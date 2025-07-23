@@ -605,12 +605,7 @@ class TabManager {
                 const contentWithMessage = terminalData.rawContent + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n`;
                 terminal.deserialize(contentWithMessage);
                 
-                // Send empty command to trigger fresh prompt after restoration
-                setTimeout(() => {
-                    if (terminal.terminal) {
-                        terminal.sendDataToPty('\r');
-                    }
-                }, 100);
+                // Terminal will naturally show a fresh prompt after content restoration
             }
             
             // Update next tab ID if needed

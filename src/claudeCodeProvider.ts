@@ -73,63 +73,45 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             // WebviewView disposed - cleanup event
         });
 
-        // Set up message router
+        // Set up message router with component delegation
+        this.setupMessageRouter(webviewView);
+    }
+
+    /**
+     * Set up message router with clean handler delegation
+     */
+    private setupMessageRouter(webviewView: vscode.WebviewView) {
+        const messageHandlers = {
+            createPty: (msg: any) => this._ptyManager?.createPtyProcess(msg.tabId, msg.terminalType),
+            disposePty: (msg: any) => this._ptyManager?.disposePtyProcess(msg.tabId),
+            data: (msg: any) => this._ptyManager?.writeToPty(msg.data, msg.tabId),
+            resize: (msg: any) => this._ptyManager?.resizePty(msg.cols, msg.rows, msg.tabId),
+            sendFilePath: (msg: any) => this._ptyManager?.sendFilePath(msg.filePath, msg.tabId),
+            sendFileData: (msg: any) => this._ptyManager?.sendFileData(msg.fileData, msg.fileName, msg.fileType, msg.tabId),
+            newTab: (msg: any) => this._ptyManager?.createPtyProcess(msg.tabId),
+            closeTab: (msg: any) => this._ptyManager?.disposePtyProcess(msg.tabId),
+            fileDrop: (msg: any) => this._handleDroppedFile(msg.fileName, msg.fileType, msg.fileSize, msg.fileData, msg.tabId),
+            openFile: (msg: any) => this._handleOpenFile(msg.filePath),
+            openUrl: (msg: any) => this._handleOpenUrl(msg.url),
+            stateResponse: (msg: any) => this._handleStateResponse(msg.state),
+            stateUpdate: (msg: any) => this._handleStateResponse(msg.state),
+            webviewReady: () => this.restoreWebviewState(),
+            switchTab: () => {}, // No-op - handled in webview
+        };
+
         webviewView.webview.onDidReceiveMessage(
             message => {
-                switch (message.command) {
-                    case 'createPty':
-                        this._ptyManager?.createPtyProcess(message.tabId, message.terminalType);
-                        break;
-                    case 'disposePty':
-                        this._ptyManager?.disposePtyProcess(message.tabId);
-                        break;
-                    case 'data':
-                        this._ptyManager?.writeToPty(message.data, message.tabId);
-                        break;
-                    case 'resize':
-                        this._ptyManager?.resizePty(message.cols, message.rows, message.tabId);
-                        break;
-                    case 'sendFilePath':
-                        this._ptyManager?.sendFilePath(message.filePath, message.tabId);
-                        break;
-                    case 'sendFileData':
-                        this._ptyManager?.sendFileData(message.fileData, message.fileName, message.fileType, message.tabId);
-                        break;
-                    case 'fileDrop':
-                        this._handleDroppedFile(message.fileName, message.fileType, message.fileSize, message.fileData, message.tabId);
-                        break;
-                    case 'openFile':
-                        this._handleOpenFile(message.filePath);
-                        break;
-                    case 'openUrl':
-                        this._handleOpenUrl(message.url);
-                        break;
-                    case 'newTab':
-                        this._ptyManager?.createPtyProcess(message.tabId);
-                        break;
-                    case 'switchTab':
-                        // Tab switching is now handled in webview
-                        break;
-                    case 'closeTab':
-                        this._ptyManager?.disposePtyProcess(message.tabId);
-                        break;
-                    case 'stateResponse':
-                        this._handleStateResponse(message.state);
-                        break;
-                    case 'stateUpdate':
-                        this._handleStateResponse(message.state);
-                        break;
-                    case 'webviewReady':
-                        // Webview is fully loaded and ready to receive state
-                        this.restoreWebviewState();
-                        break;
+                try {
+                    const handler = messageHandlers[message.command as keyof typeof messageHandlers];
+                    handler ? handler(message) : console.warn(`Unhandled message command: ${message.command}`);
+                } catch (error) {
+                    console.error(`Error handling message ${message.command}:`, error);
                 }
             },
             undefined,
             []
         );
     }
-
 
     public refresh() {
         if (this._view) {
