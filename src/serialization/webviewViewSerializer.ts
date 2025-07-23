@@ -158,29 +158,43 @@ export class WebviewViewSerializer {
      * Serialize the current state from TabManager
      */
     public serialize(tabManager: any): PersistedState {
+        console.log('💾 WebviewViewSerializer.serialize() - serializing', tabManager.terminals.size, 'terminals');
         const terminals: SerializedTerminal[] = [];
         
         for (const [id, terminal] of tabManager.terminals) {
-            terminals.push(this.serializeTerminalContent(terminal));
+            const serializedTerminal = this.serializeTerminalContent(terminal);
+            console.log(`💾 Serialized terminal ${id}:`, { id: serializedTerminal.id, label: serializedTerminal.label, hasContent: !!serializedTerminal.rawContent });
+            terminals.push(serializedTerminal);
         }
         
-        return {
+        const state = {
             terminals,
             activeTabId: tabManager.activeTabId,
             timestamp: Date.now()
         };
+        
+        console.log('💾 Final serialized state:', { terminalCount: terminals.length, activeTabId: state.activeTabId });
+        return state;
     }
 
     /**
-     * Deserialize state back to TabManager (to be implemented in webview context)
-     * This method signature is provided for completeness, but the actual deserialization
-     * logic will be handled by the TabManager itself using the restored state data.
+     * Deserialize state back to TabManager
+     * 
+     * NOTE: This method is designed for potential future use when we need
+     * extension-side deserialization. Currently, deserialization happens
+     * in the webview context via TabManager.restoreFromState().
+     * 
+     * The separation is maintained because:
+     * - WebviewViewSerializer (extension context) handles storage/retrieval
+     * - TabManager (webview context) handles UI restoration and terminal creation
      */
     public deserialize(state: PersistedState, tabManager: any): void {
-        // This method is primarily for interface completeness
-        // The actual restoration logic will be handled in the webview context
-        // by TabManager using the state data passed through the template
-        console.log('WebviewViewSerializer.deserialize called with state:', state);
+        console.log('🔄 WebviewViewSerializer.deserialize() - This method is reserved for future extension-side deserialization');
+        console.log('🔄 Current deserialization happens in webview context via TabManager.restoreFromState()');
+        console.log('🔄 State received:', { 
+            hasState: !!state, 
+            terminalCount: state?.terminals?.length
+        });
     }
 
     /**

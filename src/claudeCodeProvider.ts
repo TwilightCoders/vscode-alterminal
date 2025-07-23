@@ -94,8 +94,8 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             fileDrop: (msg: any) => this._handleDroppedFile(msg.fileName, msg.fileType, msg.fileSize, msg.fileData, msg.tabId),
             openFile: (msg: any) => this._handleOpenFile(msg.filePath),
             openUrl: (msg: any) => this._handleOpenUrl(msg.url),
-            stateResponse: (msg: any) => this._handleStateResponse(msg.state),
-            stateUpdate: (msg: any) => this._handleStateResponse(msg.state),
+            stateResponse: (msg: any) => this._serializer?.handleMessage(msg),
+            stateUpdate: (msg: any) => this._serializer?.handleMessage(msg),
             webviewReady: () => this.restoreWebviewState(),
             switchTab: () => {}, // No-op - handled in webview
         };
@@ -203,22 +203,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async _handleStateResponse(state: any) {
-        try {
-            // Create persisted state structure
-            const persistedState = {
-                terminals: state.terminals || [],
-                activeTabId: state.activeTabId || 1,
-                timestamp: Date.now()
-            };
-            
-            // Save to extension context
-            await this._context.workspaceState.update('claudePilot.webviewState', persistedState);
-            
-        } catch (error) {
-            Logger.error('❌ Failed to handle state response:', error);
-        }
-    }
 
     public dispose() {
         // Save state on disposal
