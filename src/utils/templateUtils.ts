@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { createWebviewLogger } from './logger';
 
 export class TemplateUtils {
     public static getHtmlTemplate(
@@ -47,8 +48,9 @@ export class TemplateUtils {
         // Load initialization script
         const initScript = this.loadInitScript(extensionUri);
 
-        // Combine scripts
+        // Combine scripts with logger
         const combinedScript = [
+            createWebviewLogger(),
             terminalScript,
             tabManagerScript, 
             dragDropHandlerScript,
@@ -93,8 +95,8 @@ export class TemplateUtils {
             console.error('Failed to load init script:', error);
             // Fallback to basic initialization
             return `
-                console.error('Failed to load initialization script');
-                console.log('🚀 Starting Claude Pilot initialization (fallback)');
+                Logger.error('Failed to load initialization script');
+                Logger.info('🚀 Starting Claude Pilot initialization (fallback)');
             `;
         }
     }

@@ -56,18 +56,18 @@ class TabManager {
     setupMessageHandling() {
         window.addEventListener('message', event => {
             const message = event.data;
-            console.log('📨 Webview received message:', message.command);
+            Logger.debug('📨 Webview received message:', message.command);
             
             try {
                 switch (message.command) {
                     case 'restoreState':
-                        console.log('🔄 Received restoreState command with state:', message.state);
-                        console.log('🔄 Current terminals before restore:', this.terminals.size);
+                        Logger.debug('🔄 Received restoreState command with state:', message.state);
+                        Logger.debug('🔄 Current terminals before restore:', this.terminals.size);
                         this.restoreFromState(message.state);
                         break;
                         
                     case 'initializeEmpty':
-                        console.log('🆕 Received initializeEmpty command - creating default terminal');
+                        Logger.debug('🆕 Received initializeEmpty command - creating default terminal');
                         // Create manufactured default state and restore it
                         const defaultState = this.createDefaultState();
                         this.restoreFromState(defaultState);
@@ -126,11 +126,11 @@ class TabManager {
                         break;
                         
                     default:
-                        console.log('Unknown command received:', message.command);
+                        Logger.warn('Unknown command received:', message.command);
                         break;
                 }
             } catch (error) {
-                console.error('Message handling error:', error);
+                Logger.error('Message handling error:', error);
             }
         });
     }
@@ -598,7 +598,7 @@ class TabManager {
             terminal.terminalType = terminalData.terminalType || 'claude';
             
             if (terminalData.rawContent) {
-                console.log('🔄 Restoring content for terminal', terminalData.id);
+                Logger.debug('🔄 Restoring content for terminal', terminalData.id);
                 // Add "History restored" message with timestamp to the end of the content (styled like VS Code terminal)
                 const now = new Date();
                 const timeString = now.toLocaleTimeString();

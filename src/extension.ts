@@ -1,15 +1,16 @@
 import * as vscode from 'vscode';
 import { ClaudeCodeProvider } from './claudeCodeProvider';
 import { PtyManager } from './terminal/ptyManager';
+import { Logger } from './utils/logger';
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('🚀 Claude Pilot extension is now active!');
+    Logger.info('🚀 Claude Pilot extension is now active!');
     
     // Check if we're in debug/development mode
     const isDebugMode = process.env.NODE_ENV === 'development' || 
                        context.extensionMode === vscode.ExtensionMode.Development;
     
-    console.log('📁 Extension context:', {
+    Logger.debug('📁 Extension context:', {
         extensionPath: context.extensionPath,
         globalState: 'available',
         workspaceState: 'available',
@@ -28,9 +29,9 @@ export function activate(context: vscode.ExtensionContext) {
     
     const provider = new ClaudeCodeProvider(context.extensionUri, context, ptyManager);
     
-    console.log('🔌 Registering WebviewViewProvider...');
+    Logger.debug('🔌 Registering WebviewViewProvider...');
     const disposable = vscode.window.registerWebviewViewProvider(ClaudeCodeProvider.viewType, provider);
-    console.log('✅ WebviewViewProvider registered');
+    Logger.debug('✅ WebviewViewProvider registered');
     
     context.subscriptions.push(disposable);
     
@@ -83,6 +84,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-    console.log('🛑 Claude Pilot extension is being deactivated');
-    console.log('🧹 Cleanup complete');
+    Logger.info('🛑 Claude Pilot extension is being deactivated');
+    Logger.debug('🧹 Cleanup complete');
 }

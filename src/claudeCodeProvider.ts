@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
 import { WebviewViewSerializer, PersistedState } from './serialization/webviewViewSerializer';
+import { Logger } from './utils/logger';
 
 export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'claudePilotView';
@@ -103,9 +104,9 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             message => {
                 try {
                     const handler = messageHandlers[message.command as keyof typeof messageHandlers];
-                    handler ? handler(message) : console.warn(`Unhandled message command: ${message.command}`);
+                    handler ? handler(message) : Logger.warn(`Unhandled message command: ${message.command}`);
                 } catch (error) {
-                    console.error(`Error handling message ${message.command}:`, error);
+                    Logger.error(`Error handling message ${message.command}:`, error);
                 }
             },
             undefined,
@@ -181,7 +182,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             // Request current state from the webview
             this._view.webview.postMessage({ command: 'requestState' });
         } catch (error) {
-            console.error('❌ Failed to save webview state:', error);
+            Logger.error('❌ Failed to save webview state:', error);
         }
     }
     
@@ -198,7 +199,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
                 state: savedState || null
             });
         } catch (error) {
-            console.error('❌ Failed to restore webview state:', error);
+            Logger.error('❌ Failed to restore webview state:', error);
         }
     }
 
@@ -215,7 +216,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             await this._context.workspaceState.update('claudePilot.webviewState', persistedState);
             
         } catch (error) {
-            console.error('❌ Failed to handle state response:', error);
+            Logger.error('❌ Failed to handle state response:', error);
         }
     }
 
