@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src vscode-webview: https://*.vscode-cdn.net data:; style-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; script-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; connect-src 'none'; img-src vscode-webview: https://*.vscode-cdn.net data:;">
+    <title>Claude Code Terminal</title>
+    <!-- Timestamp {{timestamp}} to force webview refresh -->
+    <link rel="stylesheet" href="{{codiconCssUri}}" />
+    <link rel="stylesheet" href="{{xtermCssUri}}" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+            background-color: var(--vscode-terminal-background, #1e1e1e);
+            color: var(--vscode-terminal-foreground, #cccccc);
+            font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+        }
+        
+        .container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .container.vertical-tabs {
+            flex-direction: row;
+        }
+        
+        .tab-bar {
+            background-color: var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            flex-shrink: 0;
+            min-height: 32px;
+            overflow: hidden;
+        }
+        
+        .tab-list {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+        }
+        
+        .container.vertical-tabs .tab-bar {
+            border-bottom: none;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            width: 200px;
+            min-width: 190px;
+            height: 100vh;
+            flex-shrink: 0;
+        }
+        
+        .container.vertical-tabs .tab-list {
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .tab {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: var(--vscode-tab-inactiveBackground, rgba(45, 45, 45, 0.5));
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            border: none;
+            cursor: pointer;
+            padding: 8px 12px;
+            margin: 0;
+            min-width: 120px;
+            max-width: 300px;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            transition: all 0.1s ease;
+            position: relative;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+        }
+        
+        .container.vertical-tabs .tab {
+            border-right: none;
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            max-width: none;
+            width: 100%;
+            justify-content: space-between;
+            padding: 8px 8px;
+            min-height: 32px;
+        }
+        
+        .tab.active {
+            background-color: var(--vscode-tab-activeBackground, rgba(60, 60, 60, 0.8));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+            border-bottom-color: var(--vscode-tab-activeBorder, transparent);
+        }
+        
+        .tab:hover {
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+        }
+        
+        .tab:focus {
+            outline: none;
+            border-color: var(--vscode-focusBorder, #007acc) !important;
+            box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        /* TODO: Add drag and drop styles when implementing tab reordering
+        .tab.drag-over-left {
+            border-left: 2px solid var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        .tab.drag-over-right {
+            border-right: 2px solid var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        .tab[draggable="true"] {
+            cursor: grab;
+        }
+        
+        .tab[draggable="true"]:active {
+            cursor: grabbing;
+        }
+        */
+        
+        .tab-new {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            background-color: transparent;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            border: none;
+            min-width: 32px;
+            transition: all 0.2s ease;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 8px 12px;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+        }
+        
+        .container.vertical-tabs .tab-new {
+            border-right: none;
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            width: 100%;
+        }
+        
+        .tab-new:hover {
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+        
+        .tab-label {
+            flex: 1;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            font-size: 13px;
+            line-height: 1.2;
+        }
+        
+        .container.vertical-tabs .tab-label {
+            flex: 1;
+            margin-right: 4px;
+            min-width: 0;
+            max-width: calc(100% - 40px);
+        }
+        
+        .tab-close {
+            opacity: 0;
+            margin-left: 4px;
+            padding: 2px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 16px;
+            transition: all 0.2s ease;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            background-color: transparent;
+            border: none;
+            line-height: 1;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        /* Ensure vertical tab close buttons have proper spacing */
+        .container.vertical-tabs .tab-close {
+            margin-left: 0;
+        }
+        
+        /* Codicon font styling for close button */
+        .codicon {
+            font-family: "codicon";
+            font-display: swap;
+            font-style: normal;
+            font-variant: normal;
+            font-weight: normal;
+            font-size: inherit;
+            line-height: 1;
+            text-decoration: none;
+            text-rendering: auto;
+            text-align: start;
+            text-transform: none;
+            white-space: nowrap;
+            speak: none;
+            word-wrap: normal;
+            -webkit-font-feature-settings: "liga" off, "calt" off;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .codicon-trash:before {
+            content: "\ea81";
+        }
+        
+        /* Tab close button accessibility and interaction */
+        
+        /* Accessibility: Focus indicators */
+        .tab:focus,
+        .tab:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder, #007ACC);
+            outline-offset: -2px;
+        }
+        
+        .tab-close:focus,
+        .tab-close:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder, #007ACC);
+            outline-offset: 1px;
+            border-radius: 2px;
+        }
+        
+        .tab:hover .tab-close {
+            opacity: 1;
+        }
+        
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            .tab {
+                border: 1px solid var(--vscode-contrastBorder, transparent);
+            }
+            
+            .tab:focus,
+            .tab:focus-visible {
+                outline-width: 3px;
+            }
+            
+            .tab-close:focus,
+            .tab-close:focus-visible {
+                outline-width: 3px;
+            }
+        }
+        
+        .tab-close:hover {
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+        
+        .terminal-container {
+            flex: 1;
+            background-color: var(--vscode-terminal-background, #1e1e1e);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .terminal-wrapper {
+            display: none;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        .terminal-wrapper.active {
+            display: block;
+        }
+        
+        .terminal-instance {
+            position: absolute;
+            width: calc(100% - 24px);
+            height: calc(100% - 24px);
+            top: 12px;
+            left: 12px;
+        }
+        
+        .terminal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--vscode-font-family, monospace);
+            font-size: 14px;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        
+        .terminal-overlay.show {
+            display: flex;
+        }
+        
+        .overlay-content {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid var(--vscode-widget-border, #454545);
+        }
+        
+        .version-display {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #888888);
+            opacity: 0.7;
+            pointer-events: none;
+            z-index: 10;
+            font-family: var(--vscode-font-family, sans-serif);
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: var(--vscode-foreground, #cccccc);
+        }
+        
+        /* Tab responsiveness */
+        @media (max-width: 800px) {
+            .container:not(.vertical-tabs) .tab {
+                min-width: 100px;
+                max-width: 200px;
+            }
+            
+            .container:not(.vertical-tabs) .tab-label {
+                font-size: 12px;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .container:not(.vertical-tabs) .tab {
+                min-width: 80px;
+                max-width: 150px;
+                padding: 8px 8px;
+            }
+        }
+        
+        /* Drag and drop styling - minimal visual feedback via background color only */
+    </style>
+</head>
+<body>
+    <div class="loading">Loading terminal...</div>
+    
+    <div id="container" class="container" style="display: none;">
+        <nav id="tab-bar" class="tab-bar">
+            <ul class="tab-list" role="tablist">
+                <!-- Terminal tabs will be dynamically created here -->
+            </ul>
+        </nav>
+        <main class="terminal-container">
+            <!-- Terminal instances will be dynamically created here -->
+            <div class="version-display">v{{version}}</div>
+        </main>
+    </div>
+    
+    <!-- Load xterm.js and addons -->
+    <script src="{{xtermUri}}"></script>
+    <script src="{{fitAddonUri}}"></script>
+    <script src="{{webglAddonUri}}"></script>
+    <script src="{{canvasAddonUri}}"></script>
+    <script src="{{webLinksAddonUri}}"></script>
+    <script src="{{serializeAddonUri}}"></script>
+    <script>
+        // Acquire VS Code API
+        const vscode = acquireVsCodeApi();
+        
+        {{combinedScript}}
+        
+    </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+/**
+ * Claude Pilot Initialization Script
+ * 
+ * This script runs when the webview loads and:
+ * 1. Sets up terminal theme from VS Code colors
+ * 2. Initializes TabManager with saved state or empty state
+ * 3. Sets up drag and drop handlers
+ * 4. Makes components globally accessible for debugging
+ */
+
+// No configuration needed - webview will receive commands from extension
+
+// Terminal theme configuration with debugging
+function getVSCodeColor(cssVar, fallback) {
+    const value = getComputedStyle(document.body).getPropertyValue(cssVar);
+    const isFromVSCode = !!value;
+    const finalColor = value || fallback;
+    // console.log(`${cssVar}: ${isFromVSCode ? 'VS Code' : 'FALLBACK'} -> ${finalColor}`);
+    return finalColor;
+}
+
+// Terminal theme configuration with full ANSI color palette
+const terminalTheme = {
+    background: getVSCodeColor('--vscode-terminal-background', '#1e1e1e'),
+    foreground: getVSCodeColor('--vscode-terminal-foreground', '#cccccc'),
+    cursor: getVSCodeColor('--vscode-terminalCursor-foreground', '#cccccc'),
+    cursorAccent: getVSCodeColor('--vscode-terminalCursor-background', '#1e1e1e'),
+    selectionBackground: getVSCodeColor('--vscode-terminal-selectionBackground', 'rgba(255, 255, 255, 0.3)'),
+    
+    // ANSI Colors (normal)
+    black: getVSCodeColor('--vscode-terminal-ansiBlack', '#000000'),
+    red: getVSCodeColor('--vscode-terminal-ansiRed', '#cd3131'),
+    green: getVSCodeColor('--vscode-terminal-ansiGreen', '#0dbc79'),
+    yellow: getVSCodeColor('--vscode-terminal-ansiYellow', '#e5e510'),
+    blue: getVSCodeColor('--vscode-terminal-ansiBlue', '#2472c8'),
+    magenta: getVSCodeColor('--vscode-terminal-ansiMagenta', '#bc3fbc'),
+    cyan: getVSCodeColor('--vscode-terminal-ansiCyan', '#11a8cd'),
+    white: getVSCodeColor('--vscode-terminal-ansiWhite', '#e5e5e5'),
+    
+    // ANSI Colors (bright)
+    brightBlack: getVSCodeColor('--vscode-terminal-ansiBrightBlack', '#666666'),
+    brightRed: getVSCodeColor('--vscode-terminal-ansiBrightRed', '#f14c4c'),
+    brightGreen: getVSCodeColor('--vscode-terminal-ansiBrightGreen', '#23d18b'),
+    brightYellow: getVSCodeColor('--vscode-terminal-ansiBrightYellow', '#f5f543'),
+    brightBlue: getVSCodeColor('--vscode-terminal-ansiBrightBlue', '#3b8eea'),
+    brightMagenta: getVSCodeColor('--vscode-terminal-ansiBrightMagenta', '#d670d6'),
+    brightCyan: getVSCodeColor('--vscode-terminal-ansiBrightCyan', '#29b8db'),
+    brightWhite: getVSCodeColor('--vscode-terminal-ansiBrightWhite', '#e5e5e5')
+};
+
+console.log('Final terminal theme:', terminalTheme);
+
+// Color utility
+function getThemeColor(cssVariable, fallback) {
+    const value = getComputedStyle(document.body).getPropertyValue(cssVariable);
+    return value || fallback;
+}
+
+// Initialize everything when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeAll);
+} else {
+    initializeAll();
+}
+
+function initializeAll() {
+    console.log('🚀 Starting Claude Pilot initialization');
+    console.log('DOM readyState:', document.readyState);
+    console.log('Available globals:', { Terminal: window.Terminal, FitAddon: window.FitAddon });
+    
+    // Small delay to ensure DOM is fully ready
+    setTimeout(() => {
+        console.log('🔧 Initializing TabManager and components');
+        
+        // Initialize the TabManager (it handles everything now)
+        const tabManager = new TabManager(vscode, terminalTheme, getThemeColor);
+        // Make it globally accessible for debugging
+        window.tabManager = tabManager;
+
+        // TabManager is ready - extension will send commands to create terminals
+        console.log('🎯 TabManager ready - waiting for commands from extension');
+
+        // Initialize drag and drop handler
+        const dragDropHandler = new DragDropHandler(vscode, tabManager);
+        // Make it globally accessible for debugging
+        window.dragDropHandler = dragDropHandler;
+        
+        // Initialize drag-drop capture
+        dragDropHandler.initialize();
+        
+        console.log('✅ Initialization complete');
+    }, 100);
+}
