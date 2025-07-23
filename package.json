@@ -23,7 +23,7 @@
     "anthropic"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onView:claudePilotView"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -42,7 +42,8 @@
           "id": "claudePilotView",
           "name": "Claude Pilot",
           "type": "webview",
-          "icon": "$(robot)"
+          "icon": "$(robot)",
+          "retainContextWhenHidden": true
         }
       ]
     },
@@ -53,22 +54,117 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "claudePilot.newTab",
+        "title": "New Terminal Tab",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudePilot.newTerminal.claude",
+        "title": "Claude Session",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "claudePilot.newTerminal.shell",
+        "title": "Shell Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "claudePilot.newTerminal.continue",
+        "title": "Claude Continue",
+        "icon": "$(play)"
+      },
+      {
         "command": "claudePilot.openTerminal",
         "title": "Open Claude Pilot",
         "icon": "$(robot)"
       },
       {
+        "command": "claudePilot.debugState",
+        "title": "Debug: Show Saved State",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "claudePilot.clearWorkspaceState",
+        "title": "Clear Workspace State",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "claudePilot.debugMenu",
+        "title": "Debug Menu",
+        "icon": "$(bug)"
+      },
+      {
         "command": "claudePilot.focus",
         "title": "Show Claude Pilot",
         "icon": "$(robot)"
+      },
+      {
+        "command": "claudePilot.openSettings",
+        "title": "Settings",
+        "icon": "$(settings-gear)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "claudePilot.newTerminal",
+        "label": "More...",
+        "icon": "$(add)"
+      },
+      {
+        "id": "claudePilot.debug",
+        "label": "Debug",
+        "icon": "$(bug)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "claudePilot.newTerminal.claude",
+          "when": "view == claudePilotView",
+          "group": "navigation@1"
+        },
+        {
+          "submenu": "claudePilot.newTerminal",
+          "when": "view == claudePilotView",
+          "group": "navigation@1"
+        },
+        {
           "command": "claudePilot.refresh",
-          "when": "view == claudePilot",
-          "group": "navigation"
+          "when": "view == claudePilotView",
+          "group": "navigation@2"
+        },
+        {
+          "submenu": "claudePilot.debug",
+          "when": "view == claudePilotView && claudePilot.debugMode",
+          "group": "navigation@3"
+        }
+      ],
+      "claudePilot.newTerminal": [
+        {
+          "command": "claudePilot.newTerminal.claude",
+          "group": "1_terminals@1"
+        },
+        {
+          "command": "claudePilot.newTerminal.continue",
+          "group": "1_terminals@2"
+        },
+        {
+          "command": "claudePilot.newTerminal.shell",
+          "group": "1_terminals@3"
+        },
+        {
+          "command": "claudePilot.openSettings",
+          "group": "2_settings@1"
+        }
+      ],
+      "claudePilot.debug": [
+        {
+          "command": "claudePilot.debugState",
+          "group": "1_debug@1"
+        },
+        {
+          "command": "claudePilot.clearWorkspaceState",
+          "group": "1_debug@2"
         }
       ],
       "commandPalette": [
@@ -114,6 +210,55 @@
             "Load the most recent conversation in the current directory",
             "Resume a specific session by ID (interactive selection)"
           ]
+        },
+        "claudePilot.tabLayout": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "horizontal",
+            "vertical"
+          ],
+          "default": "auto",
+          "description": "Tab layout orientation",
+          "enumDescriptions": [
+            "Automatically switch between horizontal and vertical based on panel size",
+            "Always use horizontal tabs (tabs on top)",
+            "Always use vertical tabs (tabs on left side)"
+          ]
+        },
+        "claudePilot.tabTitle.template": {
+          "type": "string",
+          "default": "{n}{p? • {p}}",
+          "description": "Template for tab titles using tokens like {n} (name), {p} (process), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
+        },
+        "claudePilot.tabTitle.maxLength": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 100,
+          "description": "Maximum length for tab titles before truncation"
+        },
+        "claudePilot.tabTitle.truncateMode": {
+          "type": "string",
+          "enum": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "default": "end",
+          "description": "How to truncate long tab titles",
+          "enumDescriptions": [
+            "Truncate from the beginning: …end-of-title",
+            "Truncate from the middle: start…end",
+            "Truncate from the end: start-of-title…"
+          ]
+        },
+        "claudePilot.terminal.scrollback": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Number of lines to keep in terminal scrollback buffer. Higher values use more memory but preserve more history."
         }
       }
     }
@@ -124,7 +269,9 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "compile:debug": "NODE_ENV=development tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "watch:debug": "NODE_ENV=development tsc -watch -p ./",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
@@ -137,8 +284,10 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.1.0",
+    "@vscode/codicons": "^0.0.38",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-serialize": "^0.13.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.3.0"
