@@ -34,8 +34,16 @@ Install from the VS Code Marketplace or install the `.vsix` file directly.
 Issues and pull requests welcome on GitHub.
 
 ### Known Issues & Future Work
+
+#### Known Issues
 - **Terminal state persistence**: When the Claude Pilot view is closed and reopened, the terminal appears blank until user interaction (though the underlying PTY session persists). A visual redraw mechanism is needed to restore the display state.
 - **Cursor positioning**: Cursor may appear offset from correct position after resizing terminal. Force resize to redraw fixes it temporarily.
+
+#### Planned Features
+- **Drag & Drop Tab Reordering**: Allow users to reorder terminal tabs by dragging them to new positions
+- **Customizable Tab Titles**: Template-based tab titles with tokens for process names, directories, and timestamps
+- **Vertical Tab Layout**: Option for vertical tab arrangement in wide panels
+- **Enhanced Process Detection**: Better integration with shell processes for dynamic tab labeling
 
 ## Release Notes
 

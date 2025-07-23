@@ -5,6 +5,8 @@
 		}
 	],
 	"settings": {
-		"claudePilot.autoCommand": "none"
+		"claudePilot.autoCommand": "none",
+		"C_Cpp.inlayHints.autoDeclarationTypes.showOnLeft": true,
+		"claudePilot.startingCommand": "none"
 	}
 }
