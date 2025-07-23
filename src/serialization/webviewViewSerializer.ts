@@ -18,7 +18,6 @@ export interface SerializedTerminal {
     id: number;
     label: string;
     rawContent: string;
-    hasContent: boolean;
     terminalType?: string;
 }
 
@@ -113,7 +112,18 @@ export class WebviewViewSerializer {
             case 'stateUpdate':
                 await this.handleStateResponse(message.state);
                 break;
+            default:
+                // Silently ignore unhandled commands - let caller decide what to do
+                break;
         }
+    }
+
+    /**
+     * Check if this serializer can handle a specific message command
+     */
+    public canHandle(command: string): boolean {
+        const serializerCommands = ['stateResponse', 'stateUpdate'];
+        return serializerCommands.includes(command);
     }
 
     /**
@@ -231,7 +241,6 @@ export class WebviewViewSerializer {
             id: terminal.id,
             label: terminal.label,
             rawContent: terminal.serialize() || '',
-            hasContent: terminal.hasContent || false,
             terminalType: terminal.terminalType || 'claude'
         };
     }

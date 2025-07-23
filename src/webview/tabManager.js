@@ -63,14 +63,34 @@ class TabManager {
                     case 'restoreState':
                         Logger.debug('🔄 Received restoreState command with state:', message.state);
                         Logger.debug('🔄 Current terminals before restore:', this.terminals.size);
-                        this.restoreFromState(message.state);
+                        
+                        // Try webview state first, then fall back to extension state
+                        const webviewState = vscode.getState();
+                        if (webviewState && webviewState.fullTabState) {
+                            Logger.debug('🔄 Using webview state (more recent)');
+                            this.restoreFromState(webviewState.fullTabState);
+                        } else if (message.state) {
+                            Logger.debug('🔄 Using extension state (fallback)');
+                            this.restoreFromState(message.state);
+                        } else {
+                            Logger.debug('🔄 No state available, creating default');
+                            this.restoreFromState(this.createDefaultState());
+                        }
                         break;
                         
                     case 'initializeEmpty':
-                        Logger.debug('🆕 Received initializeEmpty command - creating default terminal');
-                        // Create manufactured default state and restore it
-                        const defaultState = this.createDefaultState();
-                        this.restoreFromState(defaultState);
+                        Logger.debug('🆕 Received initializeEmpty command - checking for existing state');
+                        
+                        // Check if we have webview state before creating empty
+                        const existingState = vscode.getState();
+                        if (existingState && existingState.fullTabState) {
+                            Logger.debug('🔄 Found existing webview state, restoring instead of creating empty');
+                            this.restoreFromState(existingState.fullTabState);
+                        } else {
+                            Logger.debug('🆕 No existing state, creating default terminal');
+                            const defaultState = this.createDefaultState();
+                            this.restoreFromState(defaultState);
+                        }
                         break;
                         
                     case 'data':
@@ -270,14 +290,14 @@ class TabManager {
         let label;
         switch (terminalType) {
             case 'shell':
-                label = this.terminals.size === 0 ? 'Shell' : `Shell ${tabId}`;
+                label = 'Shell';
                 break;
             case 'continue':
-                label = this.terminals.size === 0 ? 'Claude Continue' : `Claude Continue ${tabId}`;
+                label = 'Claude (Continue)';
                 break;
             case 'claude':
             default:
-                label = this.terminals.size === 0 ? 'Claude Session' : `Claude Session ${tabId}`;
+                label = 'Claude Session';
                 break;
         }
         
@@ -306,11 +326,9 @@ class TabManager {
         // Update tab bar visibility
         this.updateTabBarVisibility();
         
-        // Save state after creating new tab
-        setTimeout(() => {
-            console.log('🆕 New tab created, saving state...');
-            this.saveToLocalState();
-        }, 1000);
+        // Save state after creating new tab (synchronous now)
+        console.log('🆕 New tab created, saving state...');
+        this.saveToLocalState();
         
         // PTY process is now created by the Terminal instance itself
     }
@@ -511,7 +529,6 @@ class TabManager {
                 id: terminal.id,
                 label: terminal.label,
                 rawContent: terminal.serialize() || '',
-                hasContent: terminal.hasContent || false,
                 terminalType: terminal.terminalType || 'claude'
             };
             console.log(`💾 Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
@@ -537,7 +554,6 @@ class TabManager {
                 id: 1,
                 label: 'Claude Session',
                 rawContent: '',
-                hasContent: false,
                 terminalType: 'claude'
             }],
             activeTabId: 1,
@@ -598,12 +614,28 @@ class TabManager {
             terminal.terminalType = terminalData.terminalType || 'claude';
             
             if (terminalData.rawContent) {
-                Logger.debug('🔄 Restoring content for terminal', terminalData.id);
-                // Add "History restored" message with timestamp to the end of the content (styled like VS Code terminal)
-                const now = new Date();
-                const timeString = now.toLocaleTimeString();
-                const contentWithMessage = terminalData.rawContent + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n`;
-                terminal.deserialize(contentWithMessage);
+                Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', terminalData.rawContent.length);
+                
+                // Add delay for first terminal to avoid race condition with PTY initialization
+                const isFirstTerminal = Array.from(this.terminals.keys()).length === 0;
+                const delay = isFirstTerminal ? 200 : 50; // Longer delay for first terminal
+                
+                setTimeout(() => {
+                    Logger.debug(`🔄 Actually restoring terminal ${terminalData.id} after ${delay}ms delay`);
+                    
+                    // Add "History restored" message with timestamp for all terminals with content
+                    if (terminalData.rawContent) {
+                        const now = new Date();
+                        const timeString = now.toLocaleTimeString();
+                        // Ensure proper newline separation to avoid content collision
+                        const ensureNewline = terminalData.rawContent.endsWith('\n') || terminalData.rawContent.endsWith('\r\n') ? '' : '\r\n';
+                        const contentWithMessage = terminalData.rawContent + ensureNewline + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n\r\n`;
+                        terminal.deserialize(contentWithMessage);
+                    } else {
+                        // No content to restore
+                        terminal.deserialize(terminalData.rawContent);
+                    }
+                }, delay);
                 
                 // Terminal will naturally show a fresh prompt after content restoration
             }
@@ -644,24 +676,31 @@ class TabManager {
     
     
     /**
-     * Save state to local webview storage
+     * Save state synchronously to webview storage
      */
     saveToLocalState() {
         try {
             const fullState = this.saveAllStates();
-            console.log('💾 TabManager saving state locally:', fullState ? `${fullState.terminals?.length} terminals` : 'no state');
+            console.log('💾 TabManager saving state synchronously:', fullState ? `${fullState.terminals?.length} terminals` : 'no state');
+            
+            // Save synchronously to webview state - this persists across sessions
             vscode.setState({
-                hasContent: true,
-                fullTabState: fullState
+                fullTabState: fullState,
+                timestamp: Date.now()
             });
             
-            // Also send to extension immediately
-            this.vscode.postMessage({ 
-                command: 'stateUpdate', 
-                state: fullState 
-            });
+            // OPTIONALLY also send to extension for backup (non-critical, async)
+            try {
+                this.vscode.postMessage({ 
+                    command: 'stateUpdate', 
+                    state: fullState 
+                });
+            } catch (msgError) {
+                // Don't fail if async message fails during shutdown
+                console.warn('⚠️ Could not send state to extension (probably shutting down):', msgError);
+            }
         } catch (error) {
-            console.error('Failed to save local state:', error);
+            console.error('Failed to save state:', error);
         }
     }
     

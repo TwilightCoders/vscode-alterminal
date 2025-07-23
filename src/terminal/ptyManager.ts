@@ -40,9 +40,6 @@ import { readFile } from 'fs/promises';
 
 export class PtyManager {
     private _ptyProcesses = new Map<number, pty.IPty>();
-    private _shellReadyStates = new Map<number, boolean>();
-    private _lastDataTimes = new Map<number, number>();
-    private _readyTimers = new Map<number, NodeJS.Timeout>();
     private _processMonitorTimers = new Map<number, NodeJS.Timeout>();
     private _currentProcessNames = new Map<number, string>();
     private _terminalTypes = new Map<number, string>();
@@ -64,6 +61,7 @@ export class PtyManager {
 
     /**
      * Handle messages intended for the PTY manager
+     * Encapsulates PTY operations and parameter extraction
      */
     public async handleMessage(message: any): Promise<void> {
         switch (message.command) {
@@ -92,28 +90,74 @@ export class PtyManager {
             case 'sendFileData':
                 await this.sendFileData(message.fileData, message.fileName, message.fileType, message.tabId);
                 break;
+            case 'newTab':
+                this.createPtyProcess(message.tabId, message.terminalType);
+                break;
+            case 'closeTab':
+                this.disposePtyProcess(message.tabId);
+                break;
+            default:
+                // Return false to indicate this manager can't handle the message
+                return;
         }
     }
 
+    /**
+     * Check if this manager can handle a specific message command
+     */
+    public canHandle(command: string): boolean {
+        const ptyCommands = ['createPty', 'disposePty', 'data', 'resize', 'sendFilePath', 'sendFileData', 'newTab', 'closeTab'];
+        return ptyCommands.includes(command);
+    }
+
+
     public createPtyProcess(tabId: number, terminalType: string = 'claude'): void {
-        // Use user's default shell with login and interactive flags
-        const shell = process.platform === 'win32' ? 'cmd.exe' : process.env.SHELL || '/bin/bash';
-        const shellArgs = process.platform === 'win32' ? [] : ['-l', '-i'];
-        
         // Only create new PTY process if one doesn't exist for this tab
         if (!this._ptyProcesses.has(tabId)) {
             // Store terminal type for this tab
             this._terminalTypes.set(tabId, terminalType);
             
-            // Reset shell ready state for new terminal
-            this._shellReadyStates.set(tabId, false);
-            this._lastDataTimes.set(tabId, 0);
-            if (this._readyTimers.has(tabId)) {
-                clearTimeout(this._readyTimers.get(tabId)!);
-                this._readyTimers.delete(tabId);
+            // Determine what command/shell to spawn based on terminal type
+            const userShell = process.platform === 'win32' ? 'cmd.exe' : process.env.SHELL || '/bin/bash';
+            let command: string;
+            let args: string[];
+            
+            switch (terminalType) {
+                case 'continue':
+                    // Spawn claude with --continue flag directly
+                    command = 'claude';
+                    args = ['--continue'];
+                    break;
+                    
+                case 'claude':
+                    command = 'claude';
+                    args = [];
+                    break;
+                    
+                case 'shell':
+                default:
+                    // Get configured starting command or default to 'claude'
+                    const config = vscode.workspace.getConfiguration('claudePilot');
+                    const startingCommand = config.get<string>('startingCommand', 'claude');
+                    console.log(`🐛 DEBUG: Creating claude terminal with startingCommand: "${startingCommand}"`);
+                    
+                    if (startingCommand === 'none') {
+                        // User wants plain shell
+                        command = userShell;
+                        args = process.platform === 'win32' ? [] : ['-l', '-i'];
+                        console.log(`🐛 DEBUG: Using shell instead: ${command} with args:`, args);
+                    } else {
+                        // Spawn the claude command directly
+                        command = startingCommand;
+                        args = [];
+                        console.log(`🐛 DEBUG: Spawning command: ${command} with args:`, args);
+                    }
+                    break;
             }
             
-            const ptyProcess = pty.spawn(shell, shellArgs, {
+            console.log(`🐛 DEBUG: About to spawn PTY with command: "${command}", args:`, args, `for terminal type: ${terminalType}`);
+            
+            const ptyProcess = pty.spawn(command, args, {
                 name: 'xterm-256color',
                 cols: 80,
                 rows: 30,
@@ -125,12 +169,12 @@ export class PtyManager {
                     TERM_PROGRAM: 'vscode',
                     TERM_PROGRAM_VERSION: vscode.version,
                     VSCODE_PID: process.pid.toString(),
-                    // Ensure PATH includes common zsh completion locations
+                    // Ensure PATH includes common locations
                     PATH: process.env.PATH || '',
-                    // Force interactive shell features
+                    // Force interactive shell features for shell terminals
                     PS1: process.env.PS1 || '$ ',
-                    // Ensure shell knows it's interactive
-                    SHELL: shell
+                    // Ensure shell environment is preserved
+                    SHELL: userShell
                 } as { [key: string]: string }
             });
 
@@ -140,14 +184,6 @@ export class PtyManager {
                     data: data,
                     tabId: tabId
                 });
-                
-                // Track when data was last received for this tab
-                this._lastDataTimes.set(tabId, Date.now());
-                
-                // If shell isn't ready yet, start/restart the ready timer
-                if (!this._shellReadyStates.get(tabId)) {
-                    this._scheduleReadyCheck(tabId);
-                }
             });
             
             ptyProcess.onExit(() => {
@@ -181,12 +217,7 @@ export class PtyManager {
     }
 
     private _cleanupProcess(tabId: number): void {
-        // Clean up timers
-        if (this._readyTimers.has(tabId)) {
-            clearTimeout(this._readyTimers.get(tabId)!);
-            this._readyTimers.delete(tabId);
-        }
-        
+        // Clean up process monitoring timer
         if (this._processMonitorTimers.has(tabId)) {
             clearInterval(this._processMonitorTimers.get(tabId)!);
             this._processMonitorTimers.delete(tabId);
@@ -200,8 +231,6 @@ export class PtyManager {
         }
         
         // Clean up state
-        this._shellReadyStates.delete(tabId);
-        this._lastDataTimes.delete(tabId);
         this._currentProcessNames.delete(tabId);
         this._terminalTypes.delete(tabId);
     }
@@ -247,51 +276,6 @@ export class PtyManager {
         }
     }
 
-    private _scheduleReadyCheck(tabId: number): void {
-        // Clear any existing timer for this tab
-        if (this._readyTimers.has(tabId)) {
-            clearTimeout(this._readyTimers.get(tabId)!);
-        }
-        
-        // Set a timer to check if shell is ready after data stops flowing
-        const timer = setTimeout(() => {
-            // Check if enough time has passed since last data for this tab
-            const lastDataTime = this._lastDataTimes.get(tabId) || 0;
-            const timeSinceLastData = Date.now() - lastDataTime;
-            const isShellReady = this._shellReadyStates.get(tabId) || false;
-            
-            if (timeSinceLastData >= 1000 && !isShellReady) {
-                this._shellReadyStates.set(tabId, true);
-                
-                // Determine command based on terminal type
-                const terminalType = this._terminalTypes.get(tabId) || 'claude';
-                let commandToExecute: string | null = null;
-                
-                switch (terminalType) {
-                    case 'claude':
-                        const config = vscode.workspace.getConfiguration('claudePilot');
-                        commandToExecute = config.get<string>('startingCommand', 'claude');
-                        break;
-                    case 'continue':
-                        commandToExecute = 'claude --continue';
-                        break;
-                    case 'shell':
-                        commandToExecute = null; // No command for shell terminal
-                        break;
-                    default:
-                        commandToExecute = 'claude';
-                        break;
-                }
-                
-                // Execute the command (if not null)
-                if (commandToExecute && commandToExecute !== 'none') {
-                    this._ptyProcesses.get(tabId)?.write(`${commandToExecute}\r`);
-                }
-            }
-        }, 1500); // Wait 1.5 seconds for shell to settle
-        
-        this._readyTimers.set(tabId, timer);
-    }
     
     /**
      * Start monitoring the current process name for a tab
@@ -322,11 +306,4 @@ export class PtyManager {
         this._processMonitorTimers.set(tabId, timer);
     }
     
-    /**
-     * Get the current process name for a tab
-     */
-    public getCurrentProcess(tabId: number): string | undefined {
-        const ptyProcess = this._ptyProcesses.get(tabId);
-        return ptyProcess?.process || this._currentProcessNames.get(tabId);
-    }
 }

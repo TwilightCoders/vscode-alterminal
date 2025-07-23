@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
-import { WebviewViewSerializer, PersistedState } from './serialization/webviewViewSerializer';
 import { Logger } from './utils/logger';
 
 export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
@@ -11,18 +10,13 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private _ptyManager: PtyManager;
     private _terminalInitialized = false;
     private _context: vscode.ExtensionContext;
-    private _serializer: WebviewViewSerializer;
 
     constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext, ptyManager: PtyManager) {
         ClaudeCodeProvider._instance = this;
         this._context = context;
-        this._serializer = new WebviewViewSerializer(context);
         this._ptyManager = ptyManager;
     }
 
-    public static getInstance(): ClaudeCodeProvider | undefined {
-        return ClaudeCodeProvider._instance;
-    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -45,7 +39,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         const scrollback = config.get<number>('terminal.scrollback', 1000);
 
         // Set up components with the webview
-        this._serializer.setWebviewView(webviewView);
         this._ptyManager.setWebviewView(webviewView);
         this._ptyManager.setScrollback(scrollback);
         
@@ -60,42 +53,46 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             this.restoreWebviewState();
         }, 100);
 
-        // Monitor webview visibility changes for state management
-        webviewView.onDidChangeVisibility(() => {
-            if (webviewView.visible) {
-                this.restoreWebviewState();
-            } else {
-                this.saveWebviewState();
-            }
-        });
-        
-        // Monitor disposal
-        webviewView.onDidDispose(() => {
-            // WebviewView disposed - cleanup event
-        });
+        // Monitor webview visibility changes and lifecycle
+        this.setupWebviewLifecycle(webviewView);
 
         // Set up message router with component delegation
         this.setupMessageRouter(webviewView);
     }
 
     /**
+     * Set up webview lifecycle event handlers
+     */
+    private setupWebviewLifecycle(webviewView: vscode.WebviewView) {
+        Logger.debug('⚠️ Setting up webview lifecycle handlers');
+        
+        // Monitor visibility changes
+        webviewView.onDidChangeVisibility(() => {
+            Logger.debug('👁️ Webview visibility changed:', webviewView.visible ? 'VISIBLE' : 'HIDDEN');
+            if (webviewView.visible) {
+                this.restoreWebviewState();
+            }
+            // Note: We no longer save state on visibility change since webview handles it synchronously
+        });
+        
+        // Monitor disposal
+        webviewView.onDidDispose(() => {
+            Logger.debug('🗑️ Webview disposed');
+            // Note: State is already saved synchronously by webview, no need for async save here
+        });
+    }
+
+    /**
      * Set up message router with clean handler delegation
      */
     private setupMessageRouter(webviewView: vscode.WebviewView) {
-        const messageHandlers = {
-            createPty: (msg: any) => this._ptyManager?.createPtyProcess(msg.tabId, msg.terminalType),
-            disposePty: (msg: any) => this._ptyManager?.disposePtyProcess(msg.tabId),
-            data: (msg: any) => this._ptyManager?.writeToPty(msg.data, msg.tabId),
-            resize: (msg: any) => this._ptyManager?.resizePty(msg.cols, msg.rows, msg.tabId),
-            sendFilePath: (msg: any) => this._ptyManager?.sendFilePath(msg.filePath, msg.tabId),
-            sendFileData: (msg: any) => this._ptyManager?.sendFileData(msg.fileData, msg.fileName, msg.fileType, msg.tabId),
-            newTab: (msg: any) => this._ptyManager?.createPtyProcess(msg.tabId),
-            closeTab: (msg: any) => this._ptyManager?.disposePtyProcess(msg.tabId),
+        // Provider-specific message handlers
+        const providerHandlers = {
             fileDrop: (msg: any) => this._handleDroppedFile(msg.fileName, msg.fileType, msg.fileSize, msg.fileData, msg.tabId),
             openFile: (msg: any) => this._handleOpenFile(msg.filePath),
             openUrl: (msg: any) => this._handleOpenUrl(msg.url),
-            stateResponse: (msg: any) => this._serializer?.handleMessage(msg),
-            stateUpdate: (msg: any) => this._serializer?.handleMessage(msg),
+            stateUpdate: (msg: any) => this._handleBackupStateUpdate(msg.state),
+            stateResponse: (msg: any) => this._handleBackupStateUpdate(msg.state),
             webviewReady: () => this.restoreWebviewState(),
             switchTab: () => {}, // No-op - handled in webview
         };
@@ -103,8 +100,19 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(
             message => {
                 try {
-                    const handler = messageHandlers[message.command as keyof typeof messageHandlers];
-                    handler ? handler(message) : Logger.warn(`Unhandled message command: ${message.command}`);
+                    // First, check if provider can handle the message directly
+                    const providerHandler = providerHandlers[message.command as keyof typeof providerHandlers];
+                    if (providerHandler) {
+                        providerHandler(message);
+                        return;
+                    }
+
+                    // Delegate to appropriate manager based on message type
+                    if (this._ptyManager?.canHandle(message.command)) {
+                        this._ptyManager.handleMessage(message);
+                    } else {
+                        Logger.warn(`Unhandled message command: ${message.command}`);
+                    }
                 } catch (error) {
                     Logger.error(`Error handling message ${message.command}:`, error);
                 }
@@ -175,29 +183,41 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         }
     }    
 
-    private async saveWebviewState() {
-        if (!this._view) return;
-        
+    private async _handleBackupStateUpdate(state: any) {
         try {
-            // Request current state from the webview
-            this._view.webview.postMessage({ command: 'requestState' });
+            // Save backup state to extension workspace (non-critical)
+            if (state) {
+                await this._context.workspaceState.update('claudePilot.webviewState', {
+                    terminals: state.terminals || [],
+                    activeTabId: state.activeTabId || 1,
+                    timestamp: Date.now()
+                });
+                Logger.debug('💾 Saved backup state to extension workspace');
+            }
         } catch (error) {
-            Logger.error('❌ Failed to save webview state:', error);
+            Logger.warn('⚠️ Failed to save backup state (non-critical):', error);
         }
     }
-    
+
     private async restoreWebviewState() {
         if (!this._view) return;
         
         try {
-            // Get saved state from extension context
-            let savedState = this._context.workspaceState.get('claudePilot.webviewState') as any;
+            // Get saved backup state from extension context (webview handles primary state itself)
+            const backupState = this._context.workspaceState.get('claudePilot.webviewState') as any;
             
-            // Always send restoration command - if no state, webview will manufacture default
-            this._view.webview.postMessage({ 
-                command: 'restoreState', 
-                state: savedState || null
-            });
+            if (backupState && backupState.terminals && backupState.terminals.length > 0) {
+                Logger.debug('📤 Sending restore command with backup state:', backupState.terminals.length, 'terminals');
+                this._view.webview.postMessage({ 
+                    command: 'restoreState', 
+                    state: backupState 
+                });
+            } else {
+                Logger.debug('📤 No backup state - sending initialize command');
+                this._view.webview.postMessage({ 
+                    command: 'initializeEmpty'
+                });
+            }
         } catch (error) {
             Logger.error('❌ Failed to restore webview state:', error);
         }
@@ -205,8 +225,8 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
 
 
     public dispose() {
-        // Save state on disposal
-        this._serializer.saveState();
+        Logger.debug('⚠️ Disposing ClaudeCodeProvider');
+        // Note: State is already saved synchronously by webview, no need for async save here
         this._ptyManager.dispose();
     }
 

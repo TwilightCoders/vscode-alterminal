@@ -42,7 +42,6 @@ class TerminalInstance {
         
         // State management
         this.isActive = false;
-        this.hasContent = false;
         
         // DOM container
         this.terminalContainer = null;
@@ -150,7 +149,7 @@ class TerminalInstance {
             // Send user input to our PTY process
             this.sendDataToPty(data);
             
-            // Save to local webview state when user types
+            // Save state synchronously (fast, no async messaging)
             if (window.tabManager && window.tabManager.saveToLocalState) {
                 window.tabManager.saveToLocalState();
             }
@@ -194,10 +193,9 @@ class TerminalInstance {
         try {
             this.terminal.write(data);
             
-            // Mark as having content when data is written
-            this.hasContent = true;
+            // Note: Content is written - no need to track hasContent flag
             
-            // Save to local webview state when PTY sends data
+            // Save state synchronously (fast, no async messaging)
             if (window.tabManager && window.tabManager.saveToLocalState) {
                 window.tabManager.saveToLocalState();
             }
@@ -240,8 +238,7 @@ class TerminalInstance {
         
         try {
             this.terminal.clear();
-            // Reset content state when cleared
-            this.hasContent = false;
+            // Terminal cleared
         } catch (error) {
             console.error(`Failed to clear terminal ${this.id}:`, error);
         }
@@ -273,11 +270,19 @@ class TerminalInstance {
         }
         
         try {
-            return this.serializeAddon.serialize({
+            // Try including modes to capture prompt state
+            const serialized = this.serializeAddon.serialize({
                 scrollback: window.scrollbackLines || 1000,
-                excludeModes: true,
+                excludeModes: false,  // Include terminal modes to capture prompt state
                 excludeAltBuffer: true
             });
+            
+            // Debug: Log serialization info
+            const lines = serialized ? serialized.split('\n').length : 0;
+            const lastLine = serialized ? serialized.split('\n').slice(-2)[0] : 'none'; // -2 because last is usually empty
+            console.log(`🐛 Serialized terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
+            
+            return serialized;
         } catch (error) {
             console.error(`Failed to serialize terminal ${this.id}:`, error);
             return null;
@@ -293,6 +298,12 @@ class TerminalInstance {
         }
         
         try {
+            // Debug: Log deserialization info
+            const lines = serializedContent.split('\n').length;
+            const lastLine = serializedContent.split('\n').slice(-2)[0]; // -2 because last is usually empty
+            console.log(`🐛 Deserializing terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
+            
+            // Write content (don't trigger state save during restoration)
             this.terminal.write(serializedContent);
             window.dispatchEvent(new Event('resize'));
         } catch (error) {
@@ -307,7 +318,6 @@ class TerminalInstance {
         return {
             id: this.id,
             label: this.label,
-            hasContent: true,
             rawContent: this.serialize() || ''
         };
     }
