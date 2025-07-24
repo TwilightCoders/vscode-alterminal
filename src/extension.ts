@@ -79,6 +79,9 @@ export function activate(context: vscode.ExtensionContext) {
                 ? `Saved workspace state: ${JSON.stringify(savedState, null, 2)}`
                 : 'No saved workspace state found';
             vscode.window.showInformationMessage('Debug State', { modal: true, detail: message });
+        }),
+        vscode.commands.registerCommand('claudePilot.testLinks', () => {
+            provider.testLinks();
         })
     );
 }

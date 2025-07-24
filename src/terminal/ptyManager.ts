@@ -37,6 +37,7 @@ import * as vscode from 'vscode';
 import * as pty from '@lydell/node-pty';
 import { exec } from 'child_process';
 import { readFile } from 'fs/promises';
+import { Logger } from '../utils/logger';
 
 export class PtyManager {
     private _ptyProcesses = new Map<number, pty.IPty>();
@@ -139,23 +140,23 @@ export class PtyManager {
                     // Get configured starting command or default to 'claude'
                     const config = vscode.workspace.getConfiguration('claudePilot');
                     const startingCommand = config.get<string>('startingCommand', 'claude');
-                    console.log(`🐛 DEBUG: Creating claude terminal with startingCommand: "${startingCommand}"`);
+                    Logger.debug(`Creating claude terminal with startingCommand: "${startingCommand}"`);
                     
                     if (startingCommand === 'none') {
                         // User wants plain shell
                         command = userShell;
                         args = process.platform === 'win32' ? [] : ['-l', '-i'];
-                        console.log(`🐛 DEBUG: Using shell instead: ${command} with args:`, args);
+                        Logger.debug(`Using shell instead: ${command} with args:`, args);
                     } else {
                         // Spawn the claude command directly
                         command = startingCommand;
                         args = [];
-                        console.log(`🐛 DEBUG: Spawning command: ${command} with args:`, args);
+                        Logger.debug(`Spawning command: ${command} with args:`, args);
                     }
                     break;
             }
             
-            console.log(`🐛 DEBUG: About to spawn PTY with command: "${command}", args:`, args, `for terminal type: ${terminalType}`);
+            Logger.debug(`About to spawn PTY with command: "${command}", args:`, args, `for terminal type: ${terminalType}`);
             
             const ptyProcess = pty.spawn(command, args, {
                 name: 'xterm-256color',
@@ -187,7 +188,7 @@ export class PtyManager {
             });
             
             ptyProcess.onExit(() => {
-                console.log(`PTY process for tab ${tabId} exited`);
+                Logger.debug(`PTY process for tab ${tabId} exited`);
                 this._cleanupProcess(tabId);
             });
 
@@ -263,7 +264,7 @@ export class PtyManager {
             this._ptyProcesses.get(tabId)?.write(`'${tempFilePath}' `);
             
         } catch (error) {
-            console.error('Error writing file to temp:', error);
+            Logger.error('Error writing file to temp:', error);
             this._ptyProcesses.get(tabId)?.write(`"${fileName}" `);
         }
     }

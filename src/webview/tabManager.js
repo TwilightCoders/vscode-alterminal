@@ -145,6 +145,12 @@ class TabManager {
                         this.createNewTab(message.terminalType);
                         break;
                         
+                    case 'switchToTab':
+                        if (message.tabId) {
+                            this.switchToTab(message.tabId);
+                        }
+                        break;
+                        
                     default:
                         Logger.warn('Unknown command received:', message.command);
                         break;
@@ -284,6 +290,7 @@ class TabManager {
      * Create a new terminal tab
      */
     createNewTab(terminalType = 'claude') {
+        Logger.debug('📝 createNewTab called with type:', terminalType);
         const tabId = this.nextTabId++;
         
         // Generate label based on terminal type
@@ -302,7 +309,9 @@ class TabManager {
         }
         
         // Create unified terminal instance (handles both frontend and backend)
+        Logger.debug('🏗️ About to create TerminalInstance with id:', tabId, 'label:', label, 'type:', terminalType);
         const terminal = new TerminalInstance(tabId, label, this.vscode, this.terminalTheme, this.getThemeColor, terminalType);
+        Logger.debug('🏗️ TerminalInstance created successfully:', terminal);
         
         // Create container and attach terminal
         const container = this.createTerminalContainer(tabId);
@@ -327,7 +336,7 @@ class TabManager {
         this.updateTabBarVisibility();
         
         // Save state after creating new tab (synchronous now)
-        console.log('🆕 New tab created, saving state...');
+        Logger.debug('New tab created, saving state...');
         this.saveToLocalState();
         
         // PTY process is now created by the Terminal instance itself
@@ -388,6 +397,8 @@ class TabManager {
         
         // Update tab bar visibility
         this.updateTabBarVisibility();
+        
+        this.saveToLocalState();
         
         // PTY disposal is now handled by the Terminal instance itself
     }
@@ -521,7 +532,7 @@ class TabManager {
      * Save state of all terminals (using WebviewViewSerializer format)
      */
     saveAllStates() {
-        console.log('💾 TabManager.saveAllStates() - Current terminals:', this.terminals.size);
+        Logger.debug('TabManager.saveAllStates() - Current terminals:', this.terminals.size);
         const terminals = [];
         
         for (const [id, terminal] of this.terminals) {
@@ -531,7 +542,7 @@ class TabManager {
                 rawContent: terminal.serialize() || '',
                 terminalType: terminal.terminalType || 'claude'
             };
-            console.log(`💾 Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
+            Logger.debug(`Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
             terminals.push(terminalData);
         }
         
@@ -541,7 +552,7 @@ class TabManager {
             timestamp: Date.now()
         };
         
-        console.log('💾 Final state being saved:', { terminalCount: terminals.length, activeTabId: this.activeTabId });
+        Logger.debug('Final state being saved:', { terminalCount: terminals.length, activeTabId: this.activeTabId });
         return state;
     }
     
@@ -565,7 +576,7 @@ class TabManager {
      * Restore terminals from saved state
      */
     restoreFromState(savedState) {
-        console.log('🔄 TabManager.restoreFromState() called with:', { 
+        Logger.debug('TabManager.restoreFromState() called with:', { 
             hasState: !!savedState, 
             terminalCount: savedState?.terminals?.length,
             terminals: savedState?.terminals?.map(t => ({ id: t.id, label: t.label, type: t.terminalType }))
@@ -573,13 +584,13 @@ class TabManager {
         
         // If no state or empty state, manufacture a default state
         if (!savedState || !savedState.terminals || savedState.terminals.length === 0) {
-            console.log('⚠️ No valid saved state, manufacturing default state');
+            Logger.warn('⚠️ No valid saved state, manufacturing default state');
             savedState = this.createDefaultState();
         }
         
         // Only dispose existing terminals if we actually have any
         if (this.terminals.size > 0) {
-            console.log('🧹 Disposing existing terminals before restore');
+            Logger.debug('Disposing existing terminals before restore');
             this.dispose();
         }
         this.terminals.clear();
@@ -593,9 +604,10 @@ class TabManager {
         }
         
         // Recreate terminals from saved state (in the saved order)
-        console.log('🔄 Starting to recreate', savedState.terminals.length, 'terminals');
+        Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
         for (const terminalData of savedState.terminals) {
-            console.log('🔄 Creating terminal:', { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType });
+            Logger.debug('🔄 Creating terminal from state:', { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType });
+            Logger.debug('🔄 About to create TerminalInstance from restore...');
             const terminal = new TerminalInstance(
                 terminalData.id, 
                 terminalData.label, 
@@ -604,6 +616,7 @@ class TabManager {
                 this.getThemeColor,
                 terminalData.terminalType || 'claude'
             );
+            Logger.debug('🔄 TerminalInstance created from restore:', terminal);
             
             // Create container and attach
             const container = this.createTerminalContainer(terminalData.id);
@@ -629,7 +642,7 @@ class TabManager {
                         const timeString = now.toLocaleTimeString();
                         // Ensure proper newline separation to avoid content collision
                         const ensureNewline = terminalData.rawContent.endsWith('\n') || terminalData.rawContent.endsWith('\r\n') ? '' : '\r\n';
-                        const contentWithMessage = terminalData.rawContent + ensureNewline + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n\r\n`;
+                        const contentWithMessage = terminalData.rawContent + ensureNewline + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n`;
                         terminal.deserialize(contentWithMessage);
                     } else {
                         // No content to restore
@@ -647,7 +660,7 @@ class TabManager {
             
             // Store terminal (Map preserves insertion order)
             this.terminals.set(terminalData.id, terminal);
-            console.log('✅ Stored terminal', terminalData.id, '- Current terminal count:', this.terminals.size);
+            Logger.debug('Stored terminal', terminalData.id, '- Current terminal count:', this.terminals.size);
             
             // Create tab element (DOM order will match saved order)
             this.createTabElement(terminalData.id, terminalData.label);
@@ -671,7 +684,7 @@ class TabManager {
         this.isInitialized = true;
         
         
-        console.log('🎉 Restore complete - Final terminal count:', this.terminals.size, 'Active tab:', this.activeTabId);
+        Logger.debug('Restore complete - Final terminal count:', this.terminals.size, 'Active tab:', this.activeTabId);
     }
     
     
@@ -681,7 +694,7 @@ class TabManager {
     saveToLocalState() {
         try {
             const fullState = this.saveAllStates();
-            console.log('💾 TabManager saving state synchronously:', fullState ? `${fullState.terminals?.length} terminals` : 'no state');
+            Logger.debug('TabManager saving state synchronously:', fullState ? `${fullState.terminals?.length} terminals` : 'no state');
             
             // Save synchronously to webview state - this persists across sessions
             vscode.setState({
@@ -697,10 +710,10 @@ class TabManager {
                 });
             } catch (msgError) {
                 // Don't fail if async message fails during shutdown
-                console.warn('⚠️ Could not send state to extension (probably shutting down):', msgError);
+                Logger.warn('⚠️ Could not send state to extension (probably shutting down):', msgError);
             }
         } catch (error) {
-            console.error('Failed to save state:', error);
+            Logger.error('Failed to save state:', error);
         }
     }
     
@@ -975,7 +988,7 @@ class TabManager {
         if (!terminal) return;
         
         // Debug: log what we're getting
-        console.log(`Process change for tab ${tabId}: "${processName}"`);
+        Logger.debug(`Process change for tab ${tabId}: "${processName}"`);
         
         // Store base label if not already stored
         if (!terminal.baseLabel) {
@@ -1018,7 +1031,7 @@ class TabManager {
             // Save the cleared state
             this.saveToLocalState();
             
-            console.log('🧹 Cleared active terminal:', this.activeTabId);
+            Logger.debug('Cleared active terminal:', this.activeTabId);
         }
     }
     

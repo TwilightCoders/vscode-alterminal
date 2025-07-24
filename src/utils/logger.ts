@@ -13,7 +13,7 @@ export class Logger {
 
     static debug(...args: any[]): void {
         if (this.isDebugMode()) {
-            console.log('[DEBUG]', ...args);
+            console.log('🐛 DEBUG:', ...args);
         }
     }
 
@@ -51,7 +51,7 @@ class Logger {
 
     static debug(...args) {
         if (this.isDebugMode()) {
-            console.log('[DEBUG]', ...args);
+            console.log('🐛 DEBUG:', ...args);
         }
     }
 

@@ -34,6 +34,8 @@ export class TemplateUtils {
         const canvasAddonUri = getNodeModuleUri('@xterm/addon-canvas/lib/addon-canvas.js');
         const webLinksAddonUri = getNodeModuleUri('@xterm/addon-web-links/lib/addon-web-links.js');
         const serializeAddonUri = getNodeModuleUri('@xterm/addon-serialize/lib/addon-serialize.js');
+        const unicodeAddonUri = getNodeModuleUri('@xterm/addon-unicode11/lib/addon-unicode11.js');
+        const linkProviderUri = getNodeModuleUri('xterm-link-provider/lib/cjs/index.js');
 
         // Get extension version for display
         const packagePath = path.join(__dirname, '..', '..', 'package.json');
@@ -74,6 +76,8 @@ export class TemplateUtils {
             canvasAddonUri,
             webLinksAddonUri,
             serializeAddonUri,
+            unicodeAddonUri,
+            linkProviderUri,
             combinedScript
         };
 

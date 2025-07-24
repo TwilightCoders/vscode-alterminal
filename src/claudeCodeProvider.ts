@@ -95,6 +95,8 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             stateResponse: (msg: any) => this._handleBackupStateUpdate(msg.state),
             webviewReady: () => this.restoreWebviewState(),
             switchTab: () => {}, // No-op - handled in webview
+            playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
+            testLinks: () => this._handleTestLinks(),
         };
 
         webviewView.webview.onDidReceiveMessage(
@@ -144,6 +146,10 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    public testLinks() {
+        this._handleTestLinks();
+    }
+
     public async openTerminal() {
         if (this._view) {
             this._view.show?.(true);
@@ -167,10 +173,28 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
 
     private async _handleOpenFile(filePath: string) {
         try {
-            const uri = vscode.Uri.file(filePath);
+            let resolvedPath = filePath;
+            
+            // Handle relative paths
+            if (filePath.startsWith('./') || filePath.startsWith('../')) {
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                if (workspaceFolder) {
+                    resolvedPath = vscode.Uri.joinPath(workspaceFolder.uri, filePath).fsPath;
+                }
+            }
+            
+            // Handle tilde paths
+            if (filePath.startsWith('~/')) {
+                const homeDir = require('os').homedir();
+                resolvedPath = filePath.replace('~', homeDir);
+            }
+            
+            const uri = vscode.Uri.file(resolvedPath);
+            Logger.debug(`Opening file: ${filePath} -> ${resolvedPath}`);
             await vscode.window.showTextDocument(uri);
         } catch (error) {
-            console.error('Failed to open file:', error);
+            Logger.error('Failed to open file:', error);
+            vscode.window.showErrorMessage(`Failed to open file: ${filePath}`);
         }
     }
 
@@ -181,7 +205,73 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         } catch (error) {
             console.error('Failed to open URL:', error);
         }
-    }    
+    }
+
+    private _playBellSound(tabId: number, tabLabel: string) {
+        try {
+            // Show clickable notification with action to go to the tab
+            vscode.window.showInformationMessage(
+                `Terminal Bell: ${tabLabel || `Tab ${tabId}`}`,
+                'Go to Terminal'
+            ).then(selection => {
+                if (selection === 'Go to Terminal') {
+                    // Focus the Claude Pilot view and switch to the specific tab
+                    this.openTerminal().then(() => {
+                        // Send message to switch to the specific tab
+                        if (this._view) {
+                            this._view.webview.postMessage({
+                                command: 'switchToTab',
+                                tabId: tabId
+                            });
+                        }
+                    });
+                }
+            });
+            
+            // Also try to focus the VS Code window (OS-level attention getting)
+            vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup').then(() => {}, () => {
+                // Fallback if focus command fails
+                Logger.debug('Could not focus editor group');
+            });
+            
+        } catch (error) {
+            Logger.error('Failed to play bell sound:', error);  
+        }
+    }
+
+    private _handleTestLinks() {
+        if (!this._view) return;
+        
+        // Send test links to the active terminal for easy testing
+        const testLinks = [
+            '\r\n\x1b[36m=== Testing WebLinksAddon ===\x1b[0m\r\n',
+            '\r\nFile paths to test:\r\n',
+            '/Users/volte/Workspace/TwilightCoders/claudepilot/package.json\r\n',
+            './src/extension.ts\r\n',
+            '../README.md\r\n',
+            '~/Desktop\r\n',
+            '\r\nURLs to test:\r\n',
+            'https://github.com/microsoft/vscode\r\n',
+            'http://example.com\r\n',
+            'https://code.visualstudio.com\r\n',
+            '\r\nYou can also test by typing these commands:\r\n',
+            'echo "Check out https://github.com"\r\n',
+            'ls -la ./src/extension.ts\r\n', 
+            'cat ~/Desktop\r\n',
+            '\r\nClick on any of the above links to test the WebLinksAddon!\r\n',
+            '\x1b[36m=========================\x1b[0m\r\n\r\n'
+        ];
+        
+        // Send each test link with a small delay
+        testLinks.forEach((link, index) => {
+            setTimeout(() => {
+                this._view?.webview.postMessage({
+                    command: 'data',
+                    data: link
+                });
+            }, index * 100);
+        });
+    }
 
     private async _handleBackupStateUpdate(state: any) {
         try {
