@@ -793,6 +793,12 @@ class TabManager {
             terminal.label = terminalData.label;
             terminal.terminalType = terminalData.terminalType || 'claude';
             
+            // Restore terminal modes from saved state
+            if (terminalData.terminalModes !== undefined) {
+                terminal._terminalModes = terminalData.terminalModes;
+                Logger.debug('🔄 Restored terminal modes for terminal', terminalData.id, 'modes:', terminalData.terminalModes);
+            }
+            
             // Decide what content to load without mutating persisted snapshot
             let contentToLoad = terminalData.rawContent || '';
 
@@ -826,13 +832,18 @@ class TabManager {
             // PTY process creation is now handled by the Terminal instance itself
         }
         
-        // Switch to previously active tab
-        if (savedState.activeTabId && this.terminals.has(savedState.activeTabId)) {
-            this.switchToTab(savedState.activeTabId);
-        } else if (this.terminals.size > 0) {
-            // Fallback to first available tab
-            const firstTabId = Array.from(this.terminals.keys())[0];
-            this.switchToTab(firstTabId);
+        // Delay switching to active tab until after all terminals have been restored
+        const targetActiveTabId = savedState.activeTabId && this.terminals.has(savedState.activeTabId) 
+            ? savedState.activeTabId 
+            : Array.from(this.terminals.keys())[0];
+        
+        if (targetActiveTabId) {
+            // Wait for all terminals to be opened before switching to active tab
+            const allOpenPromises = Array.from(this.terminals.values()).map(t => t.whenOpened.catch(()=>{}));
+            Promise.all(allOpenPromises).then(() => {
+                Logger.debug('🔄 All terminals opened, now switching to active tab:', targetActiveTabId);
+                this.switchToTab(targetActiveTabId);
+            });
         }
         
         // Show the interface after restoring
