@@ -8,7 +8,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private static _instance?: ClaudeCodeProvider;
     private _view?: vscode.WebviewView;
     private _ptyManager: PtyManager;
-    private _terminalInitialized = false;
     private _context: vscode.ExtensionContext;
     private _fileWatcher?: vscode.FileSystemWatcher;
     private _workspaceFiles = new Set<string>();
@@ -49,7 +48,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         const timeNow = new Date().getTime();
         webviewView.webview.html = TemplateUtils.getHtmlTemplate(this._extensionUri, webviewView.webview, timeNow);
 
-        this._terminalInitialized = true;
 
         // State restoration will happen when webview emits 'webviewReady' event
 

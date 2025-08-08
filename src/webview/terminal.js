@@ -53,6 +53,20 @@ class TerminalInstance {
         // State management
         this.isActive = false;
         this.hasBellIndicator = false;
+        
+        // Terminal mode tracking (bitmask for space efficiency)
+        this._terminalModes = 0; // All modes start disabled
+        
+        // Mode bit positions
+        this.MODES = {
+            FOCUS_REPORTING: 1 << 0,      // ESC[?1004h/l - bit 0
+            MOUSE_CLICK_TRACKING: 1 << 1, // ESC[?1000h/l - bit 1
+            MOUSE_DRAG_TRACKING: 1 << 2,  // ESC[?1002h/l - bit 2
+            MOUSE_MOTION_TRACKING: 1 << 3, // ESC[?1003h/l - bit 3
+            SGR_MOUSE_MODE: 1 << 4,       // ESC[?1006h/l - bit 4
+            ALTERNATE_SCREEN: 1 << 5,     // ESC[?1049h/l - bit 5
+            BRACKETED_PASTE: 1 << 6       // ESC[?2004h/l - bit 6
+        };
     this._lastWriteTs = 0; // timestamp of last data write
     this._pendingStableSnapshot = ''; // cache last stable snapshot
     this._saveDebounceTimer = null; // debounce handle
@@ -69,9 +83,7 @@ class TerminalInstance {
     this._lastNormalScreenSnapshot = ''; // last snapshot taken outside alt-screen
     // Event / promise lifecycle
     this._listeners = new Map();
-    this._openedEmitted = false;
     this.whenOpened = new Promise(r => { this._openedResolve = r; });
-    this._bootReadyEmitted = false;
     this.whenBootReady = new Promise(r => { this._bootReadyResolve = r; });
     this._pendingAltExit = false; // alt-screen exit awaiting stabilized render
         
@@ -91,8 +103,8 @@ class TerminalInstance {
     on(event, handler) { if (!this._listeners.has(event)) this._listeners.set(event, new Set()); this._listeners.get(event).add(handler); return () => this.off(event, handler); }
     off(event, handler) { const set = this._listeners.get(event); if (set) set.delete(handler); }
     _emit(event, payload) { const set = this._listeners.get(event); if (set) for (const fn of Array.from(set)) { try { fn(payload); } catch(_) {} } }
-    _markOpened() { if (this._openedEmitted) return; this._openedEmitted = true; if (this._openedResolve) this._openedResolve(); this._emit('opened'); }
-    _markBootReady() { if (this._bootReadyEmitted) return; this._bootReadyEmitted = true; if (this._bootReadyResolve) this._bootReadyResolve(); this._emit('bootReady'); }
+    _markOpened() { if (this._openedResolve) this._openedResolve(); this._emit('opened'); }
+    _markBootReady() { if (this._bootReadyResolve) this._bootReadyResolve(); this._emit('bootReady'); }
     
     /**
      * Initialize the terminal with all addons and configuration
@@ -141,7 +153,7 @@ class TerminalInstance {
                 theme: this.terminalTheme,
                 scrollback: window.scrollbackLines || 1000,
                 scrollOnUserInput: false,
-                sendFocus: false, // prevent emitting focus in/out sequences (ESC [ I / ESC [ O)
+                sendFocus: true, // allow focus in/out sequences so ncurses apps can redraw properly
                 allowTransparency: false,
                 windowsMode: false,
                 experimentalCharAtlas: 'dynamic',
@@ -441,7 +453,7 @@ class TerminalInstance {
                 if (typeof this.terminal.onRender === 'function') {
                     this.renderDisposable = this.terminal.onRender(() => {
                         // First render -> opened
-                        if (!this._openedEmitted) this._markOpened();
+                        this._markOpened();
                         // Handle deferred alt-screen exit snapshot after a clean render
                         if (this._pendingAltExit && !this._inAltScreen) {
                             this._pendingAltExit = false;
@@ -456,9 +468,113 @@ class TerminalInstance {
             // Fit the terminal to container
             if (this.fitAddon && container.offsetWidth > 0 && container.offsetHeight > 0) this.fitAddon.fit();
             // Fallback ensure opened event if render never fires soon
-            if (!this._openedEmitted) requestAnimationFrame(() => this._markOpened());
+            requestAnimationFrame(() => this._markOpened());
         } catch (error) {
             Logger.error(`Failed to attach terminal ${this.id} to container:`, error);
+        }
+    }
+    
+    /**
+     * Set a terminal mode bit
+     */
+    setMode(bit, enabled) {
+        if (enabled) {
+            this._terminalModes |= bit; // Set bit
+        } else {
+            this._terminalModes &= ~bit; // Clear bit
+        }
+    }
+    
+    /**
+     * Check if a terminal mode is enabled
+     */
+    hasMode(bit) {
+        return (this._terminalModes & bit) !== 0;
+    }
+    
+    /**
+     * Parse and track terminal modes from escape sequences
+     */
+    parseAndTrackModes(data) {
+        // Match terminal mode sequences: ESC[?<number><h|l>
+        const modeRegex = /\x1b\[\?(\d+)([hl])/g;
+        let match;
+        
+        while ((match = modeRegex.exec(data)) !== null) {
+            const modeNumber = match[1];
+            const action = match[2]; // 'h' = enable, 'l' = disable
+            const enable = action === 'h';
+            
+            switch (modeNumber) {
+                case '1004': // Focus reporting
+                    this.setMode(this.MODES.FOCUS_REPORTING, enable);
+                    Logger.debug(`Terminal ${this.id}: Focus reporting ${enable ? 'enabled' : 'disabled'}`);
+                    break;
+                case '1000': // Mouse click tracking  
+                    this.setMode(this.MODES.MOUSE_CLICK_TRACKING, enable);
+                    break;
+                case '1002': // Mouse drag tracking
+                    this.setMode(this.MODES.MOUSE_DRAG_TRACKING, enable);
+                    break;
+                case '1003': // Mouse motion tracking
+                    this.setMode(this.MODES.MOUSE_MOTION_TRACKING, enable);
+                    break;
+                case '1006': // SGR mouse mode
+                    this.setMode(this.MODES.SGR_MOUSE_MODE, enable);
+                    break;
+                case '1049': // Alternate screen
+                    this.setMode(this.MODES.ALTERNATE_SCREEN, enable);
+                    break;
+                case '2004': // Bracketed paste
+                    this.setMode(this.MODES.BRACKETED_PASTE, enable);
+                    break;
+                default:
+                    // Unknown mode, log for future handling
+                    Logger.debug(`Terminal ${this.id}: Unknown terminal mode: ${modeNumber}${action}`);
+            }
+        }
+    }
+    
+    /**
+     * Strip terminal mode sequences from data (for clean storage)
+     */
+    stripModeSequences(data) {
+        // Remove the mode sequences we're tracking separately
+        return data.replace(/\x1b\[\?(1004|1000|1002|1003|1006|1049|2004)[hl]/g, '');
+    }
+    
+    /**
+     * Restore terminal modes after deserializing content
+     */
+    restoreTerminalModes() {
+        if (!this.terminal) return;
+        
+        try {
+            // Restore each tracked mode that was enabled
+            if (this.hasMode(this.MODES.FOCUS_REPORTING)) {
+                Logger.debug(`Terminal ${this.id}: Restoring focus reporting mode`);
+                this.terminal.write('\x1b[?1004h');
+            }
+            if (this.hasMode(this.MODES.MOUSE_CLICK_TRACKING)) {
+                this.terminal.write('\x1b[?1000h');
+            }
+            if (this.hasMode(this.MODES.MOUSE_DRAG_TRACKING)) {
+                this.terminal.write('\x1b[?1002h');
+            }
+            if (this.hasMode(this.MODES.MOUSE_MOTION_TRACKING)) {
+                this.terminal.write('\x1b[?1003h');
+            }
+            if (this.hasMode(this.MODES.SGR_MOUSE_MODE)) {
+                this.terminal.write('\x1b[?1006h');
+            }
+            if (this.hasMode(this.MODES.ALTERNATE_SCREEN)) {
+                this.terminal.write('\x1b[?1049h');
+            }
+            if (this.hasMode(this.MODES.BRACKETED_PASTE)) {
+                this.terminal.write('\x1b[?2004h');
+            }
+        } catch (error) {
+            Logger.error(`Failed to restore terminal modes for ${this.id}:`, error);
         }
     }
     
@@ -468,7 +584,10 @@ class TerminalInstance {
     write(data) {
         if (!this.terminal) return;
         try {
-            // Detect alt-screen enter/leave sequences in outbound PTY data (output side)
+            // 1. Parse and track terminal modes for state management
+            this.parseAndTrackModes(data);
+            
+            // 2. Detect alt-screen enter/leave sequences in outbound PTY data (output side)
             // Enter: CSI ? 1049 h (and sometimes 47/1047 h)
             // Leave: CSI ? 1049 l (and 47/1047 l)
             if (/\x1b\[\?1049h|\x1b\[\?47h|\x1b\[\?1047h/.test(data)) {
@@ -479,6 +598,8 @@ class TerminalInstance {
                 this._inAltScreen = false;
                 this._pendingAltExit = true; // handled at next render
             }
+            
+            // 3. Write original data to terminal (let xterm.js handle modes properly)
             this.terminal.write(data);
             this._lastWriteTs = Date.now();
             if (this._booting) {
@@ -701,21 +822,21 @@ class TerminalInstance {
                 excludeModes: false,
                 excludeAltBuffer: true
             });
-            // Gating: skip updating snapshot (do NOT mutate) if ending incomplete escape or contains focus seqs
+            // Gating: skip updating snapshot if ending incomplete escape
             if (/\x1b$/.test(serialized) || /\x1b\[[0-9;?]*$/.test(serialized)) {
                 Logger.debug(`Skip snapshot t${this.id}: trailing incomplete escape`);
                 return this._pendingStableSnapshot || null;
             }
-            if (/\x1b\[I|\x1b\[O|\^\[\[I|\^\[\[O/.test(serialized)) {
-                Logger.debug(`Skip snapshot t${this.id}: contains focus seq (raw or caret form) – keeping prior snapshot`);
-                return this._pendingStableSnapshot || null;
-            }
-            const lines = serialized ? serialized.split('\n').length : 0;
-            const lastLine = serialized ? serialized.split('\n').slice(-2)[0] : 'none';
+            
+            // Strip terminal mode sequences for clean storage (but keep content)
+            const cleanSerialized = this.stripModeSequences(serialized);
+            
+            const lines = cleanSerialized ? cleanSerialized.split('\n').length : 0;
+            const lastLine = cleanSerialized ? cleanSerialized.split('\n').slice(-2)[0] : 'none';
             Logger.debug(`Serialized terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
-            this._pendingStableSnapshot = serialized;
-            this._lastNormalScreenSnapshot = serialized; // update last normal snapshot
-            return serialized;
+            this._pendingStableSnapshot = cleanSerialized;
+            this._lastNormalScreenSnapshot = cleanSerialized; // update last normal snapshot
+            return cleanSerialized;
         } catch (error) {
             Logger.error(`Failed to serialize terminal ${this.id}:`, error);
             return this._pendingStableSnapshot || null;
@@ -788,6 +909,10 @@ class TerminalInstance {
             
             // Write content (don't trigger state save during restoration)
             this.terminal.write(serializedContent);
+            
+            // Restore terminal modes after content (modes were stripped from storage)
+            this.restoreTerminalModes();
+            
             window.dispatchEvent(new Event('resize'));
             // Establish baseline snapshot so early saves can preserve history even if boot gating suppresses live serialization
             try {
@@ -805,7 +930,8 @@ class TerminalInstance {
         return {
             id: this.id,
             label: this.label,
-            rawContent: this.serialize() || ''
+            rawContent: this.serialize() || '',
+            terminalModes: this._terminalModes // Include terminal modes bitmask
         };
     }
     
@@ -817,9 +943,12 @@ class TerminalInstance {
         
         this.label = state.label || this.label;
         
+        // Restore terminal modes bitmask
+        this._terminalModes = state.terminalModes || 0;
+        
         // Restore content if available
         const contentToRestore = state.rawContent || state.serializedContent;
-    if (contentToRestore) this.deserialize(contentToRestore);
+        if (contentToRestore) this.deserialize(contentToRestore);
     }
     
     /**

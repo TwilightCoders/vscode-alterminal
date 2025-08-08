@@ -37,7 +37,6 @@ class TabManager {
         this.nextTabId = 1;
         this.isInitialized = false;
     // Cold/warm restore tracking (minimal)
-    this._hasCompletedInitialRestore = false; // becomes true after first restore IN THIS WEBVIEW INSTANCE only
     this._historyBannerInjected = false; // guards single injection of History Restored banner for this restore cycle
     this._historyBannerShownEver = false; // persisted (via vscode.setState) across webview instances to avoid re-showing banner
         
@@ -705,7 +704,8 @@ class TabManager {
                 id: terminal.id,
                 label: terminal.label,
                 rawContent: serialized,
-                terminalType: terminal.terminalType || 'claude'
+                terminalType: terminal.terminalType || 'claude',
+                terminalModes: terminal._terminalModes || 0
             };
             Logger.debug(`Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
             terminals.push(terminalData);
@@ -800,7 +800,7 @@ class TabManager {
                 Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', contentToLoad.length);
                 if (isColdBoot) {
                     Logger.debug('🏁 Injecting one-time history banner (cold boot)');
-                    contentToLoad += '\n\n* History Restored\n';
+                    contentToLoad += '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
                 }
             } else {
                 Logger.debug('🔄 No persisted content for terminal', terminalData.id, '- starting PTY on open');
