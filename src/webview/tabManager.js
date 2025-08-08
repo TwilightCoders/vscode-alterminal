@@ -44,10 +44,17 @@ class TabManager {
         this.setupWindowEventHandlers();
         this.autoInitialize();
         
-        // Signal to extension that webview is ready
-        setTimeout(() => {
+        // Show current debug filter status on startup
+        this.showDebugFilterStatus();
+        
+        // Signal immediately that webview is ready and request file cache
+        queueMicrotask(() => {
             this.vscode.postMessage({ command: 'webviewReady' });
-        }, 50);
+            this.vscode.postMessage({ command: 'requestFileCache' });
+        });
+
+    // Performance samples storage
+    window.__terminalPerf = window.__terminalPerf || { samples: [] };
     }
     
     /**
@@ -66,6 +73,10 @@ class TabManager {
                         
                         // Try webview state first, then fall back to extension state
                         const webviewState = vscode.getState();
+                        // If we've ever shown the history banner before in a previous webview instance, mark internal flag
+                        if (webviewState && webviewState.historyBannerShownOnce) {
+                            this._hasCompletedInitialRestore = true;
+                        }
                         if (webviewState && webviewState.fullTabState) {
                             Logger.debug('🔄 Using webview state (more recent)');
                             this.restoreFromState(webviewState.fullTabState);
@@ -120,6 +131,16 @@ class TabManager {
                     case 'refresh':
                         location.reload();
                         break;
+                    case 'refreshActive':
+                        // Lightweight visual refresh only
+                        const a = this.getActiveTerminal();
+                        if (a && a.terminal) {
+                            try {
+                                a.terminal.refresh(0, a.terminal.rows - 1);
+                                a.fit();
+                            } catch (_) {}
+                        }
+                        break;
                         
                     case 'triggerResize':
                         window.dispatchEvent(new Event('resize'));
@@ -151,6 +172,61 @@ class TabManager {
                         }
                         break;
                         
+                    case 'updateFileCache':
+                        Logger.debug('📁 Received workspace file cache update:', message.files?.length, 'files');
+                        window.workspaceFileCache = new Set(message.files || []);
+                        
+                        // Debug: Log first few files to see the format
+                        Logger.debug('📁 First 10 cached files:');
+                        const firstTen = Array.from(window.workspaceFileCache).slice(0, 10);
+                        firstTen.forEach(file => Logger.debug('📁 Cached file:', file));
+                        
+                        // Check if package.json is in cache
+                        const hasPackageJson = window.workspaceFileCache.has('package.json');
+                        Logger.debug('📁 Cache has package.json (exact):', hasPackageJson);
+                        
+                        // Check for files ending with package.json
+                        let foundPackageJson = false;
+                        for (const file of window.workspaceFileCache) {
+                            if (file.endsWith('package.json')) {
+                                Logger.debug('📁 Found package.json as:', file);
+                                foundPackageJson = true;
+                                break;
+                            }
+                        }
+                        if (!foundPackageJson) {
+                            Logger.debug('📁 No package.json found in cache');
+                        }
+                        break;
+                        
+                    case 'fileExistsResponse':
+                        Logger.debug('🔍 File exists response:', message.filePath, '->', message.exists);
+                        // Could be used for individual file checks if needed
+                        break;
+                        
+                    case 'setDebugFilter':
+                        if (message.filter) {
+                            localStorage.setItem('claudePilot.debugFilter', JSON.stringify(message.filter));
+                            console.log('📝 Debug filter set to:', message.filter);
+                        } else {
+                            localStorage.removeItem('claudePilot.debugFilter');
+                            console.log('📝 Debug filter cleared');
+                        }
+                        break;
+                        
+                    case 'setDeveloperMode':
+                        window.DEVELOPER_MODE = message.enabled;
+                        console.log('🛠️ Developer mode:', message.enabled ? 'ENABLED' : 'DISABLED');
+                        
+                        // Enable debug features if developer mode is on
+                        if (message.enabled) {
+                            console.log('🛠️ Debug features available for developer');
+                        }
+                        break;
+                    case 'collectPerformance':
+                        this._reportPerformance();
+                        break;
+                        
                     default:
                         Logger.warn('Unknown command received:', message.command);
                         break;
@@ -159,6 +235,56 @@ class TabManager {
                 Logger.error('Message handling error:', error);
             }
         });
+    }
+
+    _recordTerminalTiming(id) {
+        try {
+            const initStart = performance.getEntriesByName(`t${id}-init-start`)[0];
+            const openMark = performance.getEntriesByName(`t${id}-open`)[0];
+            const activeTime = performance.getEntriesByName(`t${id}-active`)[0];
+            if (initStart && openMark) {
+                const initToOpen = openMark.startTime - initStart.startTime;
+                const openToActive = activeTime ? activeTime.startTime - openMark.startTime : null;
+                window.__terminalPerf.samples.push({ id, initToOpen, openToActive });
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    _reportPerformance() {
+        const samples = window.__terminalPerf.samples || [];
+        if (!samples.length) {
+            this.vscode.postMessage({ command: 'performanceReport', data: { count: 0, samples: [] } });
+            return;
+        }
+        const initVals = samples.map(s => s.initToOpen).filter(n => n != null);
+        const openVals = samples.map(s => s.openToActive).filter(n => n != null);
+        const avg = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+        this.vscode.postMessage({ command: 'performanceReport', data: {
+            count: samples.length,
+            avgInit: initVals.length ? avg(initVals) : 0,
+            avgOpenToActive: openVals.length ? avg(openVals) : 0,
+            samples
+        }});
+    }
+    
+    /**
+     * Show current debug filter status on startup
+     */
+    showDebugFilterStatus() {
+        const currentFilter = localStorage.getItem('claudePilot.debugFilter');
+        if (currentFilter) {
+            try {
+                const filterEmojis = JSON.parse(currentFilter);
+                const filterDisplay = Array.isArray(filterEmojis) ? filterEmojis.join(' ') : filterEmojis;
+                console.log(`📝 Debug filter active: ${filterDisplay}`);
+                console.log(`📝 To change: debug-filter 🔗 📁 (or debug-filter clear)`);
+            } catch {
+                console.log(`📝 Debug filter active: ${currentFilter}`);
+            }
+        } else {
+            console.log('📝 No debug filter active - showing all logs');
+            console.log('📝 To filter: debug-filter 📁 (files) or debug-filter 🔗 (links)');
+        }
     }
     
     /**
@@ -175,12 +301,10 @@ class TabManager {
 
         // Focus handling
         window.addEventListener('focus', () => {
-            setTimeout(() => {
+            requestAnimationFrame(() => {
                 const activeTerminal = this.getActiveTerminal();
-                if (activeTerminal) {
-                    activeTerminal.fit();
-                }
-            }, 100);
+                if (activeTerminal) activeTerminal.fit();
+            });
         });
         
         // Setup keyboard shortcut passthrough
@@ -192,9 +316,8 @@ class TabManager {
      */
     autoInitialize() {
         // Just show the interface, terminal creation will happen via restoration
-        setTimeout(() => {
-            this.showInterface();
-        }, 100);
+    // Show interface immediately (no artificial delay)
+    this.showInterface();
     }
     
     /**
@@ -474,11 +597,11 @@ class TabManager {
             outline: none;
         `;
         
-        // Focus and select all text
-        setTimeout(() => {
+        // Focus and select all text (next frame)
+        requestAnimationFrame(() => {
             input.focus();
             input.select();
-        }, 0);
+        });
         
         // Save function
         const saveRename = () => {
@@ -534,12 +657,40 @@ class TabManager {
     saveAllStates() {
         Logger.debug('TabManager.saveAllStates() - Current terminals:', this.terminals.size);
         const terminals = [];
+        // Map prior persisted rawContent by id so we don't erase history when serialize is suppressed
+        let priorContentById = new Map();
+        try {
+            const priorState = vscode.getState && vscode.getState();
+            if (priorState && priorState.fullTabState && Array.isArray(priorState.fullTabState.terminals)) {
+                for (const t of priorState.fullTabState.terminals) {
+                    priorContentById.set(t.id, t.rawContent || '');
+                }
+            }
+        } catch (e) {
+            Logger.warn('Could not read prior state for preservation:', e);
+        }
         
         for (const [id, terminal] of this.terminals) {
+            // Serialize raw (TerminalInstance handles gating to avoid incomplete CSI sequences)
+            let serialized = terminal.serialize();
+            if (serialized == null) {
+                const preserved = priorContentById.get(id);
+                if (preserved) {
+                    Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
+                    serialized = preserved;
+                } else {
+                    serialized = '';
+                }
+            }
+            // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
+            if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
+                const lines = serialized.split('\n');
+                if (lines.length > 40) serialized = lines.slice(-40).join('\n');
+            }
             const terminalData = {
                 id: terminal.id,
                 label: terminal.label,
-                rawContent: terminal.serialize() || '',
+                rawContent: serialized,
                 terminalType: terminal.terminalType || 'claude'
             };
             Logger.debug(`Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
@@ -581,6 +732,11 @@ class TabManager {
             terminalCount: savedState?.terminals?.length,
             terminals: savedState?.terminals?.map(t => ({ id: t.id, label: t.label, type: t.terminalType }))
         });
+
+    // Determine if this is a true cold restore (first time webview boot) versus a redraw
+    const isColdBoot = !this._hasCompletedInitialRestore;
+    // Track whether we injected a history banner this cold boot
+    this._historyBannerInjected = this._historyBannerInjected || false;
         
         // If no state or empty state, manufacture a default state
         if (!savedState || !savedState.terminals || savedState.terminals.length === 0) {
@@ -604,17 +760,19 @@ class TabManager {
         }
         
         // Recreate terminals from saved state (in the saved order)
-        Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
-        for (const terminalData of savedState.terminals) {
+    Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
+    let maxRestoreDelay = 0;
+    for (const terminalData of savedState.terminals) {
             Logger.debug('🔄 Creating terminal from state:', { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType });
             Logger.debug('🔄 About to create TerminalInstance from restore...');
             const terminal = new TerminalInstance(
-                terminalData.id, 
-                terminalData.label, 
-                this.vscode, 
-                this.terminalTheme, 
+                terminalData.id,
+                terminalData.label,
+                this.vscode,
+                this.terminalTheme,
                 this.getThemeColor,
-                terminalData.terminalType || 'claude'
+                terminalData.terminalType || 'claude',
+                { autoStartPty: false } // delay PTY spawn until after restored content is written
             );
             Logger.debug('🔄 TerminalInstance created from restore:', terminal);
             
@@ -625,33 +783,16 @@ class TabManager {
             // Restore terminal content using new format
             terminal.label = terminalData.label;
             terminal.terminalType = terminalData.terminalType || 'claude';
-            
-            if (terminalData.rawContent) {
-                Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', terminalData.rawContent.length);
-                
-                // Add delay for first terminal to avoid race condition with PTY initialization
-                const isFirstTerminal = Array.from(this.terminals.keys()).length === 0;
-                const delay = isFirstTerminal ? 200 : 50; // Longer delay for first terminal
-                
-                setTimeout(() => {
-                    Logger.debug(`🔄 Actually restoring terminal ${terminalData.id} after ${delay}ms delay`);
-                    
-                    // Add "History restored" message with timestamp for all terminals with content
-                    if (terminalData.rawContent) {
-                        const now = new Date();
-                        const timeString = now.toLocaleTimeString();
-                        // Ensure proper newline separation to avoid content collision
-                        const ensureNewline = terminalData.rawContent.endsWith('\n') || terminalData.rawContent.endsWith('\r\n') ? '' : '\r\n';
-                        const contentWithMessage = terminalData.rawContent + ensureNewline + `\r\n\x1b[36m* History restored at ${timeString}\x1b[0m\r\n`;
-                        terminal.deserialize(contentWithMessage);
-                    } else {
-                        // No content to restore
-                        terminal.deserialize(terminalData.rawContent);
-                    }
-                }, delay);
-                
-                // Terminal will naturally show a fresh prompt after content restoration
-            }
+            terminal.whenOpened.then(() => {
+                if (terminalData.rawContent) {
+                    Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', terminalData.rawContent.length);
+                    terminalData.rawContent += "\n\n* History Restored\n\n";
+                } else {
+                    Logger.debug('🔄 No persisted content for terminal', terminalData.id, '- starting PTY on open');
+                }
+                terminal.deserialize(terminalData.rawContent);
+                try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error:', e); }
+            });
             
             // Update next tab ID if needed
             if (terminalData.id >= this.nextTabId) {
@@ -682,8 +823,31 @@ class TabManager {
         
         // Mark as initialized after successful restoration
         this.isInitialized = true;
+    this._hasCompletedInitialRestore = true;
+        if (isColdBoot) {
+            // Persist a flag so future webview instances know not to re-show the banner
+            try {
+                const existing = vscode.getState() || {};
+                vscode.setState({
+                    ...existing,
+                    fullTabState: savedState,
+                    timestamp: Date.now(),
+                    historyBannerShownOnce: true
+                });
+            } catch (e) {
+                Logger.warn('Could not persist historyBannerShownOnce flag:', e);
+            }
+        }
         
         
+        // Once all terminals are boot ready, take a single baseline save
+        try {
+            const allBootPromises = Array.from(this.terminals.values()).map(t => t.whenBootReady.catch(()=>{}));
+            Promise.all(allBootPromises).then(() => {
+                Logger.debug('🧷 Post-restore baseline save (event-driven)');
+                this.saveToLocalState();
+            });
+        } catch (e) { Logger.warn('Baseline save scheduling failed:', e); }
         Logger.debug('Restore complete - Final terminal count:', this.terminals.size, 'Active tab:', this.activeTabId);
     }
     
@@ -697,9 +861,13 @@ class TabManager {
             Logger.debug('TabManager saving state synchronously:', fullState ? `${fullState.terminals?.length} terminals` : 'no state');
             
             // Save synchronously to webview state - this persists across sessions
+            const prior = vscode.getState() || {};
             vscode.setState({
+                ...prior,
                 fullTabState: fullState,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                // Ensure persistence of the one-time banner flag once we've done a cold boot
+                historyBannerShownOnce: prior.historyBannerShownOnce || this._hasCompletedInitialRestore || false
             });
             
             // OPTIONALLY also send to extension for backup (non-critical, async)
@@ -905,10 +1073,10 @@ class TabManager {
         resizeObserver.observe(container);
         
         // Apply initial layout
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             const rect = container.getBoundingClientRect();
             this.updateTabLayout(rect);
-        }, 100);
+        });
     }
     
     /**
@@ -948,12 +1116,10 @@ class TabManager {
         }
         
         // Refit active terminal after layout change
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             const activeTerminal = this.getActiveTerminal();
-            if (activeTerminal) {
-                activeTerminal.fit();
-            }
-        }, 100);
+            if (activeTerminal) activeTerminal.fit();
+        });
     }
     
     /**
@@ -1036,6 +1202,21 @@ class TabManager {
     }
     
     /**
+     * Refresh link providers for all terminals when CMD key state changes
+     */
+    refreshLinkProviders() {
+        console.log('🔧 REFRESH DEBUG: Refreshing link providers for', this.terminals.size, 'terminals');
+        for (const terminal of this.terminals.values()) {
+            if (terminal.setupFilePathLinks) {
+                console.log('🔧 REFRESH DEBUG: Calling setupFilePathLinks for terminal', terminal.id);
+                terminal.setupFilePathLinks();
+            } else {
+                console.log('🔧 REFRESH DEBUG: Terminal', terminal.id, 'has no setupFilePathLinks method');
+            }
+        }
+    }
+    
+    /**
      * Dispose of all terminals and cleanup
      */
     dispose() {
@@ -1044,4 +1225,11 @@ class TabManager {
         }
         this.terminals.clear();
     }
+
+    /**
+     * Remove trailing incomplete ANSI CSI escape sequence which can appear if we serialize
+     * while a command is mid-output. Without this, an orphan ESC + '[' may render visibly as '^[['
+     * upon restore because xterm can't reconstruct the intended final sequence.
+     */
+    // (Sanitization removed per design choice to avoid mutating raw terminal output)
 }

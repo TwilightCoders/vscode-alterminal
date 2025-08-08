@@ -357,6 +357,17 @@
         }
         
         /* Drag and drop styling - minimal visual feedback via background color only */
+        
+        /* XTerm.js cursor override for file path links */
+        /* Normal mode: file paths get text cursor for selection */
+        .xterm-screen.xterm-cursor-pointer {
+            cursor: text !important;
+        }
+        
+        /* CMD mode: override with pointer cursor for clicking */
+        .cmd-mode .xterm-screen.xterm-cursor-pointer {
+            cursor: pointer !important;
+        }
     </style>
 </head>
 <body>

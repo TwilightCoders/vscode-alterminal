@@ -4,6 +4,7 @@ import { PtyManager } from './terminal/ptyManager';
 import { Logger } from './utils/logger';
 
 export function activate(context: vscode.ExtensionContext) {
+    
     Logger.info('🚀 Claude Pilot extension is now active!');
     
     // Check if we're in debug/development mode
@@ -82,6 +83,35 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('claudePilot.testLinks', () => {
             provider.testLinks();
+        }),
+        vscode.commands.registerCommand('claudePilot.setDebugFilter', async () => {
+            const filterOptions = [
+                { label: '📁 Files Only', description: 'Show only file cache logs', value: ['📁'] },
+                { label: '🔗 Links Only', description: 'Show only link detection logs', value: ['🔗'] },
+                { label: '⚡ Terminal Only', description: 'Show only terminal event logs', value: ['⚡'] },
+                { label: '🚀 Initialization Only', description: 'Show only startup logs', value: ['🚀'] },
+                { label: '📁 🔗 Files + Links', description: 'Show file and link logs', value: ['📁', '🔗'] },
+                { label: '🔧 Troubleshoot Mode', description: 'Show force debug logs only', value: ['🔧'] },
+                { label: 'Clear Filter', description: 'Show all debug logs', value: null }
+            ];
+            
+            const selected = await vscode.window.showQuickPick(filterOptions, {
+                placeHolder: 'Select debug filter',
+                matchOnDescription: true
+            });
+            
+            if (selected) {
+                provider.setDebugFilter(selected.value);
+                const filterText = selected.value ? selected.value.join(' ') : 'cleared';
+                vscode.window.showInformationMessage(`Debug filter ${filterText}`);
+            }
+        }),
+        vscode.commands.registerCommand('claudePilot.clearDebugFilter', () => {
+            provider.setDebugFilter(null);
+            vscode.window.showInformationMessage('Debug filter cleared - showing all logs');
+        }),
+        vscode.commands.registerCommand('claudePilot.performanceReport', async () => {
+            await provider.requestPerformanceReport();
         })
     );
 }

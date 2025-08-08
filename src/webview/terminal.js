@@ -22,16 +22,13 @@
  */
 
 class TerminalInstance {
-    constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'claude') {
+    constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'claude', options = {}) {
+        const { autoStartPty = true } = options;
         // SUCCESS! Our code is running and hover is working!
-        console.log('🔧 FORCE LOG: TerminalInstance constructor called with id:', id, 'type:', terminalType);
-        console.log('🔧 Debug mode check:', localStorage.getItem('claudePilot.debug'));
+        Logger.debug('🚀 TerminalInstance constructor called with id:', id, 'type:', terminalType);
+        Logger.debug('🚀 Debug mode check:', localStorage.getItem('claudePilot.debug'));
         
-        // Temporarily force debug mode for testing
-        if (!localStorage.getItem('claudePilot.debug')) {
-            localStorage.setItem('claudePilot.debug', 'true');
-            console.log('🔧 FORCE ENABLED debug mode');
-        }
+    // Respect existing debug mode flag (no forced enable in production)
         
         Logger.debug('🆕 Creating new TerminalInstance with id:', id, 'type:', terminalType);
         this.id = id;
@@ -56,14 +53,46 @@ class TerminalInstance {
         // State management
         this.isActive = false;
         this.hasBellIndicator = false;
+    this._lastWriteTs = 0; // timestamp of last data write
+    this._pendingStableSnapshot = ''; // cache last stable snapshot
+    this._saveDebounceTimer = null; // debounce handle
+    // Boot / readiness state to avoid capturing transient init control sequences
+    this._booting = true;               // true until we detect a stable prompt
+    this._bootReady = false;            // flips when prompt detected & idle
+    this._bootIdleTimer = null;         // timer to evaluate readiness after idle
+    this._bootLastActivity = Date.now();// last PTY output time during boot
+    this._bootSnapshotTaken = false;    // ensure snapshot taken exactly once at readiness
+    // Prompt heuristic: common final prompt chars optionally followed by a space; allow color codes before
+    this._promptRegex = /(?:\x1b\[[0-9;]*m)*.*([#%$>]) ?$/;
+    this._createdAt = Date.now();
+    this._inAltScreen = false;        // track application alternate screen (curses, TUIs)
+    this._lastNormalScreenSnapshot = ''; // last snapshot taken outside alt-screen
+    // Event / promise lifecycle
+    this._listeners = new Map();
+    this._openedEmitted = false;
+    this.whenOpened = new Promise(r => { this._openedResolve = r; });
+    this._bootReadyEmitted = false;
+    this.whenBootReady = new Promise(r => { this._bootReadyResolve = r; });
+    this._pendingAltExit = false; // alt-screen exit awaiting stabilized render
         
         // DOM container
         this.terminalContainer = null;
         
         // Initialize the complete terminal (frontend + backend)
         this.initialize();
-        this.createPtyProcess();
+        if (autoStartPty) {
+            this.createPtyProcess();
+        } else {
+            this._pendingPtyStart = true; // mark for later start
+        }
     }
+
+    // Simple event emitter API
+    on(event, handler) { if (!this._listeners.has(event)) this._listeners.set(event, new Set()); this._listeners.get(event).add(handler); return () => this.off(event, handler); }
+    off(event, handler) { const set = this._listeners.get(event); if (set) set.delete(handler); }
+    _emit(event, payload) { const set = this._listeners.get(event); if (set) for (const fn of Array.from(set)) { try { fn(payload); } catch(_) {} } }
+    _markOpened() { if (this._openedEmitted) return; this._openedEmitted = true; if (this._openedResolve) this._openedResolve(); this._emit('opened'); }
+    _markBootReady() { if (this._bootReadyEmitted) return; this._bootReadyEmitted = true; if (this._bootReadyResolve) this._bootReadyResolve(); this._emit('bootReady'); }
     
     /**
      * Initialize the terminal with all addons and configuration
@@ -71,37 +100,38 @@ class TerminalInstance {
     initialize() {
         Logger.debug('🚀 Starting terminal initialization for terminal', this.id);
         try {
+            performance.mark(`t${this.id}-init-start`);
             let XTerminal = null;
             
-            Logger.debug('Checking for Terminal constructors...');
-            Logger.debug('window.Terminal:', typeof window.Terminal, window.Terminal);
-            Logger.debug('globalThis keys with "term":', Object.keys(globalThis).filter(k => k.toLowerCase().includes('term')));
-            Logger.debug('All available globals:', Object.getOwnPropertyNames(window).slice(0, 20));
+            Logger.debug('🚀 Checking for Terminal constructors...');
+            Logger.debug('🚀 window.Terminal:', typeof window.Terminal, window.Terminal);
+            Logger.debug('🚀 globalThis keys with "term":', Object.keys(globalThis).filter(k => k.toLowerCase().includes('term')));
+            Logger.debug('🚀 All available globals:', Object.getOwnPropertyNames(window).slice(0, 20));
             
             // Check various possible locations
             if (window.Terminal && typeof window.Terminal === 'function') {
                 XTerminal = window.Terminal;
-                Logger.debug('Found Terminal on window');
+                Logger.debug('🚀 Found Terminal on window');
             } else if (globalThis.Terminal && typeof globalThis.Terminal === 'function') {
                 XTerminal = globalThis.Terminal;
-                Logger.debug('Found Terminal on globalThis');
+                Logger.debug('🚀 Found Terminal on globalThis');
             } else if (self.Terminal && typeof self.Terminal === 'function') {
                 XTerminal = self.Terminal;
-                Logger.debug('Found Terminal on self');
+                Logger.debug('🚀 Found Terminal on self');
             } else {
                 // Try to find any object that might be the Terminal
                 const possibleTerminal = window.Terminal || globalThis.Terminal;
-                Logger.debug('Possible Terminal object:', possibleTerminal);
+                Logger.debug('🚀 Possible Terminal object:', possibleTerminal);
                 
                 if (possibleTerminal && possibleTerminal.Terminal) {
                     XTerminal = possibleTerminal.Terminal;
-                    Logger.debug('Found nested Terminal constructor');
+                    Logger.debug('🚀 Found nested Terminal constructor');
                 } else {
                     throw new Error('Terminal constructor not found. window.Terminal type: ' + typeof window.Terminal + ', available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes('term')).join(', '));
                 }
             }
             
-            Logger.debug('Using Terminal constructor:', XTerminal);
+            Logger.debug('🚀 Using Terminal constructor:', XTerminal);
             
             // Create terminal with proper configuration
             this.terminal = new XTerminal({
@@ -111,10 +141,13 @@ class TerminalInstance {
                 theme: this.terminalTheme,
                 scrollback: window.scrollbackLines || 1000,
                 scrollOnUserInput: false,
+                sendFocus: false, // prevent emitting focus in/out sequences (ESC [ I / ESC [ O)
                 allowTransparency: false,
                 windowsMode: false,
                 experimentalCharAtlas: 'dynamic',
-                allowProposedApi: true
+                allowProposedApi: true,
+                convertEol: true,
+                disableStdin: false
             });
             
             // Initialize addons
@@ -125,8 +158,7 @@ class TerminalInstance {
             
             // Configure WebLinksAddon for web URLs only
             this.webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => {
-                console.log('🔧 FORCE DEBUG: WebLinksAddon detected web URL:', uri);
-                Logger.debug(`WebLinksAddon detected web URL: "${uri}"`);
+                Logger.debug(`🔗 WebLinksAddon detected web URL: "${uri}"`);
                 this.vscode.postMessage({ command: 'openUrl', url: uri });
                 return false; // Prevent default browser opening
             });
@@ -141,84 +173,31 @@ class TerminalInstance {
             }
             
             // Load addons
-            console.log('🔧 FORCE DEBUG: Loading addons...');
+            Logger.debug('🚀 Loading addons...');
             this.terminal.loadAddon(this.fitAddon);
-            console.log('🔧 FORCE DEBUG: Loaded FitAddon');
+            Logger.debug('🚀 Loaded FitAddon');
             this.terminal.loadAddon(this.serializeAddon);
-            console.log('🔧 FORCE DEBUG: Loaded SerializeAddon');
+            Logger.debug('🚀 Loaded SerializeAddon');
             this.terminal.loadAddon(this.unicodeAddon);
-            console.log('🔧 FORCE DEBUG: Loaded UnicodeAddon');
+            Logger.debug('🚀 Loaded UnicodeAddon');
             this.terminal.loadAddon(this.webLinksAddon);
-            console.log('🔧 FORCE DEBUG: Loaded WebLinksAddon');
+            Logger.debug('🚀 Loaded WebLinksAddon');
             
             // Note: File path link setup moved to after terminal attachment
             
-            // Try to manually trigger link detection after a delay
-            setTimeout(() => {
-                console.log('🔧 FORCE DEBUG: Attempting to manually trigger link detection...');
-                Logger.debug('🔗 Attempting to manually trigger link detection...');
-                
-                // Check if terminal has any methods for triggering link detection
-                const linkMethods = Object.getOwnPropertyNames(this.terminal).filter(name => 
-                    name.toLowerCase().includes('link') || name.toLowerCase().includes('refresh')
-                );
-                console.log('🔧 FORCE DEBUG: Available link/refresh methods:', linkMethods);
-                Logger.debug('Available link/refresh methods:', linkMethods);
-                
-                // Write some test content with file paths
-                console.log('🔧 FORCE DEBUG: Writing test file paths to terminal...');
-                this.terminal.write('\r\nTest file paths:\r\n');
-                this.terminal.write('/Users/volte/test.js\r\n');
-                this.terminal.write('./src/terminal.js\r\n');
-                this.terminal.write('~/Documents/project.ts\r\n');
-                this.terminal.write('package.json\r\n');
-                
-                // Debug: Check what's in the terminal buffer after writing
-                setTimeout(() => {
-                    console.log('🔧 FORCE DEBUG: Checking terminal buffer after write...');
-                    const activeBuffer = this.terminal.buffer.active;
-                    const bufferLength = activeBuffer.length;
-                    console.log('🔧 FORCE DEBUG: Buffer length:', bufferLength);
-                    
-                    // Check the last few lines for our test content
-                    for (let i = Math.max(0, bufferLength - 10); i < bufferLength; i++) {
-                        const line = activeBuffer.getLine(i);
-                        if (line) {
-                            const lineText = line.translateToString(true);
-                            console.log(`🔧 FORCE DEBUG: Line ${i + 1}: "${lineText}"`);
-                        }
-                    }
-                }, 500);
-                
-                // Try some common trigger methods if they exist
-                if (typeof this.terminal.refresh === 'function') {
-                    console.log('🔧 FORCE DEBUG: Calling terminal.refresh()');
-                    Logger.debug('Calling terminal.refresh()');
-                    this.terminal.refresh();
-                }
-                
-                if (typeof this.terminal.resize === 'function') {
-                    console.log('🔧 FORCE DEBUG: Triggering resize to refresh links');
-                    Logger.debug('Triggering resize to refresh links');
-                    const dims = this.fitAddon?.proposeDimensions();
-                    if (dims) {
-                        this.terminal.resize(dims.cols, dims.rows);
-                    }
-                }
-                
-            }, 2000); // Wait 2 seconds for terminal to be fully ready
+            // (Removed heavy forced debug test injection for performance)
             
             // Set up event handlers
             this.setupEventHandlers();
             
             // Activate Unicode 11 support (based on xterm.js PR #2568)
-            // if (this.terminal.unicode) {
-            //     this.terminal.unicode.activeVersion = '11';
-            //     console.log('Unicode 11 activated, active version:', this.terminal.unicode.activeVersion);
-            //     console.log('Available Unicode versions:', this.terminal.unicode.versions);
-            // } else {
-            //     console.warn('Unicode API not available on terminal');
-            // }
+            if (this.terminal.unicode) {
+                this.terminal.unicode.activeVersion = '11';
+                console.log('Unicode 11 activated, active version:', this.terminal.unicode.activeVersion);
+                console.log('Available Unicode versions:', this.terminal.unicode.versions);
+            } else {
+                console.warn('Unicode API not available on terminal');
+            }
             
         } catch (error) {
             Logger.error(`Failed to initialize terminal ${this.id}:`, error);
@@ -226,283 +205,98 @@ class TerminalInstance {
     }
     
     /**
-     * Set up custom link providers for file paths using xterm-link-provider
+     * Dispose of existing file path link providers
      */
-    setupFilePathLinks() {
-        console.log('🔧 FORCE DEBUG: setupFilePathLinks called for terminal', this.id);
-        Logger.debug('🔗 setupFilePathLinks called for terminal', this.id);
-        if (!this.terminal) {
-            Logger.debug('🔗 No terminal available, returning');
-            return;
-        }
-        
-        try {
-            Logger.debug('🔗 Starting debug checks...');
-            
-            // Debug: Check what link-related methods are available on the terminal
-            try {
-                const linkMethods = Object.getOwnPropertyNames(this.terminal).filter(name => name.toLowerCase().includes('link'));
-                Logger.debug('Terminal methods with "link":', linkMethods);
-            } catch (e) {
-                Logger.error('Error getting terminal methods:', e);
-            }
-            
-            try {
-                const prototypeLinkMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(this.terminal)).filter(name => name.toLowerCase().includes('link'));
-                Logger.debug('Terminal prototype methods with "link":', prototypeLinkMethods);
-            } catch (e) {
-                Logger.error('Error getting prototype methods:', e);
-            }
-            
-            Logger.debug('registerLinkProvider exists:', typeof this.terminal.registerLinkProvider);
-            Logger.debug('registerLinkMatcher exists:', typeof this.terminal.registerLinkMatcher);
-            
-            // Check xterm.js version
-            Logger.debug('Terminal constructor name:', this.terminal.constructor.name);
-            Logger.debug('Available terminal properties:', Object.getOwnPropertyNames(this.terminal).slice(0, 10));
-            
-            // Check if registerLinkProvider actually works
-            if (typeof this.terminal.registerLinkProvider !== 'function') {
-                Logger.error('registerLinkProvider is not a function, falling back to registerLinkMatcher');
-                this.setupFilePathLinksWithMatcher();
-                return;
-            }
-            
-            // Test if registerLinkProvider works at all
-            Logger.debug('Testing basic registerLinkProvider functionality...');
-            
-            // First, try the simplest possible link provider
-            const testProvider = {
-                provideLinks: (y, callback) => {
-                    Logger.debug('🧪 TEST: provideLinks called for line', y);
-                    callback(undefined); // Return no links for now
-                }
-            };
-            
-            try {
-                const testDisposable = this.terminal.registerLinkProvider(testProvider);
-                Logger.debug('🧪 TEST: Successfully registered test provider, disposable:', testDisposable);
-                
-                // If that worked, dispose it and try our real implementation
-                if (testDisposable && testDisposable.dispose) {
-                    testDisposable.dispose();
-                    Logger.debug('🧪 TEST: Disposed test provider');
-                }
-            } catch (testError) {
-                Logger.error('🧪 TEST: Failed to register test provider:', testError);
-            }
-            
-            // Create proper FilePathLinkProvider based on official xterm.js patterns
-            Logger.debug('Creating FilePathLinkProvider based on official xterm.js patterns...');
-            
-            class FilePathLinkProvider {
-                constructor(terminal, regex, handler, options = {}) {
-                    this._terminal = terminal;
-                    this._regex = regex;
-                    this._handler = handler;
-                    this._options = options;
-                }
-                
-                provideLinks(y, callback) {
-                    console.log('🔧 FORCE DEBUG: FilePathLinkProvider.provideLinks called for line', y);
-                    Logger.debug('🔍 FilePathLinkProvider.provideLinks called for line', y);
-                    try {
-                        const links = this._computeLinks(y);
-                        Logger.debug('🔍 Computed', links.length, 'links for line', y);
-                        callback(links.length > 0 ? links : undefined);
-                    } catch (error) {
-                        Logger.error('Error in FilePathLinkProvider.provideLinks:', error);
-                        callback(undefined);
-                    }
-                }
-                
-                _computeLinks(y) {
-                    const rex = new RegExp(
-                        this._regex.source,
-                        ((this._regex.flags || '') + 'g')
-                            .split('')
-                            .filter((value, index, arr) => arr.indexOf(value) === index)
-                            .join('')
-                    );
-                    
-                    const [line, startLineIndex] = this._translateBufferLineToStringWithWrap(y - 1);
-                    console.log('🔧 FORCE DEBUG: Processing line', y, 'text:', `"${line}"`);
-                    Logger.debug('🔍 Processing line text:', `"${line}"`);
-                    
-                    let match;
-                    let stringIndex = -1;
-                    const result = [];
-                    
-                    while ((match = rex.exec(line)) !== null) {
-                        const text = match[0]; // Use full match, not match[1]
-                        if (!text) {
-                            Logger.debug('🔍 Empty match found, skipping');
-                            continue;
-                        }
-                        
-                        // Find the actual position of the match in the line
-                        stringIndex = line.indexOf(text, stringIndex + 1);
-                        rex.lastIndex = stringIndex + text.length;
-                        
-                        if (stringIndex < 0) {
-                            Logger.debug('🔍 Invalid string index, breaking');
-                            break;
-                        }
-                        
-                        Logger.debug('🔍 Found file path match:', text, 'at string index', stringIndex);
-                        
-                        const range = {
-                            start: this._stringIndexToBufferPosition(startLineIndex, stringIndex),
-                            end: this._stringIndexToBufferPosition(startLineIndex, stringIndex + text.length - 1, true)
-                        };
-                        
-                        const link = {
-                            range: range,
-                            text: text,
-                            activate: (event, text) => {
-                                console.log('🔧 FORCE DEBUG: File path link ACTIVATED:', text);
-                                console.log('🔧 FORCE DEBUG: Event:', event);
-                                Logger.debug('🔗 File path link activated:', text);
-                                this._handler(event, text);
-                            },
-                            ...this._options
-                        };
-                        
-                        result.push(link);
-                    }
-                    
-                    return result;
-                }
-                
-                _translateBufferLineToStringWithWrap(lineIndex) {
-                    let lineString = '';
-                    let lineWrapsToNext;
-                    let prevLinesToWrap;
-                    
-                    // Find the start of wrapped lines
-                    do {
-                        const line = this._terminal.buffer.active.getLine(lineIndex);
-                        if (!line) {
-                            break;
-                        }
-                        if (line.isWrapped) {
-                            lineIndex--;
-                        }
-                        prevLinesToWrap = line.isWrapped;
-                    } while (prevLinesToWrap);
-                    
-                    const startLineIndex = lineIndex;
-                    
-                    // Collect all wrapped lines
-                    do {
-                        const nextLine = this._terminal.buffer.active.getLine(lineIndex + 1);
-                        lineWrapsToNext = nextLine ? nextLine.isWrapped : false;
-                        const line = this._terminal.buffer.active.getLine(lineIndex);
-                        if (!line) {
-                            break;
-                        }
-                        lineString += line.translateToString(true).substring(0, this._terminal.cols);
-                        lineIndex++;
-                    } while (lineWrapsToNext);
-                    
-                    return [lineString, startLineIndex];
-                }
-                
-                _stringIndexToBufferPosition(lineIndex, stringIndex, reportLastCell = false) {
-                    const cell = this._terminal.buffer.active.getNullCell();
-                    while (stringIndex) {
-                        const line = this._terminal.buffer.active.getLine(lineIndex);
-                        if (!line) {
-                            return { x: 0, y: 0 };
-                        }
-                        const length = line.length;
-                        for (let i = 0; i < length; ) {
-                            line.getCell(i, cell);
-                            stringIndex -= cell.getChars().length;
-                            if (stringIndex < 0) {
-                                return { x: i + (reportLastCell ? cell.getWidth() : 1), y: lineIndex + 1 };
-                            }
-                            i += cell.getWidth();
-                        }
-                        lineIndex++;
-                    }
-                    return { x: 1, y: lineIndex + 1 };
-                }
-            }
-            
-            const LinkProviderClass = FilePathLinkProvider;
-
-            // Improved file path patterns for better detection
-            const patterns = [
-                // Unix absolute paths: /path/to/file.ext or /path/to/directory
-                { regex: /\/[a-zA-Z0-9][a-zA-Z0-9\._\-\/]*[a-zA-Z0-9]/g, type: 'absolute' },
-                // Relative paths: ./file or ../path/file.ext
-                { regex: /\.\.?\/[a-zA-Z0-9][a-zA-Z0-9\._\-\/]*[a-zA-Z0-9]/g, type: 'relative' },
-                // Home directory paths: ~/path/file.ext
-                { regex: /~\/[a-zA-Z0-9][a-zA-Z0-9\._\-\/]*[a-zA-Z0-9]/g, type: 'home' },
-                // Windows paths: C:\path\file.ext
-                { regex: /[a-zA-Z]:[\\][a-zA-Z0-9][a-zA-Z0-9\._\-\\]*[a-zA-Z0-9]/g, type: 'windows' },
-                // Simple filename with extension (common in error messages)
-                { regex: /[a-zA-Z0-9][a-zA-Z0-9\._\-]*\.[a-zA-Z]{1,4}/g, type: 'filename' }
-            ];
-            
-            Logger.debug('📋 Registering file path patterns:', patterns.map(p => ({ type: p.type, regex: p.regex.source })));
-            
-            // Track providers for cleanup
-            if (!this.linkProviders) {
-                this.linkProviders = [];
-            }
-            
-            patterns.forEach(pattern => {
+    disposeFilePathLinks() {
+        // Dispose link providers
+        if (this.linkProviders) {
+            this.linkProviders.forEach(({ provider, disposable }) => {
                 try {
-                    console.log(`🔧 FORCE DEBUG: Creating ${pattern.type} FilePathLinkProvider with regex:`, pattern.regex.source);
-                    Logger.debug(`📝 Creating ${pattern.type} FilePathLinkProvider with regex:`, pattern.regex.source);
-                    
-                    const linkProvider = new LinkProviderClass(
-                        this.terminal,
-                        pattern.regex,
-                        (event, text) => {
-                            console.log(`🔧 FORCE DEBUG: File path link clicked (${pattern.type}): "${text}"`);
-                            console.log('🔧 FORCE DEBUG: Sending openFile message to VS Code');
-                            Logger.debug(`🔗 File path link clicked (${pattern.type}): "${text}"`);
-                            this.vscode.postMessage({ command: 'openFile', filePath: text });
-                        },
-                        {
-                            hover: (event, text) => {
-                                Logger.debug(`👁️ Hovering over ${pattern.type} path: "${text}"`);
-                            },
-                            leave: (event, text) => {
-                                Logger.debug(`👁️ Left hover on ${pattern.type} path: "${text}"`);
-                            }
-                        }
-                    );
-                    
-                    Logger.debug(`🏁 Created ${pattern.type} FilePathLinkProvider instance:`, {
-                        hasProvideLinks: typeof linkProvider.provideLinks === 'function',
-                        regex: pattern.regex.source,
-                        type: pattern.type
-                    });
-                    
-                    // Register the link provider
-                    console.log(`🔧 FORCE DEBUG: About to register ${pattern.type} link provider...`);
-                    const disposable = this.terminal.registerLinkProvider(linkProvider);
-                    console.log(`🔧 FORCE DEBUG: registerLinkProvider returned:`, disposable);
-                    
-                    Logger.debug(`✅ Successfully registered ${pattern.type} path link provider, disposable exists:`, !!disposable);
-                    this.linkProviders.push({ provider: linkProvider, disposable, type: pattern.type });
-                } catch (providerError) {
-                    Logger.error(`❌ Failed to register ${pattern.type} path link provider:`, providerError);
+                    if (disposable && disposable.dispose) {
+                        disposable.dispose();
+                        Logger.debug('Disposed link provider');
+                    }
+                } catch (error) {
+                    Logger.error('Error disposing link provider:', error);
                 }
             });
-            
-            console.log('🔧 FORCE DEBUG: Total link providers registered:', this.linkProviders.length);
-            Logger.debug(`📋 Total link providers registered:`, this.linkProviders.length);
-            
-        } catch (error) {
-            Logger.error('Failed to setup file path links:', error);
+            this.linkProviders = [];
+        }
+        
+        // Dispose link matchers (fallback)
+        if (this.linkMatcherIds && this.terminal && this.terminal.deregisterLinkMatcher) {
+            this.linkMatcherIds.forEach(matcherId => {
+                try {
+                    this.terminal.deregisterLinkMatcher(matcherId);
+                    Logger.debug('Deregistered link matcher:', matcherId);
+                } catch (error) {
+                    Logger.error('Error deregistering link matcher:', error);
+                }
+            });
+            this.linkMatcherIds = [];
         }
     }
     
+    /**
+     * Set up file path link detection with clean regex patterns
+     */
+    setupFilePathLinks() {
+        Logger.debug('🔗 Setting up file path links (combined) for terminal', this.id);
+        if (!this.terminal) return;
+        this.disposeFilePathLinks();
+        if (typeof this.terminal.registerLinkProvider !== 'function') {
+            this.setupFilePathLinksWithMatcher();
+            return;
+        }
+        const COMBINED = /(\b[\.~]?\/[^\s"'`]*(?:\s[^\s"'`]*)*|[a-z0-9_][^\s\/]*\.[a-z0-9]+|[a-zA-Z]:\\[^\s"'`]+)/gi;
+        const UNIVERSAL = /[^\s"'`]+/g;
+        const provider = {
+            provideLinks: (y, callback) => {
+                const line = this.terminal.buffer.active.getLine(y - 1);
+                if (!line) return callback(undefined);
+                const lineText = line.translateToString();
+                const isCmd = window.linkModeState && (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed);
+                const regex = isCmd ? UNIVERSAL : COMBINED;
+                const links = [];
+                let match;
+                const r = new RegExp(regex.source, regex.flags);
+                while ((match = r.exec(lineText)) !== null) {
+                    const raw = match[0];
+                    const trimmed = raw.trim();
+                    if (!trimmed) continue;
+                    const leading = raw.match(/^\s*/)[0].length;
+                    const startIndex = match.index + leading;
+                    // Validation: skip tokens with dangerous shell metachars when not in cmd mode
+                    if (!isCmd && /[;&|`]/.test(trimmed)) continue;
+                    const underline = isCmd || (window.workspaceFileCache && window.workspaceFileCache.has(trimmed));
+                    if (!underline) continue;
+                    links.push({
+                        range: { start: { x: startIndex + 1, y }, end: { x: startIndex + trimmed.length, y } },
+                        text: trimmed,
+                        decorations: { underline: true },
+                        activate: () => {
+                            const cmdPressed = window.linkModeState && (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed);
+                            if (!cmdPressed) {
+                                this.vscode.postMessage({ command: 'openFile', filePath: trimmed });
+                            }
+                        },
+                        hover: () => {
+                            const container = document.getElementById('container');
+                            if (isCmd) container?.classList.add('cmd-mode'); else container?.classList.remove('cmd-mode');
+                        },
+                        leave: () => {
+                            document.getElementById('container')?.classList.remove('cmd-mode');
+                        }
+                    });
+                }
+                callback(links.length ? links : undefined);
+            }
+        };
+        const disposable = this.terminal.registerLinkProvider(provider);
+        this.linkProviders = [disposable];
+        Logger.debug('🔗 Combined link provider registered');
+    }
+
     /**
      * Fallback method using registerLinkMatcher (for when registerLinkProvider fails)
      */
@@ -599,8 +393,23 @@ class TerminalInstance {
         
         // Set up bell handler - listen for terminal bell events
         this.bellDisposable = this.terminal.onBell(() => {
-            Logger.debug(`Terminal ${this.id} received bell event`);
-            this.showBellIndicator();
+            const timestamp = new Date().toISOString();
+            console.log(`🔔 BELL DEBUG [${timestamp}]: Terminal ${this.id} received bell event`);
+            
+            // Get the current command line or recent output to see what triggered it
+            const currentLine = this.terminal.buffer.active.getLine(this.terminal.buffer.active.cursorY);
+            const lineText = currentLine ? currentLine.translateToString().trim() : 'no line';
+            console.log(`🔔 BELL DEBUG: Current line: "${lineText}"`);
+            console.log(`🔔 BELL DEBUG: Cursor position: ${this.terminal.buffer.active.cursorX}, ${this.terminal.buffer.active.cursorY}`);
+            console.log(`🔔 BELL DEBUG: Is tab active: ${this.isActive}`);
+            
+            // Only show indicator if tab is not currently active
+            if (!this.isActive) {
+                console.log(`🔔 BELL DEBUG: Tab is inactive, showing bell indicator`);
+                this.showBellIndicatorOnly();
+            } else {
+                console.log(`🔔 BELL DEBUG: Tab is active, not showing bell indicator`);
+            }
         });
     }
     
@@ -615,26 +424,39 @@ class TerminalInstance {
             // Only open if terminal is not already opened
             if (!this.terminal.element) {
                 this.terminal.open(container);
+                performance.mark(`t${this.id}-open`);
                 
                 // Set up file path links immediately after opening
                 // The terminal is now attached to DOM and ready for link providers
-                console.log('🔧 FORCE DEBUG: Setting up file path links after terminal.open()');
+                Logger.debug('🔗 Setting up file path links after terminal.open()');
                 this.setupFilePathLinks();
+
+                // Visibility-aware fitting & refresh
+                this._installVisibilityHandlers();
+
+                // Kick off multi-pass stabilization redraw (addresses blank-on-move)
+                this._scheduleRedrawSequence();
                 
                 // Also listen for terminal render events to ensure links work if content changes
                 if (typeof this.terminal.onRender === 'function') {
                     this.renderDisposable = this.terminal.onRender(() => {
-                        // Links are automatically re-evaluated by xterm.js on render
-                        // No need to re-register providers
+                        // First render -> opened
+                        if (!this._openedEmitted) this._markOpened();
+                        // Handle deferred alt-screen exit snapshot after a clean render
+                        if (this._pendingAltExit && !this._inAltScreen) {
+                            this._pendingAltExit = false;
+                            try { this.serialize(); if (window.tabManager) window.tabManager.saveToLocalState(); } catch(_) {}
+                            this._emit('altScreenExit');
+                        }
                     });
-                    console.log('🔧 FORCE DEBUG: Set up onRender listener for link updates');
+                    Logger.debug('🔗 Set up onRender listener');
                 }
             }
             
             // Fit the terminal to container
-            if (this.fitAddon && container.offsetWidth > 0 && container.offsetHeight > 0) {
-                this.fitAddon.fit();
-            }
+            if (this.fitAddon && container.offsetWidth > 0 && container.offsetHeight > 0) this.fitAddon.fit();
+            // Fallback ensure opened event if render never fires soon
+            if (!this._openedEmitted) requestAnimationFrame(() => this._markOpened());
         } catch (error) {
             Logger.error(`Failed to attach terminal ${this.id} to container:`, error);
         }
@@ -645,15 +467,25 @@ class TerminalInstance {
      */
     write(data) {
         if (!this.terminal) return;
-        
         try {
+            // Detect alt-screen enter/leave sequences in outbound PTY data (output side)
+            // Enter: CSI ? 1049 h (and sometimes 47/1047 h)
+            // Leave: CSI ? 1049 l (and 47/1047 l)
+            if (/\x1b\[\?1049h|\x1b\[\?47h|\x1b\[\?1047h/.test(data)) {
+                this._inAltScreen = true;
+                if (this._pendingStableSnapshot) this._lastNormalScreenSnapshot = this._pendingStableSnapshot;
+            }
+            if (/\x1b\[\?1049l|\x1b\[\?47l|\x1b\[\?1047l/.test(data)) {
+                this._inAltScreen = false;
+                this._pendingAltExit = true; // handled at next render
+            }
             this.terminal.write(data);
-            
-            // Note: Content is written - no need to track hasContent flag
-            
-            // Save state synchronously (fast, no async messaging)
-            if (window.tabManager && window.tabManager.saveToLocalState) {
-                window.tabManager.saveToLocalState();
+            this._lastWriteTs = Date.now();
+            if (this._booting) {
+                this._bootLastActivity = Date.now();
+                this._scheduleBootReadinessCheck();
+            } else {
+                this._scheduleDebouncedSave();
             }
         } catch (error) {
             Logger.error(`Failed to write to terminal ${this.id}:`, error);
@@ -710,20 +542,72 @@ class TerminalInstance {
         }
         
         if (active) {
+            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active, hasBellIndicator: ${this.hasBellIndicator}`);
             // Clear bell indicator when tab becomes active
             if (this.hasBellIndicator) {
+                console.log(`🔔 BELL DEBUG: Clearing bell indicator for tab ${this.id}`);
                 this.clearBellIndicator();
             }
             
-            setTimeout(() => {
-                this.fit();
-                this.focus();
-            }, 100);
+            queueMicrotask(() => {
+                if (this.terminal) {
+                    this.terminal.refresh(0, this.terminal.rows - 1);
+                }
+                requestAnimationFrame(() => {
+                    this.fit();
+                    this.focus();
+                    try {
+                        performance.mark(`t${this.id}-active`);
+                        if (window.tabManager && window.tabManager._recordTerminalTiming) {
+                            window.tabManager._recordTerminalTiming(this.id);
+                        }
+                    } catch (e) {}
+                    // Additional staged redraws to combat late layout thrash
+                    this._scheduleRedrawSequence();
+                });
+            });
         }
     }
     
     /**
-     * Show bell indicator in tab
+     * Show bell indicator in tab (without VS Code notification)
+     */
+    showBellIndicatorOnly() {
+        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
+        if (!tabElement) return;
+        
+        // Check if bell indicator already exists to avoid duplicates
+        let bellIndicator = tabElement.querySelector('.bell-indicator');
+        if (!bellIndicator) {
+            // Create bell indicator
+            bellIndicator = document.createElement('span');
+            bellIndicator.className = 'bell-indicator codicon codicon-bell';
+            bellIndicator.style.cssText = `
+                margin-left: 4px;
+                opacity: 1;
+                transition: opacity 0.3s ease;
+                color: orange;
+                animation: pulse 1s infinite;
+            `;
+            
+            // Insert bell before close button
+            const closeBtn = tabElement.querySelector('.tab-close');
+            if (closeBtn) {
+                tabElement.insertBefore(bellIndicator, closeBtn);
+            } else {
+                tabElement.appendChild(bellIndicator);
+            }
+        } else {
+            // Reset opacity if indicator already exists
+            bellIndicator.style.opacity = '1';
+        }
+        
+        // Mark that this terminal has an unread bell
+        this.hasBellIndicator = true;
+    }
+
+    /**
+     * Show bell indicator in tab (with VS Code notification)
      */
     showBellIndicator() {
         const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
@@ -769,49 +653,123 @@ class TerminalInstance {
      * Clear bell indicator when tab becomes active
      */
     clearBellIndicator() {
+        console.log(`🔔 BELL DEBUG: clearBellIndicator called for tab ${this.id}`);
         const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
-        if (!tabElement) return;
+        if (!tabElement) {
+            console.log(`🔔 BELL DEBUG: No tab element found for tab ${this.id}`);
+            return;
+        }
         
         const bellIndicator = tabElement.querySelector('.bell-indicator');
         if (bellIndicator) {
-            bellIndicator.style.opacity = '0';
-            // Remove element after fade completes
-            setTimeout(() => {
-                if (bellIndicator && bellIndicator.parentNode) {
-                    bellIndicator.parentNode.removeChild(bellIndicator);
-                }
-            }, 300);
+            console.log(`🔔 BELL DEBUG: Found bell indicator, fading out`);
+            const el = bellIndicator;
+            const remove = () => { if (el && el.parentNode) { console.log(`🔔 BELL DEBUG: Removing bell indicator from DOM`); el.parentNode.removeChild(el); } };
+            el.addEventListener('transitionend', remove, { once: true });
+            // Fallback in case no transition fires (style override): microtask remove
+            queueMicrotask(() => { if (!document.body.contains(el)) return; if (getComputedStyle(el).transitionDuration === '0s') remove(); });
+            el.style.opacity = '0';
+        } else {
+            console.log(`🔔 BELL DEBUG: No bell indicator found in tab`);
         }
         
         this.hasBellIndicator = false;
+        console.log(`🔔 BELL DEBUG: Set hasBellIndicator to false for tab ${this.id}`);
     }
     
     /**
      * Serialize terminal state for persistence
      */
     serialize() {
-        if (!this.serializeAddon) {
-            return null;
-        }
-        
+        if (!this.serializeAddon) return null;
         try {
-            // Try including modes to capture prompt state
+            if (this._booting && !this._bootReady) {
+                // Suppress early snapshots; return last stable snapshot (may be empty)
+                return this._pendingStableSnapshot || null;
+            }
+            // If in alternate screen, don't capture transient full-screen UI; return last normal snapshot
+            if (this._inAltScreen) {
+                return this._lastNormalScreenSnapshot || this._pendingStableSnapshot || null;
+            }
+            const now = Date.now();
+            // If we wrote very recently, reuse last stable snapshot to avoid partial escape capture
+            if (now - this._lastWriteTs < 120 && this._pendingStableSnapshot) {
+                return this._pendingStableSnapshot;
+            }
             const serialized = this.serializeAddon.serialize({
                 scrollback: window.scrollbackLines || 1000,
-                excludeModes: false,  // Include terminal modes to capture prompt state
+                excludeModes: false,
                 excludeAltBuffer: true
             });
-            
-            // Debug: Log serialization info
+            // Gating: skip updating snapshot (do NOT mutate) if ending incomplete escape or contains focus seqs
+            if (/\x1b$/.test(serialized) || /\x1b\[[0-9;?]*$/.test(serialized)) {
+                Logger.debug(`Skip snapshot t${this.id}: trailing incomplete escape`);
+                return this._pendingStableSnapshot || null;
+            }
+            if (/\x1b\[I|\x1b\[O|\^\[\[I|\^\[\[O/.test(serialized)) {
+                Logger.debug(`Skip snapshot t${this.id}: contains focus seq (raw or caret form) – keeping prior snapshot`);
+                return this._pendingStableSnapshot || null;
+            }
             const lines = serialized ? serialized.split('\n').length : 0;
-            const lastLine = serialized ? serialized.split('\n').slice(-2)[0] : 'none'; // -2 because last is usually empty
+            const lastLine = serialized ? serialized.split('\n').slice(-2)[0] : 'none';
             Logger.debug(`Serialized terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
-            
+            this._pendingStableSnapshot = serialized;
+            this._lastNormalScreenSnapshot = serialized; // update last normal snapshot
             return serialized;
         } catch (error) {
             Logger.error(`Failed to serialize terminal ${this.id}:`, error);
-            return null;
+            return this._pendingStableSnapshot || null;
         }
+    }
+
+    _scheduleDebouncedSave() {
+        if (this._saveDebounceTimer) {
+            clearTimeout(this._saveDebounceTimer);
+        }
+        this._saveDebounceTimer = setTimeout(() => {
+            if (window.tabManager && window.tabManager.saveToLocalState) {
+                window.tabManager.saveToLocalState();
+            }
+        }, 750);
+    }
+
+    _scheduleBootReadinessCheck() {
+        if (this._bootIdleTimer) {
+            clearTimeout(this._bootIdleTimer);
+        }
+        // Wait 500ms idle after last activity to evaluate readiness
+        this._bootIdleTimer = setTimeout(() => {
+            try {
+                const buffer = this.terminal.buffer?.active;
+                if (!buffer) return;
+                const line = buffer.getLine(buffer.cursorY);
+                const text = line ? line.translateToString().trimEnd() : '';
+                // Heuristic: prompt line ends with common prompt char + space and cursor at line end
+                const cursorAtEnd = buffer.cursorX === (line ? line.translateToString().length : 0);
+                const elapsed = Date.now() - this._createdAt;
+                const promptMatch = this._promptRegex.test(text) && cursorAtEnd;
+                const timeoutFallback = elapsed > 4000; // 4s fallback to avoid indefinite suppression
+                if (promptMatch || timeoutFallback) {
+                    this._bootReady = true;
+                    this._booting = false;
+                    this._markBootReady();
+                    if (!this._bootSnapshotTaken) {
+                        // Take initial stable snapshot & persist
+                        this._bootSnapshotTaken = true;
+                        if (window.tabManager && window.tabManager.saveToLocalState) {
+                            window.tabManager.saveToLocalState();
+                        }
+                        // Also refresh stable snapshot immediately
+                        try { this.serialize(); } catch (_) {}
+                    }
+                } else {
+                    // Not ready; reschedule (still within boot window)
+                    this._scheduleBootReadinessCheck();
+                }
+            } catch (e) {
+                console.error('Boot readiness check failed:', e);
+            }
+        }, 500);
     }
     
     /**
@@ -831,6 +789,10 @@ class TerminalInstance {
             // Write content (don't trigger state save during restoration)
             this.terminal.write(serializedContent);
             window.dispatchEvent(new Event('resize'));
+            // Establish baseline snapshot so early saves can preserve history even if boot gating suppresses live serialization
+            try {
+                this._pendingStableSnapshot = serializedContent;
+            } catch (_) {}
         } catch (error) {
             Logger.error(`Failed to deserialize terminal ${this.id}:`, error);
         }
@@ -857,11 +819,7 @@ class TerminalInstance {
         
         // Restore content if available
         const contentToRestore = state.rawContent || state.serializedContent;
-        if (contentToRestore) {
-            setTimeout(() => {
-                this.deserialize(contentToRestore);
-            }, 100);
-        }
+    if (contentToRestore) this.deserialize(contentToRestore);
     }
     
     /**
@@ -926,6 +884,13 @@ class TerminalInstance {
             tabId: this.id,
             terminalType: this.terminalType
         });
+    }
+
+    startDeferredPtyIfNeeded() {
+        if (this._pendingPtyStart) {
+            this._pendingPtyStart = false;
+            this.createPtyProcess();
+        }
     }
     
     /**
@@ -1021,5 +986,96 @@ class TerminalInstance {
         } catch (error) {
             Logger.error(`Failed to dispose terminal ${this.id}:`, error);
         }
+    }
+
+    _installVisibilityHandlers() {
+        if (this._visibilityInstalled) return;
+        this._visibilityInstalled = true;
+        const container = document.getElementById('container');
+        if (container && 'ResizeObserver' in window) {
+            const ro = new ResizeObserver(() => {
+                if (this.isActive) {
+                    this.fit();
+                    // If width/height just became non-zero, force redraw sequence
+                    if (this.terminalContainer && this.terminalContainer.offsetWidth > 0 && this.terminalContainer.offsetHeight > 0) {
+                        this._scheduleRedrawSequence();
+                    }
+                }
+            });
+            ro.observe(container);
+            this._resizeObserver = ro;
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.isActive) {
+                requestAnimationFrame(() => {
+                    if (this.terminal) {
+                        this.terminal.refresh(0, this.terminal.rows - 1);
+                        this.fit();
+                        this._scheduleRedrawSequence();
+                    }
+                });
+            }
+        });
+        // WebGL context loss fallback
+        const attachWebglHandlers = () => {
+            const cvs = this.terminalContainer?.querySelectorAll('canvas') || [];
+            if (!cvs.length) return false;
+            cvs.forEach(cv => {
+                cv.addEventListener('webglcontextlost', (e) => {
+                    e.preventDefault();
+                    Logger.warn('WebGL context lost – falling back to canvas');
+                    try {
+                        const canvasAddon = new CanvasAddon.CanvasAddon();
+                        this.terminal.loadAddon(canvasAddon);
+                        this.fit();
+                        this._scheduleRedrawSequence();
+                    } catch (err) { Logger.error('Failed canvas fallback:', err); }
+                }, { passive: false });
+            });
+            return true;
+        };
+        // Try now, else poll a few animation frames
+        if (!attachWebglHandlers()) {
+            let attempts = 0;
+            const poll = () => {
+                if (attachWebglHandlers()) return;
+                if (++attempts < 10) requestAnimationFrame(poll);
+            };
+            requestAnimationFrame(poll);
+        }
+
+        // Mutation observer to detect panel moves or DOM reparenting
+        try {
+            const observer = new MutationObserver(() => {
+                if (!this.isActive) return;
+                if (!this.terminalContainer) return;
+                if (this.terminalContainer.offsetWidth === 0 || this.terminalContainer.offsetHeight === 0) return;
+                // Trigger opportunistic redraw
+                this._scheduleRedrawSequence();
+            });
+            observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+            this._mutationObserver = observer;
+        } catch (e) {
+            Logger.debug('MutationObserver unavailable:', e);
+        }
+    }
+
+    _scheduleRedrawSequence() { this._runStabilizedRedraw(); }
+
+    _runStabilizedRedraw() {
+        if (!this.terminal || this._stabilizing) return;
+        this._stabilizing = true;
+        let stable = 0, attempts = 0, lastW = -1, lastH = -1;
+        const step = () => {
+            if (!this.terminal || !this.isActive) { this._stabilizing = false; return; }
+            const w = this.terminalContainer?.offsetWidth || 0;
+            const h = this.terminalContainer?.offsetHeight || 0;
+            try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
+            if (w === lastW && h === lastH) stable++; else { stable = 0; lastW = w; lastH = h; }
+            attempts++;
+            if (stable >= 2 || attempts >= 10) { this._stabilizing = false; return; }
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
     }
 }

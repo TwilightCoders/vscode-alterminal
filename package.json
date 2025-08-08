@@ -94,6 +94,16 @@
         "icon": "$(link)"
       },
       {
+        "command": "claudePilot.setDebugFilter",
+        "title": "Set Debug Filter",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "claudePilot.clearDebugFilter",
+        "title": "Clear Debug Filter",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "claudePilot.debugMenu",
         "title": "Debug Menu",
         "icon": "$(bug)"

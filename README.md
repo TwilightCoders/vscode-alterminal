@@ -12,6 +12,8 @@ A Claude Code terminal view for VS Code that can be moved to different VS Code r
 - **Editor Integration**: Access Claude via the editor toolbar
 - **Drag & Drop Support**: Drop files and text directly into the terminal
 
+> Architecture / roadmap: See `docs/ARCHITECTURE_REVIEW_2025-08-08.md` for current technical debt, performance plan, and future direction (evolving toward a general-purpose smart terminal with profile-based auto commands, not Claude-specific).
+
 ## Usage
 
 1. Click the robot icon in the Activity Bar to open Claude Pilot

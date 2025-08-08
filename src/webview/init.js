@@ -76,6 +76,76 @@ function initializeAll() {
         const tabManager = new TabManager(vscode, terminalTheme, getThemeColor);
         // Make it globally accessible for debugging
         window.tabManager = tabManager;
+        
+        // Initialize global CMD key state tracking for two-tier link system
+        window.linkModeState = {
+            isCmdPressed: false,
+            isCtrlPressed: false
+        };
+        
+        // Add global keyboard listeners for CMD/Ctrl key detection
+        document.addEventListener('keydown', (event) => {
+            const isMac = navigator.platform.indexOf('Mac') > -1;
+            const wasCmdPressed = window.linkModeState.isCmdPressed;
+            const wasCtrlPressed = window.linkModeState.isCtrlPressed;
+            
+            console.log('🔧 KEYDOWN DEBUG:', {
+                key: event.key,
+                metaKey: event.metaKey,
+                ctrlKey: event.ctrlKey,
+                isMac: isMac,
+                currentState: { ...window.linkModeState },
+                willSetCmdPressed: (isMac && event.metaKey) || (!isMac && event.ctrlKey)
+            });
+            
+            if (isMac && event.metaKey) {
+                window.linkModeState.isCmdPressed = true;
+            } else if (!isMac && event.ctrlKey) {
+                window.linkModeState.isCtrlPressed = true;
+            }
+            
+            // If modifier key state changed, refresh link providers
+            const cmdStateChanged = (wasCmdPressed !== window.linkModeState.isCmdPressed) ||
+                                  (wasCtrlPressed !== window.linkModeState.isCtrlPressed);
+            if (cmdStateChanged && window.tabManager) {
+                console.log('🔧 CMD key state changed - refreshing link providers', {
+                    isCmdPressed: window.linkModeState.isCmdPressed,
+                    isCtrlPressed: window.linkModeState.isCtrlPressed
+                });
+                window.tabManager.refreshLinkProviders();
+            }
+        });
+        
+        document.addEventListener('keyup', (event) => {
+            const isMac = navigator.platform.indexOf('Mac') > -1;
+            const wasCmdPressed = window.linkModeState.isCmdPressed;
+            const wasCtrlPressed = window.linkModeState.isCtrlPressed;
+            
+            console.log('🔧 KEYUP DEBUG:', {
+                key: event.key,
+                metaKey: event.metaKey,
+                ctrlKey: event.ctrlKey,
+                isMac: isMac,
+                currentState: { ...window.linkModeState }
+            });
+            
+            if (isMac && !event.metaKey) {
+                window.linkModeState.isCmdPressed = false;
+            } else if (!isMac && !event.ctrlKey) {
+                window.linkModeState.isCtrlPressed = false;
+            }
+            
+            // If modifier key state changed, refresh link providers
+            const cmdStateChanged = (wasCmdPressed !== window.linkModeState.isCmdPressed) ||
+                                  (wasCtrlPressed !== window.linkModeState.isCtrlPressed);
+            if (cmdStateChanged && window.tabManager) {
+                console.log('🔧 CMD key state changed - refreshing link providers', {
+                    isCmdPressed: window.linkModeState.isCmdPressed,
+                    isCtrlPressed: window.linkModeState.isCtrlPressed
+                });
+                window.tabManager.refreshLinkProviders();
+            }
+        });
 
         // TabManager is ready - extension will send commands to create terminals
         console.log('🎯 TabManager ready - waiting for commands from extension');

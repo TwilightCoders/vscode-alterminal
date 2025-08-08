@@ -133,7 +133,7 @@ export class PtyManager {
                 case 'claude':
                     command = 'claude';
                     args = [];
-                    break;
+                    break; 
                     
                 case 'shell':
                 default:
@@ -143,10 +143,14 @@ export class PtyManager {
                     Logger.debug(`Creating claude terminal with startingCommand: "${startingCommand}"`);
                     
                     if (startingCommand === 'none') {
-                        // User wants plain shell
+                        // Plain shell always as login + interactive (restore user prompt/env)
                         command = userShell;
-                        args = process.platform === 'win32' ? [] : ['-l', '-i'];
-                        Logger.debug(`Using shell instead: ${command} with args:`, args);
+                        if (process.platform === 'win32') {
+                            args = [];
+                        } else {
+                            args = ['-l', '-i'];
+                        }
+                        Logger.debug(`Using shell instead (login+interactive): ${command} with args:`, args);
                     } else {
                         // Spawn the claude command directly
                         command = startingCommand;
@@ -158,7 +162,7 @@ export class PtyManager {
             
             Logger.debug(`About to spawn PTY with command: "${command}", args:`, args, `for terminal type: ${terminalType}`);
             
-            const ptyProcess = pty.spawn(command, args, {
+        const ptyProcess = pty.spawn(command, args, {
                 name: 'xterm-256color',
                 cols: 80,
                 rows: 30,
@@ -169,13 +173,10 @@ export class PtyManager {
                     COLORTERM: 'truecolor',
                     TERM_PROGRAM: 'vscode',
                     TERM_PROGRAM_VERSION: vscode.version,
-                    VSCODE_PID: process.pid.toString(),
-                    // Ensure PATH includes common locations
-                    PATH: process.env.PATH || '',
-                    // Force interactive shell features for shell terminals
-                    PS1: process.env.PS1 || '$ ',
-                    // Ensure shell environment is preserved
-                    SHELL: userShell
+            VSCODE_PID: process.pid.toString(),
+            PATH: process.env.PATH || '',
+            // Preserve user PS1; do NOT override (overrides can expose raw control chars)
+            SHELL: userShell
                 } as { [key: string]: string }
             });
 
@@ -196,6 +197,7 @@ export class PtyManager {
             
             // Start monitoring the process name for this tab
             this._startProcessMonitoring(tabId);
+
         }
     }
 

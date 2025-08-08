@@ -10,11 +10,16 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private _ptyManager: PtyManager;
     private _terminalInitialized = false;
     private _context: vscode.ExtensionContext;
+    private _fileWatcher?: vscode.FileSystemWatcher;
+    private _workspaceFiles = new Set<string>();
+    private _didInitialRestore = false;
 
     constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext, ptyManager: PtyManager) {
         ClaudeCodeProvider._instance = this;
         this._context = context;
         this._ptyManager = ptyManager;
+        
+        // GitHub authentication will be checked after webview is ready
     }
 
 
@@ -58,6 +63,9 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
 
         // Set up message router with component delegation
         this.setupMessageRouter(webviewView);
+        
+        // Initialize workspace file cache
+        this.initializeWorkspaceFileCache();
     }
 
     /**
@@ -70,7 +78,12 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         webviewView.onDidChangeVisibility(() => {
             Logger.debug('👁️ Webview visibility changed:', webviewView.visible ? 'VISIBLE' : 'HIDDEN');
             if (webviewView.visible) {
-                this.restoreWebviewState();
+                // Avoid re-running full restoration if already done; just ask webview to refresh layout
+                if (!this._didInitialRestore) {
+                    this.restoreWebviewState();
+                } else {
+                    this._view?.webview.postMessage({ command: 'refreshActive' });
+                }
             }
             // Note: We no longer save state on visibility change since webview handles it synchronously
         });
@@ -93,10 +106,20 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             openUrl: (msg: any) => this._handleOpenUrl(msg.url),
             stateUpdate: (msg: any) => this._handleBackupStateUpdate(msg.state),
             stateResponse: (msg: any) => this._handleBackupStateUpdate(msg.state),
-            webviewReady: () => this.restoreWebviewState(),
+            webviewReady: () => {
+                this.restoreWebviewState();
+                // Check GitHub authentication after webview is ready
+                this._checkGitHubAuthentication();
+            },
             switchTab: () => {}, // No-op - handled in webview
             playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
             testLinks: () => this._handleTestLinks(),
+            requestFileCache: () => this._sendWorkspaceFileCache(),
+            checkFileExists: (msg: any) => this._handleCheckFileExists(msg.filePath),
+            setDebugFilter: (msg: any) => {}, // Handled in webview
+            debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
+            setDeveloperMode: (msg: any) => {}, // Handled in webview
+            performanceReport: (msg: any) => this._showPerformanceReport(msg.data)
         };
 
         webviewView.webview.onDidReceiveMessage(
@@ -124,10 +147,69 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         );
     }
 
-    public refresh() {
-        if (this._view) {
-            this._view.webview.postMessage({ command: 'refresh' });
-        }
+    public async requestPerformanceReport() {
+        if (!this._view) return;
+        this._view.webview.postMessage({ command: 'collectPerformance' });
+    }
+
+    private _showPerformanceReport(data: any) {
+        if (!data) return;
+        const summary = `Terminals: ${data.count}\nAvg Init: ${data.avgInit.toFixed(1)}ms\nAvg Open->Active: ${data.avgOpenToActive.toFixed(1)}ms`;
+        vscode.window.showInformationMessage('Performance Report', { modal: true, detail: summary });
+        Logger.debug('📊 Performance detail:', data.samples);
+    }
+
+    public async refresh() {
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Restarting Claude Pilot...",
+            cancellable: false
+        }, async (progress) => {
+            try {
+                progress.report({ increment: 0, message: "Disposing terminals..." });
+                
+                // Kill all PTY processes
+                this._ptyManager.dispose();
+                
+                progress.report({ increment: 25, message: "Clearing caches..." });
+                
+                // Clear workspace file cache
+                this._workspaceFiles.clear();
+                
+                // Clear extension state (optional - might want to preserve some settings)
+                // await this._context.workspaceState.clear();
+                
+                progress.report({ increment: 50, message: "Disposing webview..." });
+                
+                // Dispose file watcher
+                if (this._fileWatcher) {
+                    this._fileWatcher.dispose();
+                    this._fileWatcher = undefined;
+                }
+                
+                progress.report({ increment: 75, message: "Reinitializing..." });
+                
+                // Reset webview HTML to force complete reload
+                if (this._view) {
+                    const timeNow = new Date().getTime();
+                    this._view.webview.html = TemplateUtils.getHtmlTemplate(this._extensionUri, this._view.webview, timeNow);
+                }
+                
+                // Reinitialize file system watcher
+                this._setupFileSystemWatcher();
+                
+                // Send fresh workspace file cache
+                this._sendWorkspaceFileCache();
+                
+                progress.report({ increment: 100, message: "Complete!" });
+                
+                vscode.window.showInformationMessage('Claude Pilot restarted successfully!');
+                
+            } catch (error) {
+                console.error('Error during refresh:', error);
+                vscode.window.showErrorMessage(`Failed to restart Claude Pilot: ${error}`);
+            }
+        });
     }
 
 
@@ -187,6 +269,26 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             if (filePath.startsWith('~/')) {
                 const homeDir = require('os').homedir();
                 resolvedPath = filePath.replace('~', homeDir);
+            }
+            
+            // Workspace containment guard (only allow outside workspace with confirmation)
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (workspaceRoot) {
+                const path = require('path');
+                const relative = path.relative(workspaceRoot, resolvedPath);
+                const isOutside = relative.startsWith('..') || path.isAbsolute(relative) && !resolvedPath.startsWith(workspaceRoot);
+                if (isOutside) {
+                    const choice = await vscode.window.showWarningMessage(
+                        `Open external file outside workspace?\n${resolvedPath}`,
+                        { modal: true, detail: 'Links are limited to workspace files for safety. Proceed only if you trust the source.' },
+                        'Open',
+                        'Cancel'
+                    );
+                    if (choice !== 'Open') {
+                        Logger.debug('Open file cancelled (outside workspace):', resolvedPath);
+                        return;
+                    }
+                }
             }
             
             const uri = vscode.Uri.file(resolvedPath);
@@ -308,14 +410,230 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
                     command: 'initializeEmpty'
                 });
             }
+            this._didInitialRestore = true;
         } catch (error) {
             Logger.error('❌ Failed to restore webview state:', error);
         }
     }
 
 
+    /**
+     * Initialize workspace file cache with file system watcher
+     */
+    private async initializeWorkspaceFileCache() {
+        Logger.debug('📁 Initializing workspace file cache');
+        
+        try {
+            // Load cached files from workspace state
+            const cachedFiles = this._context.workspaceState.get<string[]>('workspaceFiles', []);
+            this._workspaceFiles = new Set(cachedFiles);
+            Logger.debug(`📁 Loaded ${cachedFiles.length} cached files from workspace state`);
+            
+            // Send initial cache to webview
+            this._sendWorkspaceFileCache();
+            
+            // Update cache with current workspace files
+            await this._updateWorkspaceFileCache();
+            
+            // Set up file system watcher
+            this._setupFileSystemWatcher();
+        } catch (error) {
+            Logger.error('Failed to initialize workspace file cache:', error);
+        }
+    }
+    
+    /**
+     * Update workspace file cache by scanning filesystem
+     */
+    private async _updateWorkspaceFileCache() {
+        Logger.debug('🔄 Updating workspace file cache');
+        
+        try {
+            const files = await vscode.workspace.findFiles(
+                '**/*',
+                '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**}'
+            );
+            
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                Logger.warn('No workspace folder found');
+                return;
+            }
+            
+            // Convert to relative paths for better matching with terminal output
+            const relativePaths = files.map(f => {
+                const relativePath = vscode.workspace.asRelativePath(f);
+                return relativePath;
+            });
+            
+            // Also add common relative path variations
+            const allPaths = new Set(relativePaths);
+            relativePaths.forEach(path => {
+                // Add ./ prefix version for relative paths that don't start with ../
+                if (!path.startsWith('../')) {
+                    allPaths.add('./' + path);
+                }
+            });
+            
+            const filePathsArray = Array.from(allPaths);
+            this._workspaceFiles = new Set(filePathsArray);
+            
+            // Store in workspace state
+            await this._context.workspaceState.update('workspaceFiles', filePathsArray);
+            
+            // Send to webview
+            this._sendWorkspaceFileCache();
+            
+            Logger.debug(`📁 Updated workspace file cache with ${filePathsArray.length} files (${relativePaths.length} base + variations)`);
+        } catch (error) {
+            Logger.error('Failed to update workspace file cache:', error);
+        }
+    }
+    
+    /**
+     * Check GitHub authentication and log user ID for developer detection
+     */
+    private async _checkGitHubAuthentication() {
+        try {
+            console.log('Attempting GitHub authentication check...');
+            
+            // Check available GitHub accounts (this works!)
+            const authProviders = await vscode.authentication.getAccounts('github');
+            console.log('Available GitHub accounts:', authProviders);
+            
+            // Check if developer (you) is signed in
+            console.log('=== DEVELOPER DETECTION DEBUG ===');
+            const isDeveloper = authProviders.some(account => 
+                account.id === '1700514'
+            );
+            console.log('=== DEVELOPER DETECTION ===');
+            console.log('Is Developer (volte):', isDeveloper);
+            console.log('==========================');
+            
+            // Send developer status to webview
+            if (this._view) {
+                this._view.webview.postMessage({
+                    command: 'setDeveloperMode',
+                    enabled: isDeveloper
+                });
+                console.log('Developer mode', isDeveloper ? 'enabled' : 'disabled', 'for webview');
+            }
+            
+        } catch (error) {
+            console.log('GitHub authentication check failed:', error);
+        }
+    }
+
+    /**
+     * Set up file system watcher for cache updates
+     */
+    private _setupFileSystemWatcher() {
+        // Dispose existing watcher
+        if (this._fileWatcher) {
+            this._fileWatcher.dispose();
+        }
+        
+        // Create new watcher
+        this._fileWatcher = vscode.workspace.createFileSystemWatcher(
+            '**/*',
+            false, // Don't ignore creates
+            true,  // Ignore changes (we only care about file existence)
+            false  // Don't ignore deletes
+        );
+        
+        // Handle file creation
+        this._fileWatcher.onDidCreate(uri => {
+            const relativePath = vscode.workspace.asRelativePath(uri);
+            this._workspaceFiles.add(relativePath);
+            // Also add ./ prefix version if it doesn't start with ../
+            if (!relativePath.startsWith('../')) {
+                this._workspaceFiles.add('./' + relativePath);
+            }
+            this._updateWorkspaceStateCache();
+            Logger.debug('📁 File created:', relativePath);
+        });
+        
+        // Handle file deletion
+        this._fileWatcher.onDidDelete(uri => {
+            const relativePath = vscode.workspace.asRelativePath(uri);
+            this._workspaceFiles.delete(relativePath);
+            this._workspaceFiles.delete('./' + relativePath);
+            this._updateWorkspaceStateCache();
+            Logger.debug('📁 File deleted:', relativePath);
+        });
+        
+        Logger.debug('👁️ File system watcher set up');
+    }
+    
+    /**
+     * Update workspace state with current file cache (debounced)
+     */
+    private _updateWorkspaceStateCache = this._debounce(() => {
+        const filePaths = Array.from(this._workspaceFiles);
+        this._context.workspaceState.update('workspaceFiles', filePaths);
+        this._sendWorkspaceFileCache();
+    }, 500);
+    
+    /**
+     * Send workspace file cache to webview
+     */
+    private _sendWorkspaceFileCache() {
+        if (!this._view) return;
+        
+        const filePaths = Array.from(this._workspaceFiles);
+        this._view.webview.postMessage({
+            command: 'updateFileCache',
+            files: filePaths
+        });
+        
+        Logger.debug(`📤 Sent ${filePaths.length} files to webview cache`);
+    }
+    
+    /**
+     * Handle individual file existence check
+     */
+    private _handleCheckFileExists(filePath: string) {
+        const exists = this._workspaceFiles.has(filePath);
+        
+        if (this._view) {
+            this._view.webview.postMessage({
+                command: 'fileExistsResponse',
+                filePath: filePath,
+                exists: exists
+            });
+        }
+        
+        Logger.debug(`🔍 File existence check: ${filePath} -> ${exists}`);
+    }
+    
+    /**
+     * Simple debounce utility
+     */
+    private _debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
+        let timeout: NodeJS.Timeout;
+        return ((...args: any[]) => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        }) as T;
+    }
+
+    public setDebugFilter(filter: string[] | null) {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                command: 'setDebugFilter', 
+                filter: filter 
+            });
+        }
+    }
+
     public dispose() {
         Logger.debug('⚠️ Disposing ClaudeCodeProvider');
+        
+        // Dispose file watcher
+        if (this._fileWatcher) {
+            this._fileWatcher.dispose();
+        }
+        
         // Note: State is already saved synchronously by webview, no need for async save here
         this._ptyManager.dispose();
     }
