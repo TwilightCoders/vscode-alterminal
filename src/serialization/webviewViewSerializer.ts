@@ -31,6 +31,7 @@ export class WebviewViewSerializer {
     private static readonly STORAGE_KEY = 'claudePilot.webviewState';
     private _webviewView?: vscode.WebviewView;
     private _context: vscode.ExtensionContext;
+    private _didInitialViewRestore = false;
 
     constructor(context: vscode.ExtensionContext) {
         this._context = context;
@@ -75,18 +76,18 @@ export class WebviewViewSerializer {
         if (!this._webviewView) return;
 
         const savedState = this.loadFromExtensionStorage(this._context);
-        
-        if (savedState && savedState.terminals && savedState.terminals.length > 0) {
-            console.log('📤 Sending restore commands for', savedState.terminals.length, 'terminals');
-            this._webviewView.webview.postMessage({ 
-                command: 'restoreState', 
-                state: savedState 
-            });
+        if (!this._didInitialViewRestore) {
+            if (savedState && savedState.terminals && savedState.terminals.length > 0) {
+                console.log('📤 (cold) restoring', savedState.terminals.length, 'terminals');
+                this._webviewView.webview.postMessage({ command: 'restoreState', state: savedState, cold: true });
+            } else {
+                console.log('📤 (cold) no saved state - initializeEmpty');
+                this._webviewView.webview.postMessage({ command: 'initializeEmpty' });
+            }
+            this._didInitialViewRestore = true;
         } else {
-            console.log('📤 No saved state - sending command to create default terminal');
-            this._webviewView.webview.postMessage({ 
-                command: 'initializeEmpty'
-            });
+            console.log('📤 (warm) focus refresh');
+            this._webviewView.webview.postMessage({ command: 'focus' });
         }
     }
 
@@ -243,20 +244,5 @@ export class WebviewViewSerializer {
             rawContent: terminal.serialize() || '',
             terminalType: terminal.terminalType || 'claude'
         };
-    }
-
-    /**
-     * Deserialize and restore individual terminal content
-     */
-    private deserializeTerminalContent(data: SerializedTerminal, terminal: any): void {
-        terminal.label = data.label;
-        terminal.terminalType = data.terminalType || 'claude';
-        
-        // Restore content if available
-        if (data.rawContent) {
-            setTimeout(() => {
-                terminal.deserialize(data.rawContent);
-            }, 100);
-        }
     }
 }

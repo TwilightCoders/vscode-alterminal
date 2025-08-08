@@ -279,6 +279,35 @@ export class PtyManager {
         }
     }
 
+    /**
+     * Check if we have any running PTY processes (indicates warm boot)
+     */
+    public hasRunningProcesses(): boolean {
+        const hasProcesses = this._ptyProcesses.size > 0;
+        console.log('🔧 PtyManager.hasRunningProcesses():', {
+            processCount: this._ptyProcesses.size,
+            hasProcesses,
+            processKeys: Array.from(this._ptyProcesses.keys())
+        });
+        return hasProcesses;
+    }
+
+    /**
+     * Get information about running PTY processes
+     */
+    public getRunningProcessInfo(): Array<{tabId: number, terminalType: string, processName: string}> {
+        const info = [];
+        for (const [tabId, ptyProcess] of this._ptyProcesses.entries()) {
+            info.push({
+                tabId,
+                terminalType: this._terminalTypes.get(tabId) || 'unknown',
+                processName: this._currentProcessNames.get(tabId) || 'shell'
+            });
+        }
+        console.log('🔧 PtyManager.getRunningProcessInfo():', info);
+        return info;
+    }
+
     
     /**
      * Start monitoring the current process name for a tab

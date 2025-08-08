@@ -12,14 +12,12 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private _context: vscode.ExtensionContext;
     private _fileWatcher?: vscode.FileSystemWatcher;
     private _workspaceFiles = new Set<string>();
-    private _didInitialRestore = false;
+    private _isColdBoot = true; // determined once at construction/activation
 
     constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext, ptyManager: PtyManager) {
         ClaudeCodeProvider._instance = this;
         this._context = context;
         this._ptyManager = ptyManager;
-        
-        // GitHub authentication will be checked after webview is ready
     }
 
 
@@ -53,10 +51,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
 
         this._terminalInitialized = true;
 
-        // Initial state restoration after webview loads
-        setTimeout(() => {
-            this.restoreWebviewState();
-        }, 100);
+        // State restoration will happen when webview emits 'webviewReady' event
 
         // Monitor webview visibility changes and lifecycle
         this.setupWebviewLifecycle(webviewView);
@@ -74,18 +69,13 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private setupWebviewLifecycle(webviewView: vscode.WebviewView) {
         Logger.debug('⚠️ Setting up webview lifecycle handlers');
         
-        // Monitor visibility changes
+        // Monitor visibility changes (no restoration here - purely event-driven via webviewReady)
         webviewView.onDidChangeVisibility(() => {
             Logger.debug('👁️ Webview visibility changed:', webviewView.visible ? 'VISIBLE' : 'HIDDEN');
             if (webviewView.visible) {
-                // Avoid re-running full restoration if already done; just ask webview to refresh layout
-                if (!this._didInitialRestore) {
-                    this.restoreWebviewState();
-                } else {
-                    this._view?.webview.postMessage({ command: 'refreshActive' });
-                }
+                // Just refresh active state, restoration happens via webviewReady event
+                this._view?.webview.postMessage({ command: 'refreshActive' });
             }
-            // Note: We no longer save state on visibility change since webview handles it synchronously
         });
         
         // Monitor disposal
@@ -398,21 +388,29 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             // Get saved backup state from extension context (webview handles primary state itself)
             const backupState = this._context.workspaceState.get('claudePilot.webviewState') as any;
             
+            console.log('📤 Restoring webview state:', {
+                isColdBoot: this._isColdBoot,
+                hasBackupState: !!(backupState && backupState.terminals && backupState.terminals.length > 0)
+            });
             if (backupState && backupState.terminals && backupState.terminals.length > 0) {
-                Logger.debug('📤 Sending restore command with backup state:', backupState.terminals.length, 'terminals');
+                Logger.debug('📤 Sending restoreState (cold=' + this._isColdBoot + ') with', backupState.terminals.length, 'terminals');
                 this._view.webview.postMessage({ 
                     command: 'restoreState', 
-                    state: backupState 
+                    state: backupState,
+                    cold: this._isColdBoot
                 });
             } else {
-                Logger.debug('📤 No backup state - sending initialize command');
+                Logger.debug('📤 No backup state - sending initialize (cold=' + this._isColdBoot + ')');
                 this._view.webview.postMessage({ 
-                    command: 'initializeEmpty'
+                    command: 'initializeEmpty',
+                    cold: this._isColdBoot
                 });
             }
-            this._didInitialRestore = true;
+            
         } catch (error) {
             Logger.error('❌ Failed to restore webview state:', error);
+        } finally {
+            this._isColdBoot = false;
         }
     }
 
@@ -421,13 +419,11 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
      * Initialize workspace file cache with file system watcher
      */
     private async initializeWorkspaceFileCache() {
-        Logger.debug('📁 Initializing workspace file cache');
         
         try {
             // Load cached files from workspace state
             const cachedFiles = this._context.workspaceState.get<string[]>('workspaceFiles', []);
             this._workspaceFiles = new Set(cachedFiles);
-            Logger.debug(`📁 Loaded ${cachedFiles.length} cached files from workspace state`);
             
             // Send initial cache to webview
             this._sendWorkspaceFileCache();
@@ -484,7 +480,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             // Send to webview
             this._sendWorkspaceFileCache();
             
-            Logger.debug(`📁 Updated workspace file cache with ${filePathsArray.length} files (${relativePaths.length} base + variations)`);
         } catch (error) {
             Logger.error('Failed to update workspace file cache:', error);
         }
@@ -550,7 +545,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
                 this._workspaceFiles.add('./' + relativePath);
             }
             this._updateWorkspaceStateCache();
-            Logger.debug('📁 File created:', relativePath);
         });
         
         // Handle file deletion
@@ -559,7 +553,6 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             this._workspaceFiles.delete(relativePath);
             this._workspaceFiles.delete('./' + relativePath);
             this._updateWorkspaceStateCache();
-            Logger.debug('📁 File deleted:', relativePath);
         });
         
         Logger.debug('👁️ File system watcher set up');

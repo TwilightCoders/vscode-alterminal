@@ -36,6 +36,10 @@ class TabManager {
         this.activeTabId = null;
         this.nextTabId = 1;
         this.isInitialized = false;
+    // Cold/warm restore tracking (minimal)
+    this._hasCompletedInitialRestore = false; // becomes true after first restore IN THIS WEBVIEW INSTANCE only
+    this._historyBannerInjected = false; // guards single injection of History Restored banner for this restore cycle
+    this._historyBannerShownEver = false; // persisted (via vscode.setState) across webview instances to avoid re-showing banner
         
         // Initialize everything
         this.initializeEventListeners();
@@ -68,24 +72,27 @@ class TabManager {
             try {
                 switch (message.command) {
                     case 'restoreState':
-                        Logger.debug('🔄 Received restoreState command with state:', message.state);
-                        Logger.debug('🔄 Current terminals before restore:', this.terminals.size);
+                        Logger.debug('🔄 Received restoreState terminals:', message.state?.terminals?.length, 'existing:', this.terminals.size, 'providerColdFlag:', !!message.cold);
+                        if (this.terminals.size > 0) {
+                            Logger.debug('⏭️ Skipping restoreState (already have terminals) treating as warm focus');
+                            break;
+                        }
                         
                         // Try webview state first, then fall back to extension state
                         const webviewState = vscode.getState();
-                        // If we've ever shown the history banner before in a previous webview instance, mark internal flag
+                        // If we've ever shown the history banner before in ANY previous webview instance, record it separately
                         if (webviewState && webviewState.historyBannerShownOnce) {
-                            this._hasCompletedInitialRestore = true;
+                            this._historyBannerShownEver = true;
                         }
                         if (webviewState && webviewState.fullTabState) {
                             Logger.debug('🔄 Using webview state (more recent)');
-                            this.restoreFromState(webviewState.fullTabState);
+                            this.restoreFromState(webviewState.fullTabState, !!message.cold);
                         } else if (message.state) {
                             Logger.debug('🔄 Using extension state (fallback)');
-                            this.restoreFromState(message.state);
+                            this.restoreFromState(message.state, !!message.cold);
                         } else {
                             Logger.debug('🔄 No state available, creating default');
-                            this.restoreFromState(this.createDefaultState());
+                            this.restoreFromState(this.createDefaultState(), !!message.cold);
                         }
                         break;
                         
@@ -96,11 +103,11 @@ class TabManager {
                         const existingState = vscode.getState();
                         if (existingState && existingState.fullTabState) {
                             Logger.debug('🔄 Found existing webview state, restoring instead of creating empty');
-                            this.restoreFromState(existingState.fullTabState);
+                            this.restoreFromState(existingState.fullTabState, !!message.cold);
                         } else {
                             Logger.debug('🆕 No existing state, creating default terminal');
                             const defaultState = this.createDefaultState();
-                            this.restoreFromState(defaultState);
+                            this.restoreFromState(defaultState, !!message.cold);
                         }
                         break;
                         
@@ -125,6 +132,13 @@ class TabManager {
                         const activeTerminal = this.getActiveTerminal();
                         if (activeTerminal) {
                             activeTerminal.fit();
+                        }
+                        break;
+                    case 'focus':
+                        // Warm focus: just refresh active terminal visuals
+                        const act = this.getActiveTerminal();
+                        if (act && act.terminal) {
+                            try { act.terminal.refresh(0, act.terminal.rows - 1); act.fit(); } catch(_) {}
                         }
                         break;
                         
@@ -173,29 +187,23 @@ class TabManager {
                         break;
                         
                     case 'updateFileCache':
-                        Logger.debug('📁 Received workspace file cache update:', message.files?.length, 'files');
                         window.workspaceFileCache = new Set(message.files || []);
                         
                         // Debug: Log first few files to see the format
-                        Logger.debug('📁 First 10 cached files:');
                         const firstTen = Array.from(window.workspaceFileCache).slice(0, 10);
-                        firstTen.forEach(file => Logger.debug('📁 Cached file:', file));
                         
                         // Check if package.json is in cache
                         const hasPackageJson = window.workspaceFileCache.has('package.json');
-                        Logger.debug('📁 Cache has package.json (exact):', hasPackageJson);
                         
                         // Check for files ending with package.json
                         let foundPackageJson = false;
                         for (const file of window.workspaceFileCache) {
                             if (file.endsWith('package.json')) {
-                                Logger.debug('📁 Found package.json as:', file);
                                 foundPackageJson = true;
                                 break;
                             }
                         }
                         if (!foundPackageJson) {
-                            Logger.debug('📁 No package.json found in cache');
                         }
                         break;
                         
@@ -487,6 +495,12 @@ class TabManager {
         this.activeTabId = tabId;
         
         // Tab switching is now purely UI-level, no need to notify extension host
+        // Persist active tab change immediately so reload restores correct tab
+        try {
+            this.saveToLocalState();
+        } catch (e) {
+            Logger.warn('Could not persist state after tab switch:', e);
+        }
     }
     
     /**
@@ -726,18 +740,13 @@ class TabManager {
     /**
      * Restore terminals from saved state
      */
-    restoreFromState(savedState) {
+    restoreFromState(savedState, isColdBoot = false) {
         Logger.debug('TabManager.restoreFromState() called with:', { 
             hasState: !!savedState, 
             terminalCount: savedState?.terminals?.length,
             terminals: savedState?.terminals?.map(t => ({ id: t.id, label: t.label, type: t.terminalType }))
         });
 
-    // Determine if this is a true cold restore (first time webview boot) versus a redraw
-    const isColdBoot = !this._hasCompletedInitialRestore;
-    // Track whether we injected a history banner this cold boot
-    this._historyBannerInjected = this._historyBannerInjected || false;
-        
         // If no state or empty state, manufacture a default state
         if (!savedState || !savedState.terminals || savedState.terminals.length === 0) {
             Logger.warn('⚠️ No valid saved state, manufacturing default state');
@@ -783,14 +792,22 @@ class TabManager {
             // Restore terminal content using new format
             terminal.label = terminalData.label;
             terminal.terminalType = terminalData.terminalType || 'claude';
-            terminal.whenOpened.then(() => {
-                if (terminalData.rawContent) {
-                    Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', terminalData.rawContent.length);
-                    terminalData.rawContent += "\n\n* History Restored\n\n";
-                } else {
-                    Logger.debug('🔄 No persisted content for terminal', terminalData.id, '- starting PTY on open');
+            
+            // Decide what content to load without mutating persisted snapshot
+            let contentToLoad = terminalData.rawContent || '';
+
+            if (contentToLoad) {
+                Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', contentToLoad.length);
+                if (isColdBoot) {
+                    Logger.debug('🏁 Injecting one-time history banner (cold boot)');
+                    contentToLoad += '\n\n* History Restored\n';
                 }
-                terminal.deserialize(terminalData.rawContent);
+            } else {
+                Logger.debug('🔄 No persisted content for terminal', terminalData.id, '- starting PTY on open');
+            }
+            
+            terminal.whenOpened.then(() => {
+                terminal.deserialize(contentToLoad);
                 try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error:', e); }
             });
             
@@ -821,25 +838,13 @@ class TabManager {
         // Show the interface after restoring
         this.showInterface();
         
-        // Mark as initialized after successful restoration
-        this.isInitialized = true;
-    this._hasCompletedInitialRestore = true;
-        if (isColdBoot) {
-            // Persist a flag so future webview instances know not to re-show the banner
-            try {
-                const existing = vscode.getState() || {};
-                vscode.setState({
-                    ...existing,
-                    fullTabState: savedState,
-                    timestamp: Date.now(),
-                    historyBannerShownOnce: true
-                });
-            } catch (e) {
-                Logger.warn('Could not persist historyBannerShownOnce flag:', e);
-            }
-        }
-        
-        
+        const existing = vscode.getState() || {};
+        vscode.setState({
+            ...existing,
+            fullTabState: savedState,
+            timestamp: Date.now()
+        });
+    
         // Once all terminals are boot ready, take a single baseline save
         try {
             const allBootPromises = Array.from(this.terminals.values()).map(t => t.whenBootReady.catch(()=>{}));
@@ -867,7 +872,7 @@ class TabManager {
                 fullTabState: fullState,
                 timestamp: Date.now(),
                 // Ensure persistence of the one-time banner flag once we've done a cold boot
-                historyBannerShownOnce: prior.historyBannerShownOnce || this._hasCompletedInitialRestore || false
+                historyBannerShownOnce: prior.historyBannerShownOnce || this._historyBannerShownEver || false
             });
             
             // OPTIONALLY also send to extension for backup (non-critical, async)

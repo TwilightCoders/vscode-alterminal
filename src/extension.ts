@@ -11,13 +11,6 @@ export function activate(context: vscode.ExtensionContext) {
     const isDebugMode = process.env.NODE_ENV === 'development' || 
                        context.extensionMode === vscode.ExtensionMode.Development;
     
-    Logger.debug('📁 Extension context:', {
-        extensionPath: context.extensionPath,
-        globalState: 'available',
-        workspaceState: 'available',
-        subscriptions: context.subscriptions.length,
-        debugMode: isDebugMode
-    });
     
     // Set debug mode context for conditional UI
     vscode.commands.executeCommand('setContext', 'claudePilot.debugMode', isDebugMode);
