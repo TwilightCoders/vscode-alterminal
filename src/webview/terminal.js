@@ -52,7 +52,15 @@ class TerminalInstance {
         
         // State management
         this.isActive = false;
-        this.hasBellIndicator = false;
+        
+        // Tab indicator tracking (bitmask for space efficiency)
+        this._tabIndicators = 0; // All indicators start disabled
+        
+        // Indicator bit positions (bell takes precedence over activity)
+        this.INDICATORS = {
+            ACTIVITY: 1 << 0,  // bit 0 - activity indicator (...)
+            BELL: 1 << 1       // bit 1 - bell indicator (🔔) - higher precedence
+        };
         
         // Terminal mode tracking (bitmask for space efficiency)
         this._terminalModes = 0; // All modes start disabled
@@ -602,6 +610,12 @@ class TerminalInstance {
             // 3. Write original data to terminal (let xterm.js handle modes properly)
             this.terminal.write(data);
             this._lastWriteTs = Date.now();
+            
+            // 4. Track activity for inactive tabs (like macOS Terminal)
+            if (!this.isActive && !this.hasIndicator(this.INDICATORS.ACTIVITY)) {
+                this.showActivityIndicator();
+            }
+            
             if (this._booting) {
                 this._bootLastActivity = Date.now();
                 this._scheduleBootReadinessCheck();
@@ -663,11 +677,12 @@ class TerminalInstance {
         }
         
         if (active) {
-            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active, hasBellIndicator: ${this.hasBellIndicator}`);
-            // Clear bell indicator when tab becomes active
-            if (this.hasBellIndicator) {
-                console.log(`🔔 BELL DEBUG: Clearing bell indicator for tab ${this.id}`);
-                this.clearBellIndicator();
+            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active, indicators: ${this._tabIndicators}`);
+            // Clear all indicators when tab becomes active
+            if (this._tabIndicators !== 0) {
+                console.log(`🔔 BELL DEBUG: Clearing all indicators for tab ${this.id}`);
+                this._tabIndicators = 0;
+                this.updateTabIndicator();
             }
             
             queueMicrotask(() => {
@@ -694,73 +709,14 @@ class TerminalInstance {
      * Show bell indicator in tab (without VS Code notification)
      */
     showBellIndicatorOnly() {
-        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
-        if (!tabElement) return;
-        
-        // Check if bell indicator already exists to avoid duplicates
-        let bellIndicator = tabElement.querySelector('.bell-indicator');
-        if (!bellIndicator) {
-            // Create bell indicator
-            bellIndicator = document.createElement('span');
-            bellIndicator.className = 'bell-indicator codicon codicon-bell';
-            bellIndicator.style.cssText = `
-                margin-left: 4px;
-                opacity: 1;
-                transition: opacity 0.3s ease;
-                color: orange;
-                animation: pulse 1s infinite;
-            `;
-            
-            // Insert bell before close button
-            const closeBtn = tabElement.querySelector('.tab-close');
-            if (closeBtn) {
-                tabElement.insertBefore(bellIndicator, closeBtn);
-            } else {
-                tabElement.appendChild(bellIndicator);
-            }
-        } else {
-            // Reset opacity if indicator already exists
-            bellIndicator.style.opacity = '1';
-        }
-        
-        // Mark that this terminal has an unread bell
-        this.hasBellIndicator = true;
+        this.setIndicator(this.INDICATORS.BELL, true);
     }
 
     /**
      * Show bell indicator in tab (with VS Code notification)
      */
     showBellIndicator() {
-        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
-        if (!tabElement) return;
-        
-        // Check if bell indicator already exists to avoid duplicates
-        let bellIndicator = tabElement.querySelector('.bell-indicator');
-        if (!bellIndicator) {
-            // Create bell indicator
-            bellIndicator = document.createElement('span');
-            bellIndicator.className = 'bell-indicator codicon codicon-bell';
-            bellIndicator.style.cssText = `
-                margin-left: 4px;
-                opacity: 1;
-                transition: opacity 0.3s ease;
-                color: var(--vscode-notificationsWarningIcon-foreground, #ffcc02);
-            `;
-            
-            // Insert bell before close button
-            const closeBtn = tabElement.querySelector('.tab-close');
-            if (closeBtn) {
-                tabElement.insertBefore(bellIndicator, closeBtn);
-            } else {
-                tabElement.appendChild(bellIndicator);
-            }
-        } else {
-            // Reset opacity if indicator already exists
-            bellIndicator.style.opacity = '1';
-        }
-        
-        // Mark that this terminal has an unread bell
-        this.hasBellIndicator = true;
+        this.setIndicator(this.INDICATORS.BELL, true);
         
         // Play sound notification and include tab info for navigation
         this.vscode.postMessage({
@@ -770,32 +726,99 @@ class TerminalInstance {
         });
     }
     
+    
     /**
-     * Clear bell indicator when tab becomes active
+     * Helper methods for indicator bitmask management
      */
-    clearBellIndicator() {
-        console.log(`🔔 BELL DEBUG: clearBellIndicator called for tab ${this.id}`);
-        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
-        if (!tabElement) {
-            console.log(`🔔 BELL DEBUG: No tab element found for tab ${this.id}`);
-            return;
-        }
-        
-        const bellIndicator = tabElement.querySelector('.bell-indicator');
-        if (bellIndicator) {
-            console.log(`🔔 BELL DEBUG: Found bell indicator, fading out`);
-            const el = bellIndicator;
-            const remove = () => { if (el && el.parentNode) { console.log(`🔔 BELL DEBUG: Removing bell indicator from DOM`); el.parentNode.removeChild(el); } };
-            el.addEventListener('transitionend', remove, { once: true });
-            // Fallback in case no transition fires (style override): microtask remove
-            queueMicrotask(() => { if (!document.body.contains(el)) return; if (getComputedStyle(el).transitionDuration === '0s') remove(); });
-            el.style.opacity = '0';
+    hasIndicator(indicator) {
+        return (this._tabIndicators & indicator) !== 0;
+    }
+    
+    setIndicator(indicator, enabled) {
+        if (enabled) {
+            this._tabIndicators |= indicator;
         } else {
-            console.log(`🔔 BELL DEBUG: No bell indicator found in tab`);
+            this._tabIndicators &= ~indicator;
+        }
+        this.updateTabIndicator();
+    }
+    
+    /**
+     * Update the visual tab indicator based on current state
+     * Bell takes precedence over activity
+     */
+    updateTabIndicator() {
+        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
+        if (!tabElement) return;
+        
+        // Remove any existing indicators
+        const existingIndicator = tabElement.querySelector('.tab-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
         }
         
-        this.hasBellIndicator = false;
-        console.log(`🔔 BELL DEBUG: Set hasBellIndicator to false for tab ${this.id}`);
+        // Determine which indicator to show (bell takes precedence)
+        let indicatorConfig = null;
+        if (this.hasIndicator(this.INDICATORS.BELL)) {
+            indicatorConfig = {
+                className: 'tab-indicator bell-indicator codicon codicon-bell',
+                text: '',
+                style: `
+                    margin-left: 4px;
+                    color: var(--vscode-notificationsWarningIcon-foreground, #ffcc02);
+                    font-size: 12px;
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                `
+            };
+        } else if (this.hasIndicator(this.INDICATORS.ACTIVITY)) {
+            indicatorConfig = {
+                className: 'tab-indicator activity-indicator',
+                text: '...',
+                style: `
+                    margin-left: 4px;
+                    color: var(--vscode-tab-unfocusedInactiveForeground, #888);
+                    font-size: 11px;
+                    opacity: 0;
+                    transition: opacity 0.2s ease;
+                `
+            };
+        }
+        
+        // Create and show the indicator if needed
+        if (indicatorConfig) {
+            const indicator = document.createElement('span');
+            indicator.className = indicatorConfig.className;
+            indicator.textContent = indicatorConfig.text;
+            indicator.style.cssText = indicatorConfig.style;
+            
+            // Insert before close button
+            const closeBtn = tabElement.querySelector('.tab-close');
+            if (closeBtn) {
+                tabElement.insertBefore(indicator, closeBtn);
+            } else {
+                tabElement.appendChild(indicator);
+            }
+            
+            // Fade in
+            requestAnimationFrame(() => {
+                indicator.style.opacity = '1';
+            });
+        }
+    }
+    
+    /**
+     * Show activity indicator in tab (like macOS Terminal ...)
+     */
+    showActivityIndicator() {
+        this.setIndicator(this.INDICATORS.ACTIVITY, true);
+    }
+    
+    /**
+     * Clear activity indicator when tab becomes active
+     */
+    clearActivityIndicator() {
+        this.setIndicator(this.INDICATORS.ACTIVITY, false);
     }
     
     /**
@@ -1102,9 +1125,10 @@ class TerminalInstance {
                 this.terminalContainer = null;
             }
             
-            // Clear bell indicator
-            if (this.hasBellIndicator) {
-                this.clearBellIndicator();
+            // Clear all indicators
+            if (this._tabIndicators !== 0) {
+                this._tabIndicators = 0;
+                this.updateTabIndicator();
             }
             
             // Clear references
