@@ -42,7 +42,6 @@ class DragDropHandler {
         
         // Set up drag and drop on the main terminal container
         this.target = terminalContainer || container;
-        console.log('DragDropHandler initialized with target:', this.target);
         this.setupEventListeners();
         this.initialized = true;
     }
@@ -101,7 +100,6 @@ class DragDropHandler {
             
             for (let i = 0; i < e.dataTransfer.files.length; i++) {
                 const file = e.dataTransfer.files[i];
-                console.log(`Dropping file "${file.name}" to terminal ${activeTabId}`);
                 await this.processDroppedFile(file, activeTabId);
             }
         }

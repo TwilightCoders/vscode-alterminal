@@ -47,8 +47,6 @@ class TabManager {
         this.setupWindowEventHandlers();
         this.autoInitialize();
         
-        // Show current debug filter status on startup
-        this.showDebugFilterStatus();
         
         // Signal immediately that webview is ready and request file cache
         queueMicrotask(() => {
@@ -137,7 +135,6 @@ class TabManager {
                         // Warm focus: just refresh active terminal visuals
                         const act = this.getActiveTerminal();
                         if (act && act.terminal) {
-                            // try { act.terminal.refresh(0, act.terminal.rows - 1); act.fit(); } catch(_) {}
                         }
                         break;
                         
@@ -149,7 +146,6 @@ class TabManager {
                         const a = this.getActiveTerminal();
                         if (a && a.terminal) {
                             try {
-                                // a.terminal.refresh(0, a.terminal.rows - 1);
                                 a.fit();
                             } catch (_) {}
                         }
@@ -160,11 +156,9 @@ class TabManager {
                         break;
                         
                     case 'requestState':
-                        console.log('📤 Webview received requestState command');
                         this.ensureInitialized();
                         
                         const currentState = this.saveAllStates();
-                        console.log('📤 Sending state response:', currentState ? `${currentState.terminals?.length} terminals` : 'no state');
                         this.vscode.postMessage({ 
                             command: 'stateResponse', 
                             state: currentState 
@@ -188,22 +182,6 @@ class TabManager {
                     case 'updateFileCache':
                         window.workspaceFileCache = new Set(message.files || []);
                         
-                        // Debug: Log first few files to see the format
-                        const firstTen = Array.from(window.workspaceFileCache).slice(0, 10);
-                        
-                        // Check if package.json is in cache
-                        const hasPackageJson = window.workspaceFileCache.has('package.json');
-                        
-                        // Check for files ending with package.json
-                        let foundPackageJson = false;
-                        for (const file of window.workspaceFileCache) {
-                            if (file.endsWith('package.json')) {
-                                foundPackageJson = true;
-                                break;
-                            }
-                        }
-                        if (!foundPackageJson) {
-                        }
                         break;
                         
                     case 'fileExistsResponse':
@@ -214,21 +192,13 @@ class TabManager {
                     case 'setDebugFilter':
                         if (message.filter) {
                             localStorage.setItem('alterminal.debugFilter', JSON.stringify(message.filter));
-                            console.log('📝 Debug filter set to:', message.filter);
                         } else {
                             localStorage.removeItem('alterminal.debugFilter');
-                            console.log('📝 Debug filter cleared');
                         }
                         break;
                         
                     case 'setDeveloperMode':
                         window.DEVELOPER_MODE = message.enabled;
-                        console.log('🛠️ Developer mode:', message.enabled ? 'ENABLED' : 'DISABLED');
-                        
-                        // Enable debug features if developer mode is on
-                        if (message.enabled) {
-                            console.log('🛠️ Debug features available for developer');
-                        }
                         break;
                     case 'collectPerformance':
                         this._reportPerformance();
@@ -279,25 +249,6 @@ class TabManager {
         }});
     }
     
-    /**
-     * Show current debug filter status on startup
-     */
-    showDebugFilterStatus() {
-        const currentFilter = localStorage.getItem('alterminal.debugFilter');
-        if (currentFilter) {
-            try {
-                const filterEmojis = JSON.parse(currentFilter);
-                const filterDisplay = Array.isArray(filterEmojis) ? filterEmojis.join(' ') : filterEmojis;
-                console.log(`📝 Debug filter active: ${filterDisplay}`);
-                console.log(`📝 To change: debug-filter 🔗 📁 (or debug-filter clear)`);
-            } catch {
-                console.log(`📝 Debug filter active: ${currentFilter}`);
-            }
-        } else {
-            console.log('📝 No debug filter active - showing all logs');
-            console.log('📝 To filter: debug-filter 📁 (files) or debug-filter 🔗 (links)');
-        }
-    }
     
     /**
      * Setup window event handlers
@@ -1509,13 +1460,10 @@ class TabManager {
      * Refresh link providers for all terminals when CMD key state changes
      */
     refreshLinkProviders() {
-        console.log('🔧 REFRESH DEBUG: Refreshing link providers for', this.terminals.size, 'terminals');
         for (const terminal of this.terminals.values()) {
             if (terminal.setupFilePathLinks) {
-                console.log('🔧 REFRESH DEBUG: Calling setupFilePathLinks for terminal', terminal.id);
                 terminal.setupFilePathLinks();
             } else {
-                console.log('🔧 REFRESH DEBUG: Terminal', terminal.id, 'has no setupFilePathLinks method');
             }
         }
     }

@@ -48,7 +48,6 @@ const terminalTheme = {
     brightWhite: getVSCodeColor('--vscode-terminal-ansiBrightWhite', '#e5e5e5')
 };
 
-console.log('Final terminal theme:', terminalTheme);
 
 // Color utility
 function getThemeColor(cssVariable, fallback) {
@@ -64,13 +63,9 @@ if (document.readyState === 'loading') {
 }
 
 function initializeAll() {
-    console.log('🚀 Starting Alterminal initialization');
-    console.log('DOM readyState:', document.readyState);
-    console.log('Available globals:', { Terminal: window.Terminal, FitAddon: window.FitAddon });
     
     // Small delay to ensure DOM is fully ready
     setTimeout(() => {
-        console.log('🔧 Initializing TabManager and components');
         
         // Initialize the TabManager (it handles everything now)
         const tabManager = new TabManager(vscode, terminalTheme, getThemeColor);
@@ -89,14 +84,6 @@ function initializeAll() {
             const wasCmdPressed = window.linkModeState.isCmdPressed;
             const wasCtrlPressed = window.linkModeState.isCtrlPressed;
             
-            console.log('🔧 KEYDOWN DEBUG:', {
-                key: event.key,
-                metaKey: event.metaKey,
-                ctrlKey: event.ctrlKey,
-                isMac: isMac,
-                currentState: { ...window.linkModeState },
-                willSetCmdPressed: (isMac && event.metaKey) || (!isMac && event.ctrlKey)
-            });
             
             if (isMac && event.metaKey) {
                 window.linkModeState.isCmdPressed = true;
@@ -108,10 +95,6 @@ function initializeAll() {
             const cmdStateChanged = (wasCmdPressed !== window.linkModeState.isCmdPressed) ||
                                   (wasCtrlPressed !== window.linkModeState.isCtrlPressed);
             if (cmdStateChanged && window.tabManager) {
-                console.log('🔧 CMD key state changed - refreshing link providers', {
-                    isCmdPressed: window.linkModeState.isCmdPressed,
-                    isCtrlPressed: window.linkModeState.isCtrlPressed
-                });
                 window.tabManager.refreshLinkProviders();
             }
         });
@@ -121,13 +104,6 @@ function initializeAll() {
             const wasCmdPressed = window.linkModeState.isCmdPressed;
             const wasCtrlPressed = window.linkModeState.isCtrlPressed;
             
-            console.log('🔧 KEYUP DEBUG:', {
-                key: event.key,
-                metaKey: event.metaKey,
-                ctrlKey: event.ctrlKey,
-                isMac: isMac,
-                currentState: { ...window.linkModeState }
-            });
             
             if (isMac && !event.metaKey) {
                 window.linkModeState.isCmdPressed = false;
@@ -139,16 +115,11 @@ function initializeAll() {
             const cmdStateChanged = (wasCmdPressed !== window.linkModeState.isCmdPressed) ||
                                   (wasCtrlPressed !== window.linkModeState.isCtrlPressed);
             if (cmdStateChanged && window.tabManager) {
-                console.log('🔧 CMD key state changed - refreshing link providers', {
-                    isCmdPressed: window.linkModeState.isCmdPressed,
-                    isCtrlPressed: window.linkModeState.isCtrlPressed
-                });
                 window.tabManager.refreshLinkProviders();
             }
         });
 
         // TabManager is ready - extension will send commands to create terminals
-        console.log('🎯 TabManager ready - waiting for commands from extension');
 
         // Initialize drag and drop handler
         const dragDropHandler = new DragDropHandler(vscode, tabManager);
@@ -158,6 +129,5 @@ function initializeAll() {
         // Initialize drag-drop capture
         dragDropHandler.initialize();
         
-        console.log('✅ Initialization complete');
     }, 100);
 }

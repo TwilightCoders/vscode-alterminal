@@ -214,8 +214,6 @@ class TerminalInstance {
             // Activate Unicode 11 support (based on xterm.js PR #2568)
             if (this.terminal.unicode) {
                 this.terminal.unicode.activeVersion = '11';
-                console.log('Unicode 11 activated, active version:', this.terminal.unicode.activeVersion);
-                console.log('Available Unicode versions:', this.terminal.unicode.versions);
             } else {
                 console.warn('Unicode API not available on terminal');
             }
@@ -416,21 +414,8 @@ class TerminalInstance {
         // Set up bell handler - listen for terminal bell events
         this.bellDisposable = this.terminal.onBell(() => {
             const timestamp = new Date().toISOString();
-            console.log(`🔔 BELL DEBUG [${timestamp}]: Terminal ${this.id} received bell event`);
-            
-            // Get the current command line or recent output to see what triggered it
-            const currentLine = this.terminal.buffer.active.getLine(this.terminal.buffer.active.cursorY);
-            const lineText = currentLine ? currentLine.translateToString().trim() : 'no line';
-            console.log(`🔔 BELL DEBUG: Current line: "${lineText}"`);
-            console.log(`🔔 BELL DEBUG: Cursor position: ${this.terminal.buffer.active.cursorX}, ${this.terminal.buffer.active.cursorY}`);
-            console.log(`🔔 BELL DEBUG: Is tab active: ${this.isActive}`);
-            
             // Only show indicator if tab is not currently active
             if (!this.isActive) {
-                console.log(`🔔 BELL DEBUG: Tab is inactive, showing bell indicator`);
-            } else {
-                console.log(`🔔 BELL DEBUG: Tab is active, not showing bell indicator`);
-            }
         });
     }
     
@@ -685,7 +670,6 @@ class TerminalInstance {
         }
         
         if (active) {
-            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active`);
             // Clear all indicators when tab becomes active
             
             queueMicrotask(() => {
