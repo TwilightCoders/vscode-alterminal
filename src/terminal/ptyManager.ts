@@ -35,8 +35,6 @@
 
 import * as vscode from 'vscode';
 import * as pty from '@lydell/node-pty';
-import { exec } from 'child_process';
-import { readFile } from 'fs/promises';
 import { Logger } from '../utils/logger';
 
 export class PtyManager {

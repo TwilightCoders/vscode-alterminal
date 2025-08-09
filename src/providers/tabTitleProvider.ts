@@ -26,6 +26,7 @@
  */
 
 import * as vscode from 'vscode';
+import { Logger } from '../utils/logger';
 import * as path from 'path';
 
 export interface TabContext {
@@ -64,7 +65,7 @@ export class TabTitleProvider {
             const result = this.parseTemplate(template, context);
             return this.truncateIfNeeded(result);
         } catch (error) {
-            console.error('Template rendering error:', error);
+            Logger.error('Template rendering error:', error);
             // Fallback to basic format
             return context.processName ? 
                 `${context.baseTabName} • ${context.processName}` : 
