@@ -1,5 +1,5 @@
+// @ts-nocheck
 import { InputHandler } from './inputHandler.js';
-import { IndicatorManager } from './indicatorManager.js';
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
@@ -24,7 +24,7 @@ import { IndicatorManager } from './indicatorManager.js';
  * - Event-driven PTY operations coordinated through vscode messaging
  */
 
-class TerminalInstance {
+export class TerminalInstance {
     constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'default', options = {}) {
         const { autoStartPty = true, customCommand = null } = options;
         this.launchCommand = customCommand;
@@ -416,6 +416,11 @@ class TerminalInstance {
             const timestamp = new Date().toISOString();
             // Only show indicator if tab is not currently active
             if (!this.isActive) {
+                // Show bell notification on inactive tabs
+                if (this.onBellReceived) {
+                    this.onBellReceived(this.id);
+                }
+            }
         });
     }
     

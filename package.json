@@ -306,8 +306,8 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "compile:debug": "NODE_ENV=development tsc -p ./",
+    "compile": "tsc -p ./ && tsc -p ./tsconfig.webview.json",
+    "compile:debug": "NODE_ENV=development tsc -p ./ && NODE_ENV=development tsc -p ./tsconfig.webview.json",
     "watch": "tsc -watch -p ./",
     "watch:debug": "NODE_ENV=development tsc -watch -p ./",
     "test": "node ./out/test/runTest.js"

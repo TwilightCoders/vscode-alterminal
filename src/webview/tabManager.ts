@@ -1,3 +1,6 @@
+// @ts-nocheck
+import { TerminalInstance } from './terminal.js';
+import { TabTitleManager } from './tabTitleManager.js';
 /**
  * Tab Manager Class (Refactored)
  * 
@@ -23,7 +26,7 @@
  * - Event delegation for tab interactions
  */
 
-class TabManager {
+export class TabManager {
     constructor(vscode, terminalTheme, getThemeColor) {
         this.vscode = vscode;
         this.terminalTheme = terminalTheme;

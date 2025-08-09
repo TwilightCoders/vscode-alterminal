@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Drag and Drop Handler
  * 
@@ -19,8 +20,13 @@
  * - VS Code webview integration
  */
 
-class DragDropHandler {
-    constructor(vscode, tabManager) {
+export class DragDropHandler {
+    private vscode: any;
+    private tabManager: any;
+    private initialized: boolean;
+    private target: HTMLElement | null = null;
+
+    constructor(vscode: any, tabManager: any) {
         this.vscode = vscode;
         this.tabManager = tabManager;
         this.initialized = false;

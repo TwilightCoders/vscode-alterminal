@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
 import { Logger } from './utils/logger';
-import { CommandManager } from './webview/commandManager';
+import { CommandManager } from './utils/commandManager';
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'alterminalView';
@@ -57,7 +57,18 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         
         // Always include a unique timestamp to force webview refresh (from PostgreSQL extension pattern)
         const timeNow = new Date().getTime();
-        webviewView.webview.html = TemplateUtils.getHtmlTemplate(this._extensionUri, webviewView.webview, timeNow);
+        try {
+            webviewView.webview.html = TemplateUtils.getHtmlTemplate(this._extensionUri, webviewView.webview, timeNow);
+        } catch (error) {
+            Logger.error('Failed to generate webview HTML template:', error);
+            webviewView.webview.html = `
+                <html><body>
+                <h1>Error Loading Alterminal</h1>
+                <p>Failed to generate webview template: ${error.message}</p>
+                <p>Check the extension logs for more details.</p>
+                </body></html>
+            `;
+        }
 
 
         // State restoration will happen when webview emits 'webviewReady' event

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Input Handler
  * 
@@ -21,7 +22,13 @@
  */
 
 export class InputHandler {
-    constructor(terminal, tabId, vscodePostMessage, saveStateCallback) {
+    public terminal: any;
+    public tabId: any;
+    public vscode: any;  
+    public saveState: any;
+    public disposables: any[] = [];
+
+    constructor(terminal: any, tabId: any, vscodePostMessage: any, saveStateCallback: any) {
         this.terminal = terminal;
         this.tabId = tabId;
         this.vscode = { postMessage: vscodePostMessage };

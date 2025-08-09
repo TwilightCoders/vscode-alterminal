@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Tab Title Manager
  * 
@@ -27,7 +28,7 @@
  * - Integration with VS Code themes and styling
  */
 
-class TabTitleManager {
+export class TabTitleManager {
     constructor(tabId, terminal, vscode, icon = 'codicon-terminal') {
         this.tabId = tabId;
         this.terminal = terminal;

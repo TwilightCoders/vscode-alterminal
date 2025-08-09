@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Alterminal Initialization Script
  * 
@@ -7,6 +8,9 @@
  * 3. Sets up drag and drop handlers
  * 4. Makes components globally accessible for debugging
  */
+
+import { TabManager } from './tabManager.js';
+import { DragDropHandler } from './dragDropHandler.js';
 
 // No configuration needed - webview will receive commands from extension
 

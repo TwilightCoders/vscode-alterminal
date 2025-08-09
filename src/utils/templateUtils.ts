@@ -14,20 +14,10 @@ export class TemplateUtils {
         webview: vscode.Webview, 
         timestamp: number
     ): string {
-        // Read webview scripts from src directory
-        const srcDir = path.join(__dirname, '..', '..', 'src');
-        
-        // Load and inline the imported classes first
-        const inputHandlerScript = fs.readFileSync(path.join(srcDir, 'webview', 'inputHandler.js'), 'utf8')
-            .replace('export class InputHandler', 'class InputHandler');
-        const tabTitleManagerScript = fs.readFileSync(path.join(srcDir, 'webview', 'tabTitleManager.js'), 'utf8')
-            .replace('export class TabTitleManager', 'class TabTitleManager');
-        
-        // Load main scripts and remove import statements
-        const terminalScript = fs.readFileSync(path.join(srcDir, 'webview', 'terminal.js'), 'utf8')
-            .replace(/^import.*from.*;\s*$/gm, ''); // Remove import lines
-        const tabManagerScript = `${fs.readFileSync(path.join(srcDir, 'webview', 'tabManager.js'), 'utf8')}`;
-        const dragDropHandlerScript = `${fs.readFileSync(path.join(srcDir, 'webview', 'dragDropHandler.js'), 'utf8')}`;
+        // Get webview URIs for compiled ES6 modules
+        const outDir = path.join(__dirname, '..');
+        const getWebviewScriptUri = (scriptPath: string) => 
+            webview.asWebviewUri(vscode.Uri.joinPath(vscode.Uri.file(outDir), 'webview', scriptPath));
         
         // Helper to create webview URIs for node_modules files
         const getNodeModuleUri = (packagePath: string) => 
@@ -44,7 +34,7 @@ export class TemplateUtils {
         const webLinksAddonUri = getNodeModuleUri('@xterm/addon-web-links/lib/addon-web-links.js');
         const serializeAddonUri = getNodeModuleUri('@xterm/addon-serialize/lib/addon-serialize.js');
         const unicodeAddonUri = getNodeModuleUri('@xterm/addon-unicode11/lib/addon-unicode11.js');
-        const linkProviderUri = getNodeModuleUri('xterm-link-provider/lib/cjs/index.js');
+        const linkProviderUri = getNodeModuleUri('xterm-link-provider/lib/esm/index.js');
 
         // Get extension version for display
         const packagePath = path.join(__dirname, '..', '..', 'package.json');
@@ -56,21 +46,20 @@ export class TemplateUtils {
             console.warn('Could not read package.json version:', error);
         }
 
-        // Load initialization script
-        const initScript = this.loadInitScript(extensionUri);
 
-        // Combine scripts with logger
-        const combinedScript = [
-            createWebviewLogger(),
-            inputHandlerScript,      // Load utility classes first
-            tabTitleManagerScript,   // Load TabTitleManager before TabManager
-            terminalScript,
-            tabManagerScript, 
-            dragDropHandlerScript,
-            initScript
-        ].join('\n\n');
+        // Get ES6 module URIs
+        const inputHandlerUri = getWebviewScriptUri('inputHandler.js');
+        const tabTitleManagerUri = getWebviewScriptUri('tabTitleManager.js'); 
+        const terminalUri = getWebviewScriptUri('terminal.js');
+        const tabManagerUri = getWebviewScriptUri('tabManager.js');
+        const dragDropHandlerUri = getWebviewScriptUri('dragDropHandler.js');
+        const initUri = getWebviewScriptUri('init.js');
+        
+        // Create logger script inline (no import needed)
+        const combinedScript = createWebviewLogger();
 
-        // Read HTML template from file and interpolate variables
+        // Read HTML template from file and interpolate variables (from src, not compiled)
+        const srcDir = path.join(__dirname, '..', '..', 'src');
         const templatePath = path.join(srcDir, 'templates', 'webview.html');
         let htmlTemplate = fs.readFileSync(templatePath, 'utf8');
 
@@ -89,7 +78,14 @@ export class TemplateUtils {
             serializeAddonUri,
             unicodeAddonUri,
             linkProviderUri,
-            combinedScript
+            combinedScript,
+            // ES6 module URIs for import map
+            inputHandlerUri,
+            tabTitleManagerUri,
+            terminalUri,
+            tabManagerUri,
+            dragDropHandlerUri,
+            initUri
         };
 
         // Replace all template variables
@@ -104,7 +100,7 @@ export class TemplateUtils {
 
     private static loadInitScript(extensionUri: vscode.Uri): string {
         try {
-            const initScriptPath = path.join(extensionUri.fsPath, 'src', 'webview', 'init.js');
+            const initScriptPath = path.join(extensionUri.fsPath, 'out', 'webview', 'init.js');
             return fs.readFileSync(initScriptPath, 'utf8');
         } catch (error) {
             console.error('Failed to load init script:', error);

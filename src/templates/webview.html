@@ -517,13 +517,38 @@
     <script src="{{webLinksAddonUri}}"></script>
     <script src="{{serializeAddonUri}}"></script>
     <script src="{{unicodeAddonUri}}"></script>
-    <script src="{{linkProviderUri}}"></script>
+    <script type="module">
+        // Import and make LinkProvider globally available for other modules
+        import { LinkProvider } from '{{linkProviderUri}}';
+        window.LinkProvider = LinkProvider;
+    </script>
     <script>
-        // Acquire VS Code API
-        const vscode = acquireVsCodeApi();
+        // Acquire VS Code API and make it global for ES6 modules
+        window.vscode = acquireVsCodeApi();
         
         {{combinedScript}}
-        
     </script>
+    
+    <!-- Import map for ES6 module resolution -->
+    <script type="importmap">
+    {
+        "imports": {
+            "./inputHandler.js": "{{inputHandlerUri}}",
+            "./tabTitleManager.js": "{{tabTitleManagerUri}}",
+            "./terminal.js": "{{terminalUri}}",
+            "./tabManager.js": "{{tabManagerUri}}",
+            "./dragDropHandler.js": "{{dragDropHandlerUri}}",
+            "./init.js": "{{initUri}}"
+        }
+    }
+    </script>
+    
+    <!-- Load webview ES6 modules in dependency order -->
+    <script type="module" src="{{inputHandlerUri}}"></script>
+    <script type="module" src="{{tabTitleManagerUri}}"></script>
+    <script type="module" src="{{terminalUri}}"></script>
+    <script type="module" src="{{tabManagerUri}}"></script>
+    <script type="module" src="{{dragDropHandlerUri}}"></script>
+    <script type="module" src="{{initUri}}"></script>
 </body>
 </html>
