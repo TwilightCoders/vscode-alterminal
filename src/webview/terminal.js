@@ -1,3 +1,5 @@
+import { InputHandler } from './inputHandler.js';
+
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
  * 
@@ -99,6 +101,9 @@ class TerminalInstance {
         // DOM container
         this.terminalContainer = null;
         
+        // Input handler
+        this.inputHandler = null;
+        
         // Initialize the complete terminal (frontend + backend)
         this.initialize();
         if (autoStartPty) {
@@ -161,7 +166,7 @@ class TerminalInstance {
                 fontFamily: this.getThemeColor('--vscode-editor-font-family', 'Consolas, Monaco, Menlo, monospace'),
                 theme: this.terminalTheme,
                 scrollback: window.scrollbackLines || 1000,
-                scrollOnUserInput: false,
+                scrollOnUserInput: true,
                 sendFocus: true, // allow focus in/out sequences so ncurses apps can redraw properly
                 allowTransparency: false,
                 windowsMode: false,
@@ -395,16 +400,17 @@ class TerminalInstance {
         // Dispose existing handlers first
         this.disposeEventHandlers();
         
-        // Set up data handler - coordinate with PTY backend
-        this.dataDisposable = this.terminal.onData((data) => {
-            // Send user input to our PTY process
-            this.sendDataToPty(data);
-            
-            // Save state synchronously (fast, no async messaging)
-            if (window.tabManager && window.tabManager.saveToLocalState) {
-                window.tabManager.saveToLocalState();
+        // Set up input handling (keyboard, file drops, etc.)
+        this.inputHandler = new InputHandler(
+            this.terminal,
+            this.id,
+            (msg) => this.vscode.postMessage(msg),
+            () => {
+                if (window.tabManager && window.tabManager.saveToLocalState) {
+                    window.tabManager.saveToLocalState();
+                }
             }
-        });
+        );
         
         // Set up resize handler - coordinate with PTY backend
         this.resizeDisposable = this.terminal.onResize((size) => {
@@ -1004,6 +1010,12 @@ class TerminalInstance {
      * Dispose of event handlers
      */
     disposeEventHandlers() {
+        // Dispose input handler
+        if (this.inputHandler) {
+            this.inputHandler.dispose();
+            this.inputHandler = null;
+        }
+        
         if (this.dataDisposable) {
             this.dataDisposable.dispose();
             this.dataDisposable = null;
@@ -1073,17 +1085,6 @@ class TerminalInstance {
     }
     
     /**
-     * Send data to PTY process
-     */
-    sendDataToPty(data) {
-        this.vscode.postMessage({ 
-            command: 'data', 
-            data: data, 
-            tabId: this.id 
-        });
-    }
-    
-    /**
      * Send resize to PTY process
      */
     sendResizeToPty(cols, rows) {
@@ -1091,30 +1092,6 @@ class TerminalInstance {
             command: 'resize', 
             cols: cols, 
             rows: rows, 
-            tabId: this.id 
-        });
-    }
-    
-    /**
-     * Send file path to PTY process
-     */
-    sendFilePathToPty(filePath) {
-        this.vscode.postMessage({ 
-            command: 'sendFilePath', 
-            filePath: filePath, 
-            tabId: this.id 
-        });
-    }
-    
-    /**
-     * Send file data to PTY process
-     */
-    sendFileDataToPty(fileData, fileName, fileType) {
-        this.vscode.postMessage({ 
-            command: 'sendFileData', 
-            fileData: fileData, 
-            fileName: fileName, 
-            fileType: fileType, 
             tabId: this.id 
         });
     }
