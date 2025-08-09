@@ -689,6 +689,103 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /**
+     * Handle context menu commands from VS Code
+     */
+    public handleContextMenuCommand(command: string, args: any) {
+        Logger.debug(`Context menu command: ${command}`, args);
+        
+        switch (command) {
+            case 'saveTabCommand':
+                this._handleContextMenuSaveCommand(args);
+                break;
+            case 'renameTab':
+                this._handleContextMenuRenameTab(args);
+                break;
+            case 'closeTab':
+                this._handleContextMenuCloseTab(args);
+                break;
+            default:
+                Logger.warn(`Unknown context menu command: ${command}`);
+        }
+    }
+
+    private async _handleContextMenuSaveCommand(args: any) {
+        try {
+            const tabId = args?.tabId;
+            const command = args?.command;
+            
+            if (!command) {
+                Logger.warn('Cannot save command: no command provided in context');
+                vscode.window.showErrorMessage('No command to save');
+                return;
+            }
+
+            // Use CommandManager to save the command
+            await this._commandManager.saveCommand(command);
+            
+            // Show success message
+            vscode.window.showInformationMessage(
+                `Command "${command}" saved to quick launch menu!`
+            );
+            
+            Logger.info(`Context menu - Command saved from tab ${tabId}: ${command}`);
+        } catch (error) {
+            Logger.error('Failed to save command from context menu:', error);
+            vscode.window.showErrorMessage('Failed to save command. Please try again.');
+        }
+    }
+
+    private async _handleContextMenuRenameTab(args: any) {
+        try {
+            const tabId = args?.tabId;
+            
+            if (!tabId) {
+                Logger.warn('Cannot rename tab: no tab ID provided');
+                vscode.window.showErrorMessage('No tab selected');
+                return;
+            }
+
+            if (this._view) {
+                // Send rename command to webview to start inline editing
+                this._view.webview.postMessage({
+                    command: 'renameTab',
+                    tabId: parseInt(tabId)
+                });
+                
+                Logger.info(`Context menu - Starting inline rename for tab ${tabId}`);
+            }
+        } catch (error) {
+            Logger.error('Failed to start tab rename from context menu:', error);
+            vscode.window.showErrorMessage('Failed to start tab rename. Please try again.');
+        }
+    }
+
+    private _handleContextMenuCloseTab(args: any) {
+        try {
+            const tabId = args?.tabId;
+            
+            if (!tabId) {
+                Logger.warn('Cannot close tab: no tab ID provided');
+                vscode.window.showErrorMessage('No tab selected');
+                return;
+            }
+
+            if (this._view) {
+                // Send close command to webview
+                this._view.webview.postMessage({
+                    command: 'closeTab',
+                    tabId: parseInt(tabId)
+                });
+                
+                Logger.info(`Context menu - Closed tab ${tabId}`);
+            }
+        } catch (error) {
+            Logger.error('Failed to close tab from context menu:', error);
+            vscode.window.showErrorMessage('Failed to close tab. Please try again.');
+        }
+    }
+
 
     public dispose() {
         Logger.debug('⚠️ Disposing AlterminalProvider');

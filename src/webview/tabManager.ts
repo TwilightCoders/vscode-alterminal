@@ -36,6 +36,7 @@ export class TabManager {
         
         // Collection of terminal wrappers
         this.terminals = new Map();
+        this.titleManagers = new Map(); // Collection of tab title managers
         this.activeTabId = null;
         this.nextTabId = 1;
         this.isInitialized = false;
@@ -210,6 +211,16 @@ export class TabManager {
                     case 'commandSavedResponse':
                         Logger.debug('📋 Received command saved status:', message.launchCommand, message.isSaved);
                         this.updateSaveButtonVisibility(message.launchCommand, message.isSaved);
+                        break;
+                        
+                    case 'renameTab':
+                        Logger.debug('✏️ Received rename tab request for inline editing:', message.tabId);
+                        this.startTabRename(message.tabId);
+                        break;
+                        
+                    case 'closeTab':
+                        Logger.debug('❌ Received close tab request:', message.tabId);
+                        this.closeTab(message.tabId);
                         break;
                         
                     default:
@@ -470,6 +481,7 @@ export class TabManager {
         }
     }
     
+    
     /**
      * Close a specific tab
      */
@@ -636,82 +648,35 @@ export class TabManager {
         }
     }
     
-    /**
-     * Start inline tab renaming
-     */
-    startTabRename(tabId, labelElement) {
-        const currentLabel = labelElement.textContent;
-        
-        // Create input element
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = currentLabel;
-        input.className = 'tab-rename-input';
-        input.style.cssText = `
-            background: var(--vscode-input-background, #3c3c3c);
-            color: var(--vscode-input-foreground, #cccccc);
-            border: 1px solid var(--vscode-input-border, #3c3c3c);
-            border-radius: 2px;
-            padding: 2px 4px;
-            font-size: 12px;
-            font-family: inherit;
-            width: 100%;
-            min-width: 60px;
-            outline: none;
-        `;
-        
-        // Focus and select all text (next frame)
-        requestAnimationFrame(() => {
-            input.focus();
-            input.select();
-        });
-        
-        // Save function
-        const saveRename = () => {
-            const newLabel = input.value.trim();
-            if (newLabel && newLabel !== currentLabel) {
-                this.updateTabLabel(tabId, newLabel);
-            }
-            this.endTabRename(labelElement, input, currentLabel);
-        };
-        
-        // Cancel function
-        const cancelRename = () => {
-            this.endTabRename(labelElement, input, currentLabel);
-        };
-        
-        // Event handlers
-        input.addEventListener('blur', saveRename);
-        input.addEventListener('keydown', (e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                saveRename();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                cancelRename();
-            }
-        });
-        
-        // Replace label with input
-        labelElement.style.display = 'none';
-        labelElement.parentNode.insertBefore(input, labelElement);
-    }
     
     /**
-     * End inline tab renaming
+     * Start inline tab renaming (delegates to TabTitleManager)
      */
-    endTabRename(labelElement, inputElement, originalLabel) {
-        // Remove input element
-        if (inputElement.parentNode) {
-            inputElement.parentNode.removeChild(inputElement);
+    startTabRename(tabIdOrLabelElement, labelElement = null) {
+        // Handle both old signature (tabId, labelElement) and new signature (tabId)
+        let tabId;
+        if (typeof tabIdOrLabelElement === 'number') {
+            tabId = tabIdOrLabelElement;
+        } else {
+            // Old double-click signature - extract tabId from label element
+            const tabElement = tabIdOrLabelElement.closest('.tab');
+            if (tabElement && tabElement.dataset.tabId) {
+                tabId = parseInt(tabElement.dataset.tabId);
+                labelElement = tabIdOrLabelElement;
+            } else {
+                Logger.warn('Cannot determine tab ID for rename');
+                return;
+            }
         }
         
-        // Show label element
-        labelElement.style.display = '';
+        const titleManager = this.titleManagers.get(tabId);
+        if (!titleManager) {
+            Logger.warn(`Cannot start rename: TabTitleManager not found for tab ${tabId}`);
+            return;
+        }
         
-        // Save state after renaming
-        this.saveToLocalState();
+        // Delegate to TabTitleManager which already has this functionality
+        titleManager.startTitleEdit();
     }
     
     /**
@@ -982,6 +947,17 @@ export class TabManager {
         tab.setAttribute('tabindex', '0');
         tab.setAttribute('aria-selected', 'false');
         tab.setAttribute('aria-label', `${label} tab`);
+        
+        // Set VS Code context for tab-specific context menu
+        tab.setAttribute('data-vscode-context', JSON.stringify({
+            webviewSection: 'alterminal',
+            contextType: 'tab',
+            tabId: tabId.toString(),
+            terminalType: terminal?.launchCommand ? 'command' : 'shell',
+            command: terminal?.launchCommand || null,
+            preventDefaultContextMenuItems: true
+        }));
+        
         // TODO: Add draggable="true" when implementing drag and drop reordering
         
         // Create TabTitleManager instance for this tab - pass icon directly
@@ -989,10 +965,12 @@ export class TabManager {
         const tabTitleManager = new TabTitleManager(tabId, terminal, vscode, icon);
         
         // Store TabTitleManager instance for later use
-        if (!this.tabTitleManagers) {
-            this.tabTitleManagers = new Map();
-        }
-        this.tabTitleManagers.set(tabId, tabTitleManager);
+        this.titleManagers.set(tabId, tabTitleManager);
+        
+        // Set up callback for title changes (saves state after rename)
+        tabTitleManager.setTitleChangeCallback((tabId) => {
+            this.saveToLocalState();
+        });
         
         // Create tab title (icon + label) using TabTitleManager
         const tabContent = tabTitleManager.createTabTitle(label);
@@ -1291,7 +1269,7 @@ export class TabManager {
      * Show notification bell for a specific tab
      */
     showNotification(tabId) {
-        const tabTitleManager = this.tabTitleManagers?.get(tabId);
+        const tabTitleManager = this.titleManagers?.get(tabId);
         if (tabTitleManager) {
             tabTitleManager.showNotification();
         }
@@ -1301,7 +1279,7 @@ export class TabManager {
      * Hide notification bell for a specific tab
      */
     hideNotification(tabId) {
-        const tabTitleManager = this.tabTitleManagers?.get(tabId);
+        const tabTitleManager = this.titleManagers?.get(tabId);
         if (tabTitleManager) {
             tabTitleManager.hideNotification();
         }

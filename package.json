@@ -127,6 +127,21 @@
         "command": "alterminal.saveCurrentCommand",
         "title": "Save Current Command",
         "icon": "$(save)"
+      },
+      {
+        "command": "alterminal.saveTabCommand",
+        "title": "Save Command",
+        "icon": "$(save)"
+      },
+      {
+        "command": "alterminal.renameTab",
+        "title": "Rename Tab",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "alterminal.closeTab",
+        "title": "Close Tab",
+        "icon": "$(close)"
       }
     ],
     "submenus": [
@@ -215,6 +230,23 @@
           "command": "alterminal.openTerminal",
           "when": "true",
           "group": "navigation"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "alterminal.saveTabCommand",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab && terminalType == command",
+          "group": "1_tab@1"
+        },
+        {
+          "command": "alterminal.renameTab",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "1_tab@2"
+        },
+        {
+          "command": "alterminal.closeTab",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "2_tab@1"
         }
       ]
     },

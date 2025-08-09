@@ -121,6 +121,15 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('alterminal.saveCurrentCommand', async () => {
             await provider.saveCurrentCommand();
+        }),
+        vscode.commands.registerCommand('alterminal.saveTabCommand', (args) => {
+            provider.handleContextMenuCommand('saveTabCommand', args);
+        }),
+        vscode.commands.registerCommand('alterminal.renameTab', (args) => {
+            provider.handleContextMenuCommand('renameTab', args);
+        }),
+        vscode.commands.registerCommand('alterminal.closeTab', (args) => {
+            provider.handleContextMenuCommand('closeTab', args);
         })
     );
 }

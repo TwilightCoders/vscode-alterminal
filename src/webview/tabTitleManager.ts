@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { ContextMenu } from './contextMenu.js';
 /**
  * Tab Title Manager
  * 
@@ -35,22 +36,23 @@ export class TabTitleManager {
         this.vscode = vscode;
         this.icon = icon;
         
+        // Initialize context menu helper
+        this.contextMenu = new ContextMenu(vscode);
+        
         // State tracking using bitmasks
         this._state = 0;
         
         // State bit positions
         this.STATES = {
             NOTIFICATION: 1 << 0,  // Bell notification active
-            DROPDOWN_OPEN: 1 << 1, // Dropdown menu is open
-            CUSTOMIZED: 1 << 2,    // User has customized the icon
-            EDITING: 1 << 3        // Title is being edited
+            CUSTOMIZED: 1 << 1,    // User has customized the icon
+            EDITING: 1 << 2        // Title is being edited
         };
 
         // DOM references
         this.iconContainer = null;
         this.regularIcon = null;
         this.bellIcon = null;
-        this.dropdown = null;
         this.labelElement = null;
 
         // Title management
@@ -99,15 +101,12 @@ export class TabTitleManager {
     }
 
     /**
-     * Create icon container with dropdown menu
+     * Create icon container with context menu support
      */
     createIconContainer(label) {
         const container = document.createElement('div');
         container.className = 'tab-icon';
-        container.setAttribute('role', 'button');
-        container.setAttribute('tabindex', '0');
-        container.setAttribute('aria-label', `${label} menu`);
-        container.setAttribute('title', `Click for ${label} options`);
+        container.setAttribute('aria-label', `${label} terminal`);
         
         // Create regular type icon
         this.regularIcon = document.createElement('span');
@@ -119,14 +118,6 @@ export class TabTitleManager {
         this.bellIcon.className = 'codicon codicon-bell-dot';
         this.bellIcon.style.display = 'none';
         container.appendChild(this.bellIcon);
-        
-
-        // Create dropdown menu as child of icon container
-        this.dropdown = this.createDropdownMenu();
-        container.appendChild(this.dropdown);
-
-        // Set up event listeners
-        this.setupEventListeners();
 
         return container;
     }
@@ -139,13 +130,33 @@ export class TabTitleManager {
         labelEl.className = 'tab-label';
         labelEl.textContent = label;
         
-        // Add right-click context menu
-        labelEl.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            this.showContextMenu(e.clientX, e.clientY);
-        });
+        // Context menu is handled by the parent tab element
         
         return labelEl;
+    }
+
+    /**
+     * Show native context menu for tab
+     */
+    showNativeContextMenu(x, y) {
+        // Send context menu request to extension host
+        this.contextMenu.showTabContextMenu({
+            tabId: this.tabId,
+            terminalType: this.getTerminalType(),
+            command: this.terminal?.launchCommand || null,
+            x,
+            y
+        });
+    }
+
+    /**
+     * Get the terminal type for context menu
+     */
+    getTerminalType() {
+        if (this.terminal?.launchCommand) {
+            return 'command';
+        }
+        return 'shell';
     }
 
     /**
@@ -154,121 +165,9 @@ export class TabTitleManager {
     setupEventListeners() {
         if (!this.iconContainer) return;
 
-        // Icon click handler
-        this.iconContainer.addEventListener('click', (e) => {
-            e.stopPropagation();
-            
-            // If dropdown is open, close it
-            if (this.hasState(this.STATES.DROPDOWN_OPEN)) {
-                this.hideDropdown();
-                return;
-            }
-            
-            // Otherwise handle normal icon click logic
-            this.handleIconClick();
-        });
-
-        // Keyboard support for icon
-        this.iconContainer.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Same logic as click - check if dropdown is open first
-                if (this.hasState(this.STATES.DROPDOWN_OPEN)) {
-                    this.hideDropdown();
-                } else {
-                    this.handleIconClick();
-                }
-            }
-        });
-
-        // Dropdown item click handler
-        if (this.dropdown) {
-            this.dropdown.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const action = e.target.closest('.tab-dropdown-item')?.getAttribute('data-action');
-                if (action) {
-                    this.handleDropdownAction(action);
-                }
-            });
-
-            // Dropdown keyboard navigation
-            this.dropdown.addEventListener('keydown', (e) => {
-                const currentItem = e.target;
-                if (!currentItem.classList.contains('tab-dropdown-item')) return;
-
-                switch (e.key) {
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        this.focusNextDropdownItem(currentItem);
-                        break;
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        this.focusPrevDropdownItem(currentItem);
-                        break;
-                    case 'Enter':
-                    case ' ':
-                        e.preventDefault();
-                        const action = currentItem.getAttribute('data-action');
-                        if (action) {
-                            this.handleDropdownAction(action);
-                        }
-                        break;
-                    case 'Escape':
-                        e.preventDefault();
-                        this.hideDropdown();
-                        this.iconContainer.focus();
-                        break;
-                }
-            });
-        }
-
-
-        // Close dropdown when clicking outside (store reference for cleanup)
-        this.documentClickHandler = (e) => {
-            if (!this.dropdown?.contains(e.target) && !this.iconContainer?.contains(e.target)) {
-                this.hideDropdown();
-            }
-        };
-        document.addEventListener('click', this.documentClickHandler);
+        // No event listeners needed - context menu is handled by parent tab element
     }
 
-    /**
-     * Create dropdown menu with appropriate items
-     */
-    createDropdownMenu() {
-        const dropdown = document.createElement('div');
-        dropdown.className = 'tab-dropdown';
-
-        // Save menu item (only for command tabs that aren't saved)
-        if (this.isCommandTab()) {
-            const saveItem = document.createElement('button');
-            saveItem.className = 'tab-dropdown-item';
-            saveItem.setAttribute('data-action', 'save');
-            saveItem.innerHTML = '<span class="codicon codicon-save"></span>Save Command';
-            
-            // Check if command is already saved
-            this.checkCommandSavedStatus(this.terminal.launchCommand, saveItem);
-            dropdown.appendChild(saveItem);
-        }
-
-        // Settings menu item
-        const settingsItem = document.createElement('button');
-        settingsItem.className = 'tab-dropdown-item';
-        settingsItem.setAttribute('data-action', 'settings');
-        settingsItem.innerHTML = '<span class="codicon codicon-settings-gear"></span>Settings';
-        dropdown.appendChild(settingsItem);
-
-        // Close menu item
-        const closeItem = document.createElement('button');
-        closeItem.className = 'tab-dropdown-item';
-        closeItem.setAttribute('data-action', 'close');
-        closeItem.innerHTML = '<span class="codicon codicon-close"></span>Close Tab';
-        dropdown.appendChild(closeItem);
-
-        return dropdown;
-    }
 
     /**
      * Check if this is a command tab
@@ -464,7 +363,7 @@ export class TabTitleManager {
     }
 
     /**
-     * Handle click on icon (notification vs menu logic)
+     * Handle click on icon (notification logic only)
      */
     handleIconClick() {
         if (this.hasState(this.STATES.NOTIFICATION)) {
@@ -472,10 +371,8 @@ export class TabTitleManager {
             if (this.onNotificationClick) {
                 this.onNotificationClick(this.tabId);
             }
-        } else {
-            // Normal menu behavior - just show dropdown (toggle logic handled in click handler)
-            this.showDropdown();
         }
+        // Context menu is now handled natively by VS Code
     }
 
     /**
@@ -739,12 +636,6 @@ export class TabTitleManager {
      * Cleanup resources
      */
     dispose() {
-        // Remove document click handler
-        if (this.documentClickHandler) {
-            document.removeEventListener('click', this.documentClickHandler);
-            this.documentClickHandler = null;
-        }
-        
         if (this.iconContainer) {
             this.iconContainer.remove();
         }
@@ -755,7 +646,6 @@ export class TabTitleManager {
         this.iconContainer = null;
         this.regularIcon = null;
         this.bellIcon = null;
-        this.dropdown = null;
         this.labelElement = null;
         this.onTitleChanged = null;
         this.onNotificationClick = null;
