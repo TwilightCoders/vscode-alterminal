@@ -34,7 +34,9 @@
             border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
             flex-shrink: 0;
             min-height: 28px;
-            overflow: hidden;
+            overflow: visible;
+            position: relative;
+            z-index: 10000;
         }
         
         .tab-list {
@@ -76,7 +78,7 @@
             position: relative;
             white-space: nowrap;
             text-overflow: ellipsis;
-            overflow: hidden;
+            overflow: visible;
             font-size: 12px;
         }
         
@@ -167,52 +169,6 @@
             max-width: calc(100% - 40px);
         }
         
-        .tab-save {
-            opacity: 0;
-            margin-left: 4px;
-            padding: 2px;
-            cursor: pointer;
-            border-radius: 2px;
-            font-size: 14px;
-            transition: all 0.2s ease;
-            color: var(--vscode-tab-inactiveForeground, #cccccc);
-            background-color: transparent;
-            border: none;
-            line-height: 1;
-            width: 16px;
-            height: 16px;
-            min-width: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .tab-close {
-            opacity: 0;
-            margin-left: 4px;
-            padding: 2px;
-            cursor: pointer;
-            border-radius: 2px;
-            font-size: 16px;
-            transition: all 0.2s ease;
-            color: var(--vscode-tab-inactiveForeground, #cccccc);
-            background-color: transparent;
-            border: none;
-            line-height: 1;
-            width: 16px;
-            height: 16px;
-            min-width: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-        
-        /* Ensure vertical tab close buttons have proper spacing */
-        .container.vertical-tabs .tab-close {
-            margin-left: 0;
-        }
         
         /* Codicon font styling for close button */
         .codicon {
@@ -238,6 +194,42 @@
         .codicon-trash:before {
             content: "\ea81";
         }
+
+        .codicon-terminal:before {
+            content: "\ea85";
+        }
+
+        .codicon-console:before {
+            content: "\ea6d";
+        }
+
+        .codicon-robot:before {
+            content: "\eaa2";
+        }
+
+        .codicon-rocket:before {
+            content: "\eb44";
+        }
+
+        .codicon-save:before {
+            content: "\ea71";
+        }
+
+        .codicon-settings-gear:before {
+            content: "\eb51";
+        }
+
+        .codicon-close:before {
+            content: "\ea76";
+        }
+
+        .codicon-bell:before {
+            content: "\ea85";
+        }
+
+        .codicon-bell-dot:before {
+            content: "\eb9a";
+        }
         
         /* Tab close button accessibility and interaction */
         
@@ -248,24 +240,135 @@
             outline-offset: -2px;
         }
         
-        .tab-close:focus,
-        .tab-close:focus-visible {
+        
+
+        .tab-icon {
+            margin-right: 6px;
+            padding: 2px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            background-color: transparent;
+            border: none;
+            line-height: 1;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .tab.active .tab-icon {
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        .tab-icon:hover {
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        .tab-icon:focus,
+        .tab-icon:focus-visible {
             outline: 2px solid var(--vscode-focusBorder, #007ACC);
             outline-offset: 1px;
             border-radius: 2px;
         }
-        
-        .tab:hover .tab-save {
-            opacity: 1;
+
+        .tab-icon.notification {
+            color: #ff8c00;
+            animation: pulse-notification 2s infinite;
         }
 
-        .tab:hover .tab-close {
-            opacity: 1;
+        .tab.active .tab-icon.notification {
+            animation: none;
+            color: var(--vscode-tab-activeForeground, #ffffff);
         }
 
-        .tab-save:hover {
-            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
-            color: var(--vscode-button-foreground, #ffffff);
+        @keyframes pulse-notification {
+            0% { 
+                color: #ff8c00;
+                transform: scale(1);
+            }
+            50% { 
+                color: #ffb347;
+                transform: scale(1.1);
+            }
+            100% { 
+                color: #ff8c00;
+                transform: scale(1);
+            }
+        }
+
+        .tab-icon.notification .codicon {
+            transition: all 0.3s ease;
+        }
+
+        .tab-dropdown {
+            position: absolute;
+            background: var(--vscode-dropdown-background, #3c3c3c);
+            border: 1px solid var(--vscode-dropdown-border, #454545);
+            border-radius: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            min-width: 120px;
+            display: none;
+            flex-direction: column;
+            padding: 4px 0;
+            top: 100%;
+            left: 0;
+        }
+
+        .tab-dropdown.show {
+            display: flex;
+        }
+
+        .tab-dropdown-item {
+            padding: 6px 12px;
+            color: var(--vscode-dropdown-foreground, #cccccc);
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            background: transparent;
+            border: none;
+            text-align: left;
+            width: 100%;
+        }
+
+        .tab-dropdown-item:hover {
+            background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-list-hoverForeground, #ffffff);
+        }
+
+        .tab-dropdown-item:focus,
+        .tab-dropdown-item:focus-visible {
+            outline: none;
+            background: var(--vscode-list-focusBackground, #094771);
+            color: var(--vscode-list-focusForeground, #ffffff);
+        }
+
+        .tab-dropdown-item .codicon {
+            margin-right: 8px;
+            font-size: 14px;
+            width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tab-dropdown-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tab-dropdown-item.disabled:hover {
+            background: transparent;
+            color: var(--vscode-dropdown-foreground, #cccccc);
         }
         
         /* High contrast mode support */
@@ -279,16 +382,8 @@
                 outline-width: 3px;
             }
             
-            .tab-close:focus,
-            .tab-close:focus-visible {
-                outline-width: 3px;
-            }
         }
         
-        .tab-close:hover {
-            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
-            color: var(--vscode-tab-activeForeground, #ffffff);
-        }
         
         .terminal-container {
             flex: 1;

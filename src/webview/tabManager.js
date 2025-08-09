@@ -137,7 +137,7 @@ class TabManager {
                         // Warm focus: just refresh active terminal visuals
                         const act = this.getActiveTerminal();
                         if (act && act.terminal) {
-                            try { act.terminal.refresh(0, act.terminal.rows - 1); act.fit(); } catch(_) {}
+                            // try { act.terminal.refresh(0, act.terminal.rows - 1); act.fit(); } catch(_) {}
                         }
                         break;
                         
@@ -149,7 +149,7 @@ class TabManager {
                         const a = this.getActiveTerminal();
                         if (a && a.terminal) {
                             try {
-                                a.terminal.refresh(0, a.terminal.rows - 1);
+                                // a.terminal.refresh(0, a.terminal.rows - 1);
                                 a.fit();
                             } catch (_) {}
                         }
@@ -504,6 +504,9 @@ class TabManager {
         this.updateActiveTabUI(tabId);
         this.activeTabId = tabId;
         
+        // Clear notifications for the newly active tab
+        this.clearNotificationsOnActivation(tabId);
+        
         // Tab switching is now purely UI-level, no need to notify extension host
         // Persist active tab change immediately so reload restores correct tab
         try {
@@ -578,29 +581,32 @@ class TabManager {
     /**
      * Check if a command is already saved and update save button visibility
      */
-    checkCommandSavedStatus(command, saveBtn) {
+    checkCommandSavedStatus(command, saveElement) {
         // Request saved commands from extension
         this.vscode.postMessage({
             command: 'checkCommandSaved',
             launchCommand: command
         });
         
-        // Store button reference for later update
-        saveBtn.setAttribute('data-command', command);
+        // Store element reference for later update
+        saveElement.setAttribute('data-command', command);
     }
 
     /**
      * Update save button visibility for a specific command
      */
     updateSaveButtonVisibility(command, isSaved) {
-        const saveButtons = document.querySelectorAll(`.tab-save[data-command="${command}"]`);
-        saveButtons.forEach(btn => {
+        // Handle save items in dropdowns only (no more tab bar save buttons)
+        const dropdownSaveItems = document.querySelectorAll(`.tab-dropdown-item[data-action="save"][data-command="${command}"]`);
+        dropdownSaveItems.forEach(item => {
             if (isSaved) {
-                btn.style.display = 'none';
-                btn.setAttribute('aria-hidden', 'true');
+                item.classList.add('disabled');
+                item.setAttribute('aria-hidden', 'true');
+                item.style.display = 'none';
             } else {
-                btn.style.display = 'flex';
-                btn.setAttribute('aria-hidden', 'false');
+                item.classList.remove('disabled');
+                item.setAttribute('aria-hidden', 'false');
+                item.style.display = 'flex';
             }
         });
     }
@@ -609,11 +615,12 @@ class TabManager {
      * Update all save buttons visibility after commands change
      */
     updateAllSaveButtonsVisibility() {
-        const saveButtons = document.querySelectorAll('.tab-save[data-command]');
-        saveButtons.forEach(btn => {
-            const command = btn.getAttribute('data-command');
+        // Update dropdown save items only (no more tab-bar save buttons)
+        const dropdownSaveItems = document.querySelectorAll('.tab-dropdown-item[data-action="save"][data-command]');
+        dropdownSaveItems.forEach(item => {
+            const command = item.getAttribute('data-command');
             if (command) {
-                this.checkCommandSavedStatus(command, btn);
+                this.checkCommandSavedStatus(command, item);
             }
         });
     }
@@ -640,6 +647,16 @@ class TabManager {
         const terminal = this.terminals.get(tabId);
         if (terminal) {
             terminal.write(data);
+            
+            // Show notification if writing to an inactive tab and data has visible content
+            if (tabId !== this.activeTabId && data && data.trim().length > 0) {
+                // Only show notification for "significant" output (not just control sequences)
+                // Filter out pure ANSI escape sequences and very short outputs
+                const visibleContent = data.replace(/\x1b\[[0-9;]*m/g, '').trim();
+                if (visibleContent.length > 5) {
+                    this.showNotification(tabId);
+                }
+            }
         }
     }
     
@@ -1013,40 +1030,24 @@ class TabManager {
         tab.setAttribute('aria-label', `${label} tab`);
         // TODO: Add draggable="true" when implementing drag and drop reordering
         
-        const labelElement = document.createElement('span');
-        labelElement.className = 'tab-label';
-        labelElement.textContent = label;
+        // Create TabTitleManager instance for this tab - pass icon directly
+        const icon = terminal.icon || (terminal.launchCommand ? 'codicon-rocket' : 'codicon-terminal');
+        const tabTitleManager = new TabTitleManager(tabId, terminal, vscode, icon);
         
-        // Add save button for command tabs (only if not already saved)
-        if (isCommandTab) {
-            const saveBtn = document.createElement('span');
-            saveBtn.className = 'tab-save codicon codicon-save';
-            saveBtn.setAttribute('role', 'button');
-            saveBtn.setAttribute('tabindex', '0');
-            saveBtn.setAttribute('aria-label', `Save ${terminal.launchCommand} command`);
-            saveBtn.setAttribute('title', `Save "${terminal.launchCommand}" to quick launch menu`);
-            
-            // Check if command is already saved and hide button if so
-            this.checkCommandSavedStatus(terminal.launchCommand, saveBtn);
-            
-            tab.appendChild(labelElement);
-            tab.appendChild(saveBtn);
-        } else {
-            tab.appendChild(labelElement);
+        // Store TabTitleManager instance for later use
+        if (!this.tabTitleManagers) {
+            this.tabTitleManagers = new Map();
         }
+        this.tabTitleManagers.set(tabId, tabTitleManager);
         
-        const closeBtn = document.createElement('span');
-        closeBtn.className = 'tab-close codicon codicon-trash';
-        closeBtn.setAttribute('role', 'button');
-        closeBtn.setAttribute('tabindex', '0');
-        closeBtn.setAttribute('aria-label', `Close ${label} tab`);
-        // TODO: Add draggable="false" when implementing drag and drop reordering
-        
-        tab.appendChild(closeBtn);
+        // Create tab title (icon + label) using TabTitleManager
+        const tabContent = tabTitleManager.createTabTitle(label);
+        tab.appendChild(tabContent);
         
         // Append to the end of the tab list
         tabList.appendChild(tab);
     }
+    
     
     /**
      * Update active tab UI
@@ -1090,13 +1091,22 @@ class TabManager {
             
             // Click handlers
             tabBar.addEventListener('click', (e) => {
-                // Handle save button clicks
-                if (e.target.classList.contains('tab-save')) {
-                    const tab = e.target.closest('.tab');
-                    if (tab && tab.dataset.tabId) {
+                // Handle tab icon clicks (show dropdown or handle notification)
+                if (e.target.classList.contains('tab-icon') || e.target.parentElement.classList.contains('tab-icon')) {
+                    const icon = e.target.classList.contains('tab-icon') ? e.target : e.target.parentElement;
+                    const tab = icon.closest('.tab');
+                    
+                    // If clicking on notification bell, switch to tab instead of showing dropdown
+                    if (icon.classList.contains('notification')) {
                         const tabId = parseInt(tab.dataset.tabId);
                         if (!isNaN(tabId)) {
-                            this.saveCommand(tabId);
+                            this.switchToTab(tabId);
+                        }
+                    } else {
+                        // Normal menu behavior
+                        const dropdown = icon.querySelector('.tab-dropdown');
+                        if (dropdown) {
+                            this.toggleDropdown(dropdown);
                         }
                     }
                     e.preventDefault();
@@ -1104,19 +1114,26 @@ class TabManager {
                     return;
                 }
 
-                // Handle close button clicks
-                if (e.target.classList.contains('tab-close')) {
-                    const tab = e.target.closest('.tab');
+                // Handle dropdown item clicks
+                if (e.target.classList.contains('tab-dropdown-item') || e.target.parentElement.classList.contains('tab-dropdown-item')) {
+                    const item = e.target.classList.contains('tab-dropdown-item') ? e.target : e.target.parentElement;
+                    const action = item.getAttribute('data-action');
+                    const tab = item.closest('.tab');
+                    
                     if (tab && tab.dataset.tabId) {
                         const tabId = parseInt(tab.dataset.tabId);
                         if (!isNaN(tabId)) {
-                            this.closeTab(tabId);
+                            this.handleDropdownAction(action, tabId);
                         }
                     }
+                    
+                    // Close dropdown after action
+                    this.hideAllDropdowns();
                     e.preventDefault();
                     e.stopPropagation();
                     return;
                 }
+
                 
                 // Handle tab clicks for switching
                 if (e.target.classList.contains('tab') || e.target.parentElement.classList.contains('tab')) {
@@ -1165,22 +1182,185 @@ class TabManager {
                             e.preventDefault();
                             break;
                     }
-                } else if (e.target.classList.contains('tab-close')) {
+                } else if (e.target.classList.contains('tab-icon')) {
                     if (e.key === 'Enter' || e.key === ' ') {
-                        const tab = e.target.closest('.tab');
-                        if (tab && tab.dataset.tabId) {
+                        // If icon has notification, switch to tab instead of showing dropdown
+                        if (e.target.classList.contains('notification')) {
+                            const tab = e.target.closest('.tab');
                             const tabId = parseInt(tab.dataset.tabId);
                             if (!isNaN(tabId)) {
-                                this.closeTab(tabId);
+                                this.switchToTab(tabId);
+                            }
+                        } else {
+                            const dropdown = e.target.querySelector('.tab-dropdown');
+                            if (dropdown) {
+                                this.toggleDropdown(dropdown);
                             }
                         }
                         e.preventDefault();
+                    }
+                } else if (e.target.classList.contains('tab-dropdown-item')) {
+                    switch (e.key) {
+                        case 'Enter':
+                        case ' ':
+                            const action = e.target.getAttribute('data-action');
+                            const tab = e.target.closest('.tab');
+                            if (tab && tab.dataset.tabId) {
+                                const tabId = parseInt(tab.dataset.tabId);
+                                if (!isNaN(tabId)) {
+                                    this.handleDropdownAction(action, tabId);
+                                }
+                            }
+                            this.hideAllDropdowns();
+                            e.preventDefault();
+                            break;
+                        case 'Escape':
+                            this.hideAllDropdowns();
+                            e.preventDefault();
+                            break;
+                        case 'ArrowDown':
+                            this.focusNextDropdownItem(e.target);
+                            e.preventDefault();
+                            break;
+                        case 'ArrowUp':
+                            this.focusPrevDropdownItem(e.target);
+                            e.preventDefault();
+                            break;
                     }
                 }
             });
         }
         
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.tab-icon') && !e.target.closest('.tab-dropdown')) {
+                this.hideAllDropdowns();
+            }
+        });
+        
     }
+
+    /**
+     * Toggle dropdown visibility
+     */
+    toggleDropdown(dropdown) {
+        // Hide other dropdowns first
+        this.hideAllDropdowns();
+        
+        // Toggle the target dropdown
+        dropdown.classList.toggle('show');
+        
+        // Focus the first item if opening
+        if (dropdown.classList.contains('show')) {
+            const firstItem = dropdown.querySelector('.tab-dropdown-item');
+            if (firstItem) {
+                firstItem.focus();
+            }
+        }
+    }
+
+    /**
+     * Hide all dropdown menus
+     */
+    hideAllDropdowns() {
+        const dropdowns = document.querySelectorAll('.tab-dropdown');
+        dropdowns.forEach(dropdown => {
+            dropdown.classList.remove('show');
+        });
+    }
+
+    /**
+     * Handle dropdown menu actions
+     */
+    handleDropdownAction(action, tabId) {
+        switch (action) {
+            case 'save':
+                this.saveCommand(tabId);
+                break;
+            case 'settings':
+                this.openTabSettings(tabId);
+                break;
+            case 'close':
+                this.closeTab(tabId);
+                break;
+            default:
+                Logger.warn('Unknown dropdown action:', action);
+                break;
+        }
+    }
+
+    /**
+     * Open tab-specific settings (placeholder for now)
+     */
+    openTabSettings(tabId) {
+        const terminal = this.terminals.get(tabId);
+        if (!terminal) return;
+        
+        // For now, just open the global settings
+        // In the future, this could open a tab-specific settings panel
+        this.vscode.postMessage({
+            command: 'openSettings'
+        });
+        
+        Logger.info(`Opening settings for tab ${tabId} (${terminal.label})`);
+    }
+
+    /**
+     * Focus next dropdown item for keyboard navigation
+     */
+    focusNextDropdownItem(currentItem) {
+        const dropdown = currentItem.closest('.tab-dropdown');
+        if (!dropdown) return;
+        
+        const items = dropdown.querySelectorAll('.tab-dropdown-item:not(.disabled)');
+        const currentIndex = Array.from(items).indexOf(currentItem);
+        const nextIndex = (currentIndex + 1) % items.length;
+        
+        items[nextIndex].focus();
+    }
+
+    /**
+     * Focus previous dropdown item for keyboard navigation
+     */
+    focusPrevDropdownItem(currentItem) {
+        const dropdown = currentItem.closest('.tab-dropdown');
+        if (!dropdown) return;
+        
+        const items = dropdown.querySelectorAll('.tab-dropdown-item:not(.disabled)');
+        const currentIndex = Array.from(items).indexOf(currentItem);
+        const prevIndex = currentIndex === 0 ? items.length - 1 : currentIndex - 1;
+        
+        items[prevIndex].focus();
+    }
+
+    /**
+     * Show notification bell for a specific tab
+     */
+    showNotification(tabId) {
+        const tabTitleManager = this.tabTitleManagers?.get(tabId);
+        if (tabTitleManager) {
+            tabTitleManager.showNotification();
+        }
+    }
+
+    /**
+     * Hide notification bell for a specific tab
+     */
+    hideNotification(tabId) {
+        const tabTitleManager = this.tabTitleManagers?.get(tabId);
+        if (tabTitleManager) {
+            tabTitleManager.hideNotification();
+        }
+    }
+
+    /**
+     * Clear all notifications when a tab becomes active
+     */
+    clearNotificationsOnActivation(tabId) {
+        // Hide notification for the newly active tab
+        this.hideNotification(tabId);
+    }
+    
     
     /**
      * Set up responsive layout detection and switching

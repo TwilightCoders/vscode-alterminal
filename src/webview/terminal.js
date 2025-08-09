@@ -98,8 +98,6 @@ class TerminalInstance {
         // Input handler
         this.inputHandler = null;
         
-        // Indicator manager
-        this.indicatorManager = new IndicatorManager(this.id);
         
         // Initialize the complete terminal (frontend + backend)
         this.initialize();
@@ -430,7 +428,6 @@ class TerminalInstance {
             // Only show indicator if tab is not currently active
             if (!this.isActive) {
                 console.log(`🔔 BELL DEBUG: Tab is inactive, showing bell indicator`);
-                this.indicatorManager.showBellIndicatorOnly();
             } else {
                 console.log(`🔔 BELL DEBUG: Tab is active, not showing bell indicator`);
             }
@@ -626,10 +623,6 @@ class TerminalInstance {
             this.terminal.write(data);
             this._lastWriteTs = Date.now();
             
-            // 4. Track activity for inactive tabs (like macOS Terminal)
-            if (!this.isActive && !this.indicatorManager.hasIndicator(this.indicatorManager.INDICATORS.ACTIVITY)) {
-                this.indicatorManager.showActivityIndicator();
-            }
             
             if (this._booting) {
                 this._bootLastActivity = Date.now();
@@ -694,11 +687,10 @@ class TerminalInstance {
         if (active) {
             console.log(`🔔 BELL DEBUG: Tab ${this.id} became active`);
             // Clear all indicators when tab becomes active
-            this.indicatorManager.clearAllIndicators();
             
             queueMicrotask(() => {
                 if (this.terminal) {
-                    this.terminal.refresh(0, this.terminal.rows - 1);
+                    // this.terminal.refresh(0, this.terminal.rows - 1);
                 }
                 requestAnimationFrame(() => {
                     this.fit();
@@ -716,26 +708,7 @@ class TerminalInstance {
         }
     }
     
-    /**
-     * Show bell indicator in tab (without VS Code notification)
-     */
-    showBellIndicatorOnly() {
-        this.indicatorManager.showBellIndicatorOnly();
-    }
 
-    /**
-     * Show bell indicator in tab (with VS Code notification)
-     */
-    showBellIndicator() {
-        this.indicatorManager.showBellIndicatorOnly();
-        
-        // Play sound notification and include tab info for navigation
-        this.vscode.postMessage({
-            command: 'playBellSound',
-            tabId: this.id,
-            tabLabel: this.label
-        });
-    }
     
     
     /**
@@ -1029,7 +1002,6 @@ class TerminalInstance {
             }
             
             // Clear all indicators
-            this.indicatorManager.clearAllIndicators();
             
             // Clear references
             this.fitAddon = null;
@@ -1062,7 +1034,7 @@ class TerminalInstance {
             if (!document.hidden && this.isActive) {
                 requestAnimationFrame(() => {
                     if (this.terminal) {
-                        this.terminal.refresh(0, this.terminal.rows - 1);
+                        // this.terminal.refresh(0, this.terminal.rows - 1);
                         this.fit();
                         this._scheduleRedrawSequence();
                     }
@@ -1123,7 +1095,7 @@ class TerminalInstance {
             if (!this.terminal || !this.isActive) { this._stabilizing = false; return; }
             const w = this.terminalContainer?.offsetWidth || 0;
             const h = this.terminalContainer?.offsetHeight || 0;
-            try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
+            // try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
             if (w === lastW && h === lastH) stable++; else { stable = 0; lastW = w; lastH = h; }
             attempts++;
             if (stable >= 2 || attempts >= 10) { this._stabilizing = false; return; }
