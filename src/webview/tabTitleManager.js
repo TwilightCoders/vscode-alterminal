@@ -716,7 +716,6 @@ class TabTitleManager {
     getState() {
         return {
             state: this._state,
-            customIcons: Array.from(this.customIcons.entries()),
             baseLabel: this.baseLabel
         };
     }
@@ -729,9 +728,6 @@ class TabTitleManager {
             this._state = state.state;
         }
         
-        if (state && Array.isArray(state.customIcons)) {
-            this.customIcons = new Map(state.customIcons);
-        }
 
         if (state && state.baseLabel) {
             this.baseLabel = state.baseLabel;
@@ -760,7 +756,6 @@ class TabTitleManager {
         this.bellIcon = null;
         this.dropdown = null;
         this.labelElement = null;
-        this.customIcons.clear();
         this.onTitleChanged = null;
         this.onNotificationClick = null;
     }
