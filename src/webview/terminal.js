@@ -1,4 +1,5 @@
 import { InputHandler } from './inputHandler.js';
+import { IndicatorManager } from './indicatorManager.js';
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
@@ -56,14 +57,7 @@ class TerminalInstance {
         // State management
         this.isActive = false;
         
-        // Tab indicator tracking (bitmask for space efficiency)
-        this._tabIndicators = 0; // All indicators start disabled
-        
-        // Indicator bit positions (bell takes precedence over activity)
-        this.INDICATORS = {
-            ACTIVITY: 1 << 0,  // bit 0 - activity indicator (...)
-            BELL: 1 << 1       // bit 1 - bell indicator (🔔) - higher precedence
-        };
+        // Tab indicators handled by IndicatorManager
         
         // Terminal mode tracking (bitmask for space efficiency)
         this._terminalModes = 0; // All modes start disabled
@@ -103,6 +97,9 @@ class TerminalInstance {
         
         // Input handler
         this.inputHandler = null;
+        
+        // Indicator manager
+        this.indicatorManager = new IndicatorManager(this.id);
         
         // Initialize the complete terminal (frontend + backend)
         this.initialize();
@@ -433,7 +430,7 @@ class TerminalInstance {
             // Only show indicator if tab is not currently active
             if (!this.isActive) {
                 console.log(`🔔 BELL DEBUG: Tab is inactive, showing bell indicator`);
-                this.showBellIndicatorOnly();
+                this.indicatorManager.showBellIndicatorOnly();
             } else {
                 console.log(`🔔 BELL DEBUG: Tab is active, not showing bell indicator`);
             }
@@ -630,8 +627,8 @@ class TerminalInstance {
             this._lastWriteTs = Date.now();
             
             // 4. Track activity for inactive tabs (like macOS Terminal)
-            if (!this.isActive && !this.hasIndicator(this.INDICATORS.ACTIVITY)) {
-                this.showActivityIndicator();
+            if (!this.isActive && !this.indicatorManager.hasIndicator(this.indicatorManager.INDICATORS.ACTIVITY)) {
+                this.indicatorManager.showActivityIndicator();
             }
             
             if (this._booting) {
@@ -695,13 +692,9 @@ class TerminalInstance {
         }
         
         if (active) {
-            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active, indicators: ${this._tabIndicators}`);
+            console.log(`🔔 BELL DEBUG: Tab ${this.id} became active`);
             // Clear all indicators when tab becomes active
-            if (this._tabIndicators !== 0) {
-                console.log(`🔔 BELL DEBUG: Clearing all indicators for tab ${this.id}`);
-                this._tabIndicators = 0;
-                this.updateTabIndicator();
-            }
+            this.indicatorManager.clearAllIndicators();
             
             queueMicrotask(() => {
                 if (this.terminal) {
@@ -727,14 +720,14 @@ class TerminalInstance {
      * Show bell indicator in tab (without VS Code notification)
      */
     showBellIndicatorOnly() {
-        this.setIndicator(this.INDICATORS.BELL, true);
+        this.indicatorManager.showBellIndicatorOnly();
     }
 
     /**
      * Show bell indicator in tab (with VS Code notification)
      */
     showBellIndicator() {
-        this.setIndicator(this.INDICATORS.BELL, true);
+        this.indicatorManager.showBellIndicatorOnly();
         
         // Play sound notification and include tab info for navigation
         this.vscode.postMessage({
@@ -744,100 +737,6 @@ class TerminalInstance {
         });
     }
     
-    
-    /**
-     * Helper methods for indicator bitmask management
-     */
-    hasIndicator(indicator) {
-        return (this._tabIndicators & indicator) !== 0;
-    }
-    
-    setIndicator(indicator, enabled) {
-        if (enabled) {
-            this._tabIndicators |= indicator;
-        } else {
-            this._tabIndicators &= ~indicator;
-        }
-        this.updateTabIndicator();
-    }
-    
-    /**
-     * Update the visual tab indicator based on current state
-     * Bell takes precedence over activity
-     */
-    updateTabIndicator() {
-        const tabElement = document.querySelector(`[data-tab-id="${this.id}"]`);
-        if (!tabElement) return;
-        
-        // Remove any existing indicators
-        const existingIndicator = tabElement.querySelector('.tab-indicator');
-        if (existingIndicator) {
-            existingIndicator.remove();
-        }
-        
-        // Determine which indicator to show (bell takes precedence)
-        let indicatorConfig = null;
-        if (this.hasIndicator(this.INDICATORS.BELL)) {
-            indicatorConfig = {
-                className: 'tab-indicator bell-indicator codicon codicon-bell',
-                text: '',
-                style: `
-                    margin-left: 4px;
-                    color: var(--vscode-notificationsWarningIcon-foreground, #ffcc02);
-                    font-size: 12px;
-                    opacity: 0;
-                    transition: opacity 0.3s ease;
-                `
-            };
-        } else if (this.hasIndicator(this.INDICATORS.ACTIVITY)) {
-            indicatorConfig = {
-                className: 'tab-indicator activity-indicator',
-                text: '...',
-                style: `
-                    margin-left: 4px;
-                    color: var(--vscode-tab-unfocusedInactiveForeground, #888);
-                    font-size: 11px;
-                    opacity: 0;
-                    transition: opacity 0.2s ease;
-                `
-            };
-        }
-        
-        // Create and show the indicator if needed
-        if (indicatorConfig) {
-            const indicator = document.createElement('span');
-            indicator.className = indicatorConfig.className;
-            indicator.textContent = indicatorConfig.text;
-            indicator.style.cssText = indicatorConfig.style;
-            
-            // Insert before close button
-            const closeBtn = tabElement.querySelector('.tab-close');
-            if (closeBtn) {
-                tabElement.insertBefore(indicator, closeBtn);
-            } else {
-                tabElement.appendChild(indicator);
-            }
-            
-            // Fade in
-            requestAnimationFrame(() => {
-                indicator.style.opacity = '1';
-            });
-        }
-    }
-    
-    /**
-     * Show activity indicator in tab (like macOS Terminal ...)
-     */
-    showActivityIndicator() {
-        this.setIndicator(this.INDICATORS.ACTIVITY, true);
-    }
-    
-    /**
-     * Clear activity indicator when tab becomes active
-     */
-    clearActivityIndicator() {
-        this.setIndicator(this.INDICATORS.ACTIVITY, false);
-    }
     
     /**
      * Serialize terminal state for persistence
@@ -1130,10 +1029,7 @@ class TerminalInstance {
             }
             
             // Clear all indicators
-            if (this._tabIndicators !== 0) {
-                this._tabIndicators = 0;
-                this.updateTabIndicator();
-            }
+            this.indicatorManager.clearAllIndicators();
             
             // Clear references
             this.fitAddon = null;
