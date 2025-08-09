@@ -15,7 +15,6 @@
             height: 100vh;
             box-sizing: border-box;
             overflow: hidden;
-            background-color: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
             color: var(--vscode-terminal-foreground, #cccccc);
             font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
         }
@@ -32,10 +31,9 @@
         }
         
         .tab-bar {
-            background-color: var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
             border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
             flex-shrink: 0;
-            min-height: 32px;
+            min-height: 28px;
             overflow: hidden;
         }
         
@@ -69,7 +67,7 @@
             color: var(--vscode-tab-inactiveForeground, #cccccc);
             border: none;
             cursor: pointer;
-            padding: 8px 12px;
+            padding: 6px 10px;
             margin: 0;
             min-width: 120px;
             max-width: 300px;
@@ -79,6 +77,7 @@
             white-space: nowrap;
             text-overflow: ellipsis;
             overflow: hidden;
+            font-size: 12px;
         }
         
         .container.vertical-tabs .tab {
@@ -87,8 +86,8 @@
             max-width: none;
             width: 100%;
             justify-content: space-between;
-            padding: 8px 8px;
-            min-height: 32px;
+            padding: 6px 8px;
+            min-height: 28px;
         }
         
         .tab.active {
@@ -133,11 +132,11 @@
             background-color: transparent;
             color: var(--vscode-tab-inactiveForeground, #cccccc);
             border: none;
-            min-width: 32px;
+            min-width: 28px;
             transition: all 0.2s ease;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: bold;
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
         }
         
@@ -168,6 +167,27 @@
             max-width: calc(100% - 40px);
         }
         
+        .tab-save {
+            opacity: 0;
+            margin-left: 4px;
+            padding: 2px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            background-color: transparent;
+            border: none;
+            line-height: 1;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
         .tab-close {
             opacity: 0;
             margin-left: 4px;
@@ -235,8 +255,17 @@
             border-radius: 2px;
         }
         
+        .tab:hover .tab-save {
+            opacity: 1;
+        }
+
         .tab:hover .tab-close {
             opacity: 1;
+        }
+
+        .tab-save:hover {
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-button-foreground, #ffffff);
         }
         
         /* High contrast mode support */
@@ -263,7 +292,6 @@
         
         .terminal-container {
             flex: 1;
-            background-color: var(--vscode-terminal-background, #1e1e1e);
             position: relative;
             overflow: hidden;
         }
@@ -357,6 +385,7 @@
         }
         
         /* Drag and drop styling - minimal visual feedback via background color only */
+        
         
         /* XTerm.js cursor override for file path links */
         /* Normal mode: file paths get text cursor for selection */

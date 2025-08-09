@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
 import { Logger } from './utils/logger';
+import { CommandManager } from './webview/commandManager';
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'alterminalView';
@@ -12,11 +13,21 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     private _fileWatcher?: vscode.FileSystemWatcher;
     private _workspaceFiles = new Set<string>();
     private _isColdBoot = true; // determined once at construction/activation
+    private _commandManager: CommandManager;
 
     constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext, ptyManager: PtyManager) {
         AlterminalProvider._instance = this;
         this._context = context;
         this._ptyManager = ptyManager;
+        // Initialize CommandManager asynchronously to avoid blocking extension startup
+        this._commandManager = new CommandManager(
+            { 
+                getConfiguration: (section: string) => vscode.workspace.getConfiguration(section),
+                window: vscode.window,
+                commands: vscode.commands
+            },
+            (command: string) => this.createNewTabWithCommand(command)
+        );
     }
 
 
@@ -107,7 +118,9 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             setDebugFilter: (msg: any) => {}, // Handled in webview
             debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
             setDeveloperMode: (msg: any) => {}, // Handled in webview
-            performanceReport: (msg: any) => this._showPerformanceReport(msg.data)
+            performanceReport: (msg: any) => this._showPerformanceReport(msg.data),
+            saveCommand: (msg: any) => this._handleSaveCommand(msg),
+            checkCommandSaved: (msg: any) => this._handleCheckCommandSaved(msg)
         };
 
         webviewView.webview.onDidReceiveMessage(
@@ -608,6 +621,63 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             });
         }
     }
+
+    public async showSavedCommands() {
+        await this._commandManager.showSavedCommandsPicker();
+    }
+
+    public async saveCurrentCommand() {
+        await this._commandManager.showSaveCommandDialog();
+    }
+
+    private async _handleSaveCommand(msg: any) {
+        try {
+            if (!msg.launchCommand) {
+                Logger.warn('Cannot save command: no launch command provided');
+                return;
+            }
+
+            // Use CommandManager to save the command
+            await this._commandManager.saveCommand(msg.launchCommand);
+            
+            // Show success message
+            vscode.window.showInformationMessage(
+                `Command "${msg.launchCommand}" saved to quick launch menu!`
+            );
+            
+            Logger.info(`Command saved from tab ${msg.tabId}: ${msg.launchCommand}`);
+        } catch (error) {
+            Logger.error('Failed to save command:', error);
+            vscode.window.showErrorMessage('Failed to save command. Please try again.');
+        }
+    }
+
+    private _handleCheckCommandSaved(msg: any) {
+        try {
+            if (!msg.launchCommand) {
+                Logger.warn('Cannot check command saved status: no launch command provided');
+                return;
+            }
+
+            // Check if command exists in saved commands
+            const savedCommands = this._commandManager.getSavedCommands();
+            const isSaved = savedCommands.some(cmd => cmd.command === msg.launchCommand);
+            
+            // Send response back to webview
+            if (this._view) {
+                this._view.webview.postMessage({
+                    command: 'commandSavedResponse',
+                    launchCommand: msg.launchCommand,
+                    isSaved: isSaved
+                });
+            }
+            
+            Logger.debug(`Command saved status check: ${msg.launchCommand} = ${isSaved}`);
+        } catch (error) {
+            Logger.error('Failed to check command saved status:', error);
+        }
+    }
+
 
     public dispose() {
         Logger.debug('⚠️ Disposing AlterminalProvider');

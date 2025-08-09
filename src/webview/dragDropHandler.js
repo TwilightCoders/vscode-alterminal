@@ -73,8 +73,9 @@ class DragDropHandler {
         e.stopPropagation();
         e.dataTransfer.dropEffect = 'copy';
         
-        // Apply subtle visual feedback - light grey tint like VS Code
-        this.target.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+        // Apply subtle visual feedback using VS Code's terminal drop background
+        const dropBackground = getComputedStyle(document.body).getPropertyValue('--vscode-terminal-dropBackground') || 'rgba(255, 255, 255, 0.05)';
+        this.target.style.backgroundColor = dropBackground;
         this.target.style.transition = 'background-color 0.15s ease';
     }
     

@@ -71,7 +71,7 @@
       {
         "command": "alterminal.newTerminal.command",
         "title": "Launch Command",
-        "icon": "$(play)"
+        "icon": "$(rocket)"
       },
       {
         "command": "alterminal.openTerminal",
@@ -117,12 +117,22 @@
         "command": "alterminal.openSettings",
         "title": "Settings",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "alterminal.showSavedCommands",
+        "title": "Launch Saved Command",
+        "icon": "$(play)"
+      },
+      {
+        "command": "alterminal.saveCurrentCommand",
+        "title": "Save Current Command",
+        "icon": "$(save)"
       }
     ],
     "submenus": [
       {
         "id": "alterminal.newTerminal",
-        "label": "More...",
+        "label": "More Options",
         "icon": "$(ellipsis)"
       },
       {
@@ -139,29 +149,39 @@
           "group": "navigation@1"
         },
         {
-          "submenu": "alterminal.newTerminal",
-          "when": "view == alterminalView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "alterminal.refresh",
+          "command": "alterminal.newTerminal.command",
           "when": "view == alterminalView",
           "group": "navigation@2"
         },
         {
+          "command": "alterminal.showSavedCommands",
+          "when": "view == alterminalView && alterminal.hasSavedCommands",
+          "group": "navigation@3"
+        },
+        {
+          "command": "alterminal.openSettings",
+          "when": "view == alterminalView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "alterminal.refresh",
+          "when": "view == alterminalView",
+          "group": "navigation@5"
+        },
+        {
           "submenu": "alterminal.debug",
           "when": "view == alterminalView && alterminal.debugMode",
-          "group": "navigation@3"
+          "group": "navigation@6"
         }
       ],
       "alterminal.newTerminal": [
         {
-          "command": "alterminal.newTerminal.command",
+          "command": "alterminal.newTerminal.shell",
           "group": "1_terminals@1"
         },
         {
-          "command": "alterminal.openSettings",
-          "group": "2_settings@1"
+          "command": "alterminal.saveCurrentCommand", 
+          "group": "2_commands@1"
         }
       ],
       "alterminal.debug": [
@@ -254,6 +274,32 @@
           "minimum": 100,
           "maximum": 50000,
           "description": "Number of lines to keep in terminal scrollback buffer. Higher values use more memory but preserve more history."
+        },
+        "alterminal.savedCommands": {
+          "type": "array",
+          "default": [],
+          "description": "Saved terminal commands for quick launching",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The command to execute"
+              },
+              "label": {
+                "type": "string", 
+                "description": "Display label for the command"
+              },
+              "count": {
+                "type": "number",
+                "description": "Usage count"
+              },
+              "lastUsed": {
+                "type": "string",
+                "description": "Last used timestamp"
+              }
+            }
+          }
         }
       }
     }

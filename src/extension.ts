@@ -115,6 +115,12 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('alterminal.performanceReport', async () => {
             await provider.requestPerformanceReport();
+        }),
+        vscode.commands.registerCommand('alterminal.showSavedCommands', async () => {
+            await provider.showSavedCommands();
+        }),
+        vscode.commands.registerCommand('alterminal.saveCurrentCommand', async () => {
+            await provider.saveCurrentCommand();
         })
     );
 }

@@ -233,6 +233,11 @@ class TabManager {
                     case 'collectPerformance':
                         this._reportPerformance();
                         break;
+                    
+                    case 'commandSavedResponse':
+                        Logger.debug('📋 Received command saved status:', message.launchCommand, message.isSaved);
+                        this.updateSaveButtonVisibility(message.launchCommand, message.isSaved);
+                        break;
                         
                     default:
                         Logger.warn('Unknown command received:', message.command);
@@ -543,6 +548,74 @@ class TabManager {
         this.saveToLocalState();
         
         // PTY disposal is now handled by the Terminal instance itself
+    }
+
+    /**
+     * Save command from a command tab to the saved commands
+     */
+    saveCommand(tabId) {
+        const terminal = this.terminals.get(tabId);
+        if (!terminal || !terminal.launchCommand) {
+            Logger.warn('Cannot save command: terminal not found or not a command tab');
+            return;
+        }
+
+        // Send command to extension host for saving via CommandManager
+        this.vscode.postMessage({
+            command: 'saveCommand',
+            tabId: tabId,
+            launchCommand: terminal.launchCommand,
+            tabLabel: terminal.label
+        });
+
+        // Provide visual feedback
+        Logger.info(`Saving command: ${terminal.launchCommand}`);
+        
+        // Update save button visibility for all tabs after saving
+        this.updateAllSaveButtonsVisibility();
+    }
+
+    /**
+     * Check if a command is already saved and update save button visibility
+     */
+    checkCommandSavedStatus(command, saveBtn) {
+        // Request saved commands from extension
+        this.vscode.postMessage({
+            command: 'checkCommandSaved',
+            launchCommand: command
+        });
+        
+        // Store button reference for later update
+        saveBtn.setAttribute('data-command', command);
+    }
+
+    /**
+     * Update save button visibility for a specific command
+     */
+    updateSaveButtonVisibility(command, isSaved) {
+        const saveButtons = document.querySelectorAll(`.tab-save[data-command="${command}"]`);
+        saveButtons.forEach(btn => {
+            if (isSaved) {
+                btn.style.display = 'none';
+                btn.setAttribute('aria-hidden', 'true');
+            } else {
+                btn.style.display = 'flex';
+                btn.setAttribute('aria-hidden', 'false');
+            }
+        });
+    }
+
+    /**
+     * Update all save buttons visibility after commands change
+     */
+    updateAllSaveButtonsVisibility() {
+        const saveButtons = document.querySelectorAll('.tab-save[data-command]');
+        saveButtons.forEach(btn => {
+            const command = btn.getAttribute('data-command');
+            if (command) {
+                this.checkCommandSavedStatus(command, btn);
+            }
+        });
     }
     
     /**
@@ -926,6 +999,10 @@ class TabManager {
         
         if (!tabList) return;
         
+        // Get the terminal to check if it's a command tab
+        const terminal = this.terminals.get(tabId);
+        const isCommandTab = terminal && terminal.launchCommand;
+        
         // Create semantic list item for tab
         const tab = document.createElement('li');
         tab.className = 'tab';
@@ -940,6 +1017,24 @@ class TabManager {
         labelElement.className = 'tab-label';
         labelElement.textContent = label;
         
+        // Add save button for command tabs (only if not already saved)
+        if (isCommandTab) {
+            const saveBtn = document.createElement('span');
+            saveBtn.className = 'tab-save codicon codicon-save';
+            saveBtn.setAttribute('role', 'button');
+            saveBtn.setAttribute('tabindex', '0');
+            saveBtn.setAttribute('aria-label', `Save ${terminal.launchCommand} command`);
+            saveBtn.setAttribute('title', `Save "${terminal.launchCommand}" to quick launch menu`);
+            
+            // Check if command is already saved and hide button if so
+            this.checkCommandSavedStatus(terminal.launchCommand, saveBtn);
+            
+            tab.appendChild(labelElement);
+            tab.appendChild(saveBtn);
+        } else {
+            tab.appendChild(labelElement);
+        }
+        
         const closeBtn = document.createElement('span');
         closeBtn.className = 'tab-close codicon codicon-trash';
         closeBtn.setAttribute('role', 'button');
@@ -947,7 +1042,6 @@ class TabManager {
         closeBtn.setAttribute('aria-label', `Close ${label} tab`);
         // TODO: Add draggable="false" when implementing drag and drop reordering
         
-        tab.appendChild(labelElement);
         tab.appendChild(closeBtn);
         
         // Append to the end of the tab list
@@ -996,6 +1090,20 @@ class TabManager {
             
             // Click handlers
             tabBar.addEventListener('click', (e) => {
+                // Handle save button clicks
+                if (e.target.classList.contains('tab-save')) {
+                    const tab = e.target.closest('.tab');
+                    if (tab && tab.dataset.tabId) {
+                        const tabId = parseInt(tab.dataset.tabId);
+                        if (!isNaN(tabId)) {
+                            this.saveCommand(tabId);
+                        }
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+
                 // Handle close button clicks
                 if (e.target.classList.contains('tab-close')) {
                     const tab = e.target.closest('.tab');

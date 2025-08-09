@@ -21,7 +21,7 @@ function getVSCodeColor(cssVar, fallback) {
 
 // Terminal theme configuration with full ANSI color palette
 const terminalTheme = {
-    background: getVSCodeColor('--vscode-terminal-background', '#1e1e1e'),
+    background: getVSCodeColor('--vscode-panel-background', '#ff0000'),
     foreground: getVSCodeColor('--vscode-terminal-foreground', '#cccccc'),
     cursor: getVSCodeColor('--vscode-terminalCursor-foreground', '#cccccc'),
     cursorAccent: getVSCodeColor('--vscode-terminalCursor-background', '#1e1e1e'),

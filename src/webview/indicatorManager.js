@@ -20,7 +20,7 @@
  */
 
 export class IndicatorManager {
-    constructor(tabId, updateTabUICallback) {
+    constructor(tabId, updateTabUICallback = null) {
         this.tabId = tabId;
         this.updateTabUI = updateTabUICallback;
         

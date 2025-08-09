@@ -16,7 +16,16 @@ export class TemplateUtils {
     ): string {
         // Read webview scripts from src directory
         const srcDir = path.join(__dirname, '..', '..', 'src');
-        const terminalScript = `${fs.readFileSync(path.join(srcDir, 'webview', 'terminal.js'), 'utf8')}`;
+        
+        // Load and inline the imported classes first
+        const inputHandlerScript = fs.readFileSync(path.join(srcDir, 'webview', 'inputHandler.js'), 'utf8')
+            .replace('export class InputHandler', 'class InputHandler');
+        const indicatorManagerScript = fs.readFileSync(path.join(srcDir, 'webview', 'indicatorManager.js'), 'utf8')
+            .replace('export class IndicatorManager', 'class IndicatorManager');
+        
+        // Load main scripts and remove import statements
+        const terminalScript = fs.readFileSync(path.join(srcDir, 'webview', 'terminal.js'), 'utf8')
+            .replace(/^import.*from.*;\s*$/gm, ''); // Remove import lines
         const tabManagerScript = `${fs.readFileSync(path.join(srcDir, 'webview', 'tabManager.js'), 'utf8')}`;
         const dragDropHandlerScript = `${fs.readFileSync(path.join(srcDir, 'webview', 'dragDropHandler.js'), 'utf8')}`;
         
@@ -53,6 +62,8 @@ export class TemplateUtils {
         // Combine scripts with logger
         const combinedScript = [
             createWebviewLogger(),
+            inputHandlerScript,      // Load classes first
+            indicatorManagerScript,
             terminalScript,
             tabManagerScript, 
             dragDropHandlerScript,
