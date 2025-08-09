@@ -121,24 +121,20 @@ export class PtyManager {
             let command: string;
             let args: string[];
             
-            const config = vscode.workspace.getConfiguration('alterminal');
-            const startingCommand = config.get<string>('startingCommand', '');
             
             switch (terminalType) {
                 case 'command':
-                    // Use custom command if provided, otherwise fall back to configured starting command
+                    // Use custom command if provided, otherwise default to shell
                     if (customCommand) {
                         const parts = customCommand.split(' ');
                         command = parts[0];
                         args = parts.slice(1);
                         Logger.debug(`Using custom command: ${command} with args:`, args);
-                    } else if (startingCommand) {
-                        const parts = startingCommand.split(' ');
-                        command = parts[0];
-                        args = parts.slice(1);
                     } else {
+                        // Default to shell if no command specified
                         command = userShell;
                         args = process.platform === 'win32' ? [] : ['-l', '-i'];
+                        Logger.debug(`No command specified, using shell: ${command} with args:`, args);
                     }
                     break;
                     
@@ -155,22 +151,14 @@ export class PtyManager {
                     
                 case 'default':
                 default:
-                    // Use configured starting command or default to shell
-                    if (startingCommand) {
-                        const parts = startingCommand.split(' ');
-                        command = parts[0];
-                        args = parts.slice(1);
-                        Logger.debug(`Spawning configured command: ${command} with args:`, args);
+                    // Default to plain shell
+                    command = userShell;
+                    if (process.platform === 'win32') {
+                        args = [];
                     } else {
-                        // Plain shell
-                        command = userShell;
-                        if (process.platform === 'win32') {
-                            args = [];
-                        } else {
-                            args = ['-l', '-i'];
-                        }
-                        Logger.debug(`No starting command configured, using shell: ${command} with args:`, args);
+                        args = ['-l', '-i'];
                     }
+                    Logger.debug(`Using default shell: ${command} with args:`, args);
                     break;
             }
             

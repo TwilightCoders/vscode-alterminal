@@ -221,11 +221,6 @@
     "configuration": {
       "title": "Alterminal",
       "properties": {
-        "alterminal.startingCommand": {
-          "type": "string",
-          "default": "",
-          "description": "Command to automatically execute when the terminal starts (leave empty for shell only)"
-        },
         "alterminal.tabLayout": {
           "type": "string",
           "enum": [
