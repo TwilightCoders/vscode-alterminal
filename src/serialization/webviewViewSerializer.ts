@@ -1,7 +1,7 @@
 /**
  * WebviewViewSerializer
  * 
- * Handles all serialization and deserialization logic for the Claude Pilot WebviewView.
+ * Handles all serialization and deserialization logic for the Alterminal WebviewView.
  * Since WebviewView doesn't have built-in serialization support like WebviewPanel,
  * this class provides comprehensive state management for terminal sessions.
  * 
@@ -28,7 +28,7 @@ export interface PersistedState {
 }
 
 export class WebviewViewSerializer {
-    private static readonly STORAGE_KEY = 'claudePilot.webviewState';
+    private static readonly STORAGE_KEY = 'alterminal.webviewState';
     private _webviewView?: vscode.WebviewView;
     private _context: vscode.ExtensionContext;
     private _didInitialViewRestore = false;
@@ -242,7 +242,7 @@ export class WebviewViewSerializer {
             id: terminal.id,
             label: terminal.label,
             rawContent: terminal.serialize() || '',
-            terminalType: terminal.terminalType || 'claude'
+            terminalType: terminal.terminalType || 'default'
         };
     }
 }

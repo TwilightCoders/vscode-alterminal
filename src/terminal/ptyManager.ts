@@ -8,14 +8,14 @@
  * 
  * Responsibilities:
  * - Spawn and manage individual PTY processes with proper environment
- * - Handle shell readiness detection and automatic Claude command execution
+ * - Handle shell readiness detection and command execution
  * - Process file drops and convert them to appropriate terminal input
  * - Manage PTY resizing, data flow, and process cleanup
  * 
  * Key Features:
  * - Automatic shell detection (bash/zsh on Unix, cmd on Windows)
  * - Smart shell readiness detection based on data flow timing
- * - Configurable auto-command execution (claude, claude --continue, etc.)
+ * - Configurable auto-command execution
  * - File path handling with proper shell escaping
  * - Clean process-focused API without tab awareness
  * 
@@ -67,7 +67,7 @@ export class PtyManager {
     public async handleMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'createPty':
-                this.createPtyProcess(message.tabId, message.terminalType);
+                this.createPtyProcess(message.tabId, message.terminalType, message.customCommand);
                 break;
             case 'disposePty':
                 this.disposePtyProcess(message.tabId);
@@ -112,7 +112,7 @@ export class PtyManager {
     }
 
 
-    public createPtyProcess(tabId: number, terminalType: string = 'claude'): void {
+    public createPtyProcess(tabId: number, terminalType: string = 'default', customCommand?: string): void {
         // Only create new PTY process if one doesn't exist for this tab
         if (!this._ptyProcesses.has(tabId)) {
             // Store terminal type for this tab
@@ -123,39 +123,55 @@ export class PtyManager {
             let command: string;
             let args: string[];
             
+            const config = vscode.workspace.getConfiguration('alterminal');
+            const startingCommand = config.get<string>('startingCommand', '');
+            
             switch (terminalType) {
-                case 'continue':
-                    // Spawn claude with --continue flag directly
-                    command = 'claude';
-                    args = ['--continue'];
+                case 'command':
+                    // Use custom command if provided, otherwise fall back to configured starting command
+                    if (customCommand) {
+                        const parts = customCommand.split(' ');
+                        command = parts[0];
+                        args = parts.slice(1);
+                        Logger.debug(`Using custom command: ${command} with args:`, args);
+                    } else if (startingCommand) {
+                        const parts = startingCommand.split(' ');
+                        command = parts[0];
+                        args = parts.slice(1);
+                    } else {
+                        command = userShell;
+                        args = process.platform === 'win32' ? [] : ['-l', '-i'];
+                    }
                     break;
                     
-                case 'claude':
-                    command = 'claude';
-                    args = [];
-                    break; 
-                    
                 case 'shell':
-                default:
-                    // Get configured starting command or default to 'claude'
-                    const config = vscode.workspace.getConfiguration('claudePilot');
-                    const startingCommand = config.get<string>('startingCommand', 'claude');
-                    Logger.debug(`Creating claude terminal with startingCommand: "${startingCommand}"`);
+                    // Always plain shell (no auto command)
+                    command = userShell;
+                    if (process.platform === 'win32') {
+                        args = [];
+                    } else {
+                        args = ['-l', '-i'];
+                    }
+                    Logger.debug(`Using shell (login+interactive): ${command} with args:`, args);
+                    break;
                     
-                    if (startingCommand === 'none') {
-                        // Plain shell always as login + interactive (restore user prompt/env)
+                case 'default':
+                default:
+                    // Use configured starting command or default to shell
+                    if (startingCommand) {
+                        const parts = startingCommand.split(' ');
+                        command = parts[0];
+                        args = parts.slice(1);
+                        Logger.debug(`Spawning configured command: ${command} with args:`, args);
+                    } else {
+                        // Plain shell
                         command = userShell;
                         if (process.platform === 'win32') {
                             args = [];
                         } else {
                             args = ['-l', '-i'];
                         }
-                        Logger.debug(`Using shell instead (login+interactive): ${command} with args:`, args);
-                    } else {
-                        // Spawn the claude command directly
-                        command = startingCommand;
-                        args = [];
-                        Logger.debug(`Spawning command: ${command} with args:`, args);
+                        Logger.debug(`No starting command configured, using shell: ${command} with args:`, args);
                     }
                     break;
             }
@@ -245,7 +261,7 @@ export class PtyManager {
             const fs = require('fs').promises;
             
             const tempDir = os.tmpdir();
-            const tempFileName = `claude-pilot-${Date.now()}-${fileName}`;
+            const tempFileName = `alterminal-${Date.now()}-${fileName}`;
             const tempFilePath = path.join(tempDir, tempFileName);
             
             // Handle different data formats

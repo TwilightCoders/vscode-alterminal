@@ -3,9 +3,9 @@ import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
 import { Logger } from './utils/logger';
 
-export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'claudePilotView';
-    private static _instance?: ClaudeCodeProvider;
+export class AlterminalProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'alterminalView';
+    private static _instance?: AlterminalProvider;
     private _view?: vscode.WebviewView;
     private _ptyManager: PtyManager;
     private _context: vscode.ExtensionContext;
@@ -14,7 +14,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     private _isColdBoot = true; // determined once at construction/activation
 
     constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext, ptyManager: PtyManager) {
-        ClaudeCodeProvider._instance = this;
+        AlterminalProvider._instance = this;
         this._context = context;
         this._ptyManager = ptyManager;
     }
@@ -37,7 +37,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         };
 
         // Get configuration
-        const config = vscode.workspace.getConfiguration('claudePilot');
+        const config = vscode.workspace.getConfiguration('alterminal');
         const scrollback = config.get<number>('terminal.scrollback', 1000);
 
         // Set up components with the webview
@@ -150,7 +150,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     public async refresh() {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "Restarting Claude Pilot...",
+            title: "Restarting Alterminal...",
             cancellable: false
         }, async (progress) => {
             try {
@@ -191,11 +191,11 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
                 
                 progress.report({ increment: 100, message: "Complete!" });
                 
-                vscode.window.showInformationMessage('Claude Pilot restarted successfully!');
+                vscode.window.showInformationMessage('Alterminal restarted successfully!');
                 
             } catch (error) {
                 console.error('Error during refresh:', error);
-                vscode.window.showErrorMessage(`Failed to restart Claude Pilot: ${error}`);
+                vscode.window.showErrorMessage(`Failed to restart Alterminal: ${error}`);
             }
         });
     }
@@ -215,6 +215,16 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             });
         }
     }
+    
+    public createNewTabWithCommand(command: string) {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                command: 'createNewTab',
+                terminalType: 'command',
+                customCommand: command
+            });
+        }
+    }
 
     public testLinks() {
         this._handleTestLinks();
@@ -224,7 +234,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         if (this._view) {
             this._view.show?.(true);
         } else {
-            await vscode.commands.executeCommand('workbench.view.extension.claudePilotContainer');
+            await vscode.commands.executeCommand('workbench.view.extension.alterminalContainer');
         }
     }
 
@@ -305,7 +315,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
                 'Go to Terminal'
             ).then(selection => {
                 if (selection === 'Go to Terminal') {
-                    // Focus the Claude Pilot view and switch to the specific tab
+                    // Focus the Alterminal view and switch to the specific tab
                     this.openTerminal().then(() => {
                         // Send message to switch to the specific tab
                         if (this._view) {
@@ -367,7 +377,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         try {
             // Save backup state to extension workspace (non-critical)
             if (state) {
-                await this._context.workspaceState.update('claudePilot.webviewState', {
+                await this._context.workspaceState.update('alterminal.webviewState', {
                     terminals: state.terminals || [],
                     activeTabId: state.activeTabId || 1,
                     timestamp: Date.now()
@@ -384,7 +394,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         
         try {
             // Get saved backup state from extension context (webview handles primary state itself)
-            const backupState = this._context.workspaceState.get('claudePilot.webviewState') as any;
+            const backupState = this._context.workspaceState.get('alterminal.webviewState') as any;
             
             console.log('📤 Restoring webview state:', {
                 isColdBoot: this._isColdBoot,
@@ -420,7 +430,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
         
         try {
             // Load cached files from workspace state
-            const cachedFiles = this._context.workspaceState.get<string[]>('workspaceFiles', []);
+            const cachedFiles = this._context.workspaceState.get<string[]>('alterminal.workspaceFiles', []);
             this._workspaceFiles = new Set(cachedFiles);
             
             // Send initial cache to webview
@@ -473,7 +483,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
             this._workspaceFiles = new Set(filePathsArray);
             
             // Store in workspace state
-            await this._context.workspaceState.update('workspaceFiles', filePathsArray);
+            await this._context.workspaceState.update('alterminal.workspaceFiles', filePathsArray);
             
             // Send to webview
             this._sendWorkspaceFileCache();
@@ -561,7 +571,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
      */
     private _updateWorkspaceStateCache = this._debounce(() => {
         const filePaths = Array.from(this._workspaceFiles);
-        this._context.workspaceState.update('workspaceFiles', filePaths);
+        this._context.workspaceState.update('alterminal.workspaceFiles', filePaths);
         this._sendWorkspaceFileCache();
     }, 500);
     
@@ -618,7 +628,7 @@ export class ClaudeCodeProvider implements vscode.WebviewViewProvider {
     }
 
     public dispose() {
-        Logger.debug('⚠️ Disposing ClaudeCodeProvider');
+        Logger.debug('⚠️ Disposing AlterminalProvider');
         
         // Dispose file watcher
         if (this._fileWatcher) {

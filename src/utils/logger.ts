@@ -77,11 +77,11 @@ class Logger {
     static isDebugMode() {
         // Check for debug mode in webview context
         return window.location?.search?.includes('debug=true') || 
-               localStorage.getItem('claudePilot.debug') === 'true';
+               localStorage.getItem('alterminal.debug') === 'true';
     }
     
     static getDebugFilter() {
-        const filter = localStorage.getItem('claudePilot.debugFilter');
+        const filter = localStorage.getItem('alterminal.debugFilter');
         if (!filter) return null;
         
         try {

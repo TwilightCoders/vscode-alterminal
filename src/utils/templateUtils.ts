@@ -100,7 +100,7 @@ export class TemplateUtils {
             // Fallback to basic initialization
             return `
                 Logger.error('Failed to load initialization script');
-                Logger.info('🚀 Starting Claude Pilot initialization (fallback)');
+                Logger.info('🚀 Starting Alterminal initialization (fallback)');
             `;
         }
     }

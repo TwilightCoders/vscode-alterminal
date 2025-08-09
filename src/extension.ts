@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
-import { ClaudeCodeProvider } from './claudeCodeProvider';
+import { AlterminalProvider } from './alterminalProvider';
 import { PtyManager } from './terminal/ptyManager';
 import { Logger } from './utils/logger';
 
 export function activate(context: vscode.ExtensionContext) {
     
-    Logger.info('🚀 Claude Pilot extension is now active!');
+    Logger.info('🚀 Alterminal extension is now active!');
     
     // Check if we're in debug/development mode
     const isDebugMode = process.env.NODE_ENV === 'development' || 
@@ -13,71 +13,81 @@ export function activate(context: vscode.ExtensionContext) {
     
     
     // Set debug mode context for conditional UI
-    vscode.commands.executeCommand('setContext', 'claudePilot.debugMode', isDebugMode);
+    vscode.commands.executeCommand('setContext', 'alterminal.debugMode', isDebugMode);
     
     // Force the view container to be visible
-    vscode.commands.executeCommand('setContext', 'claudePilotContainer:visible', true);
+    vscode.commands.executeCommand('setContext', 'alterminalContainer:visible', true);
     
-    // Create shared PtyManager - will be used by ClaudeCodeProvider
+    // Create shared PtyManager - will be used by AlterminalProvider
     const ptyManager = new PtyManager();
     
-    const provider = new ClaudeCodeProvider(context.extensionUri, context, ptyManager);
+    const provider = new AlterminalProvider(context.extensionUri, context, ptyManager);
     
     Logger.debug('🔌 Registering WebviewViewProvider...');
-    const disposable = vscode.window.registerWebviewViewProvider(ClaudeCodeProvider.viewType, provider);
+    const disposable = vscode.window.registerWebviewViewProvider(AlterminalProvider.viewType, provider);
     Logger.debug('✅ WebviewViewProvider registered');
     
     context.subscriptions.push(disposable);
     
     // Create status bar item
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
-    statusBarItem.text = "$(robot) Claude";
-    statusBarItem.tooltip = "Open Claude Pilot";
-    statusBarItem.command = 'claudePilot.openTerminal';
+    statusBarItem.text = "$(terminal) Alterminal";
+    statusBarItem.tooltip = "Open Alterminal";
+    statusBarItem.command = 'alterminal.openTerminal';
     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
     statusBarItem.show();
     
     context.subscriptions.push(
         statusBarItem,
-        vscode.commands.registerCommand('claudePilot.refresh', () => {
+        vscode.commands.registerCommand('alterminal.refresh', () => {
             provider.refresh();
         }),
-        vscode.commands.registerCommand('claudePilot.clearWorkspaceState', async () => {
-            await context.workspaceState.update('claudePilot.webviewState', undefined);
-            vscode.window.showInformationMessage('Claude Pilot workspace state cleared');
+        vscode.commands.registerCommand('alterminal.clearWorkspaceState', async () => {
+            await context.workspaceState.update('alterminal.webviewState', undefined);
+            vscode.window.showInformationMessage('Alterminal workspace state cleared');
         }),
-        vscode.commands.registerCommand('claudePilot.newTab', () => {
+        vscode.commands.registerCommand('alterminal.newTab', () => {
             provider.createNewTab();
         }),
-        vscode.commands.registerCommand('claudePilot.newTerminal.claude', () => {
-            provider.createNewTab('claude');
+        vscode.commands.registerCommand('alterminal.newTerminal.default', () => {
+            provider.createNewTab('default');
         }),
-        vscode.commands.registerCommand('claudePilot.newTerminal.shell', () => {
+        vscode.commands.registerCommand('alterminal.newTerminal.shell', () => {
             provider.createNewTab('shell');
         }),
-        vscode.commands.registerCommand('claudePilot.newTerminal.continue', () => {
-            provider.createNewTab('continue');
+        vscode.commands.registerCommand('alterminal.newTerminal.command', async () => {
+            const command = await vscode.window.showInputBox({
+                prompt: 'Enter the command to launch',
+                placeHolder: 'e.g., python, node, npm start, etc.',
+                validateInput: (value) => {
+                    return value.trim() ? null : 'Command cannot be empty';
+                }
+            });
+            
+            if (command) {
+                provider.createNewTabWithCommand(command.trim());
+            }
         }),
-        vscode.commands.registerCommand('claudePilot.openTerminal', async () => {
+        vscode.commands.registerCommand('alterminal.openTerminal', async () => {
             await provider.openTerminal();
         }),
-        vscode.commands.registerCommand('claudePilot.focus', () => {
-            vscode.commands.executeCommand('workbench.view.extension.claudePilotContainer');
+        vscode.commands.registerCommand('alterminal.focus', () => {
+            vscode.commands.executeCommand('workbench.view.extension.alterminalContainer');
         }),
-        vscode.commands.registerCommand('claudePilot.openSettings', () => {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'claudePilot');
+        vscode.commands.registerCommand('alterminal.openSettings', () => {
+            vscode.commands.executeCommand('workbench.action.openSettings', 'alterminal');
         }),
-        vscode.commands.registerCommand('claudePilot.debugState', async () => {
-            const savedState = context.workspaceState.get('claudePilot.webviewState');
+        vscode.commands.registerCommand('alterminal.debugState', async () => {
+            const savedState = context.workspaceState.get('alterminal.webviewState');
             const message = savedState 
                 ? `Saved workspace state: ${JSON.stringify(savedState, null, 2)}`
                 : 'No saved workspace state found';
             vscode.window.showInformationMessage('Debug State', { modal: true, detail: message });
         }),
-        vscode.commands.registerCommand('claudePilot.testLinks', () => {
+        vscode.commands.registerCommand('alterminal.testLinks', () => {
             provider.testLinks();
         }),
-        vscode.commands.registerCommand('claudePilot.setDebugFilter', async () => {
+        vscode.commands.registerCommand('alterminal.setDebugFilter', async () => {
             const filterOptions = [
                 { label: '📁 Files Only', description: 'Show only file cache logs', value: ['📁'] },
                 { label: '🔗 Links Only', description: 'Show only link detection logs', value: ['🔗'] },
@@ -99,17 +109,17 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showInformationMessage(`Debug filter ${filterText}`);
             }
         }),
-        vscode.commands.registerCommand('claudePilot.clearDebugFilter', () => {
+        vscode.commands.registerCommand('alterminal.clearDebugFilter', () => {
             provider.setDebugFilter(null);
             vscode.window.showInformationMessage('Debug filter cleared - showing all logs');
         }),
-        vscode.commands.registerCommand('claudePilot.performanceReport', async () => {
+        vscode.commands.registerCommand('alterminal.performanceReport', async () => {
             await provider.requestPerformanceReport();
         })
     );
 }
 
 export function deactivate() {
-    Logger.info('🛑 Claude Pilot extension is being deactivated');
+    Logger.info('🛑 Alterminal extension is being deactivated');
     Logger.debug('🧹 Cleanup complete');
 }

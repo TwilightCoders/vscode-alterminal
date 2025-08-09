@@ -22,11 +22,12 @@
  */
 
 class TerminalInstance {
-    constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'claude', options = {}) {
-        const { autoStartPty = true } = options;
+    constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'default', options = {}) {
+        const { autoStartPty = true, customCommand = null } = options;
+        this.launchCommand = customCommand;
         // SUCCESS! Our code is running and hover is working!
         Logger.debug('🚀 TerminalInstance constructor called with id:', id, 'type:', terminalType);
-        Logger.debug('🚀 Debug mode check:', localStorage.getItem('claudePilot.debug'));
+        Logger.debug('🚀 Debug mode check:', localStorage.getItem('alterminal.debug'));
         
     // Respect existing debug mode flag (no forced enable in production)
         
@@ -554,32 +555,43 @@ class TerminalInstance {
     /**
      * Restore terminal modes after deserializing content
      */
+    /**
+     * Write mode sequences directly to xterm without processing
+     */
+    _writeModeDirect(sequence) {
+        // Write directly to xterm.js without going through our write() method
+        // This prevents mode sequences from being parsed/displayed during restoration
+        if (this.terminal && this.terminal.write) {
+            this.terminal.write(sequence);
+        }
+    }
+    
     restoreTerminalModes() {
         if (!this.terminal) return;
         
         try {
-            // Restore each tracked mode that was enabled
+            // Restore each tracked mode that was enabled directly
             if (this.hasMode(this.MODES.FOCUS_REPORTING)) {
                 Logger.debug(`Terminal ${this.id}: Restoring focus reporting mode`);
-                this.terminal.write('\x1b[?1004h');
+                this._writeModeDirect('\x1b[?1004h');
             }
             if (this.hasMode(this.MODES.MOUSE_CLICK_TRACKING)) {
-                this.terminal.write('\x1b[?1000h');
+                this._writeModeDirect('\x1b[?1000h');
             }
             if (this.hasMode(this.MODES.MOUSE_DRAG_TRACKING)) {
-                this.terminal.write('\x1b[?1002h');
+                this._writeModeDirect('\x1b[?1002h');
             }
             if (this.hasMode(this.MODES.MOUSE_MOTION_TRACKING)) {
-                this.terminal.write('\x1b[?1003h');
+                this._writeModeDirect('\x1b[?1003h');
             }
             if (this.hasMode(this.MODES.SGR_MOUSE_MODE)) {
-                this.terminal.write('\x1b[?1006h');
+                this._writeModeDirect('\x1b[?1006h');
             }
             if (this.hasMode(this.MODES.ALTERNATE_SCREEN)) {
-                this.terminal.write('\x1b[?1049h');
+                this._writeModeDirect('\x1b[?1049h');
             }
             if (this.hasMode(this.MODES.BRACKETED_PASTE)) {
-                this.terminal.write('\x1b[?2004h');
+                this._writeModeDirect('\x1b[?2004h');
             }
         } catch (error) {
             Logger.error(`Failed to restore terminal modes for ${this.id}:`, error);
@@ -933,8 +945,10 @@ class TerminalInstance {
             // Write content (don't trigger state save during restoration)
             this.terminal.write(serializedContent);
             
-            // Restore terminal modes after content (modes were stripped from storage)
-            this.restoreTerminalModes();
+            // Restore terminal modes after content with slight delay to ensure terminal is ready
+            setTimeout(() => {
+                this.restoreTerminalModes();
+            }, 100);
             
             window.dispatchEvent(new Event('resize'));
             // Establish baseline snapshot so early saves can preserve history even if boot gating suppresses live serialization
@@ -953,8 +967,10 @@ class TerminalInstance {
         return {
             id: this.id,
             label: this.label,
-            rawContent: this.serialize() || '',
-            terminalModes: this._terminalModes // Include terminal modes bitmask
+            // Only serialize content for default terminals - launch command terminals start fresh
+            rawContent: this.launchCommand ? '' : (this.serialize() || ''),
+            terminalModes: this._terminalModes, // Include terminal modes bitmask
+            launchCommand: this.launchCommand
         };
     }
     
@@ -969,9 +985,19 @@ class TerminalInstance {
         // Restore terminal modes bitmask
         this._terminalModes = state.terminalModes || 0;
         
-        // Restore content if available
-        const contentToRestore = state.rawContent || state.serializedContent;
-        if (contentToRestore) this.deserialize(contentToRestore);
+        // Restore launch command and derive terminal type
+        this.launchCommand = state.launchCommand || state.customCommand || this.launchCommand; // Support old customCommand for migration
+        this.terminalType = this.launchCommand ? 'command' : 'default';
+        
+        // For terminals with launch commands, start fresh instead of restoring old content
+        if (this.launchCommand) {
+            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`);
+            // PTY will be created with the launch command when terminal opens
+        } else {
+            // For default terminals, restore the saved content
+            const contentToRestore = state.rawContent || state.serializedContent;
+            if (contentToRestore) this.deserialize(contentToRestore);
+        }
     }
     
     /**
@@ -1034,7 +1060,8 @@ class TerminalInstance {
         this.vscode.postMessage({ 
             command: 'createPty', 
             tabId: this.id,
-            terminalType: this.terminalType
+            terminalType: this.terminalType,
+            customCommand: this.launchCommand
         });
     }
 

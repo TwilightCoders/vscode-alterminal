@@ -1,5 +1,5 @@
 /**
- * Type definitions for Claude Pilot webview components
+ * Type definitions for Alterminal webview components
  */
 
 export interface TabData {

@@ -176,7 +176,7 @@ class TabManager {
                         break;
                         
                     case 'createNewTab':
-                        this.createNewTab(message.terminalType);
+                        this.createNewTab(message.terminalType, message.customCommand);
                         break;
                         
                     case 'switchToTab':
@@ -213,10 +213,10 @@ class TabManager {
                         
                     case 'setDebugFilter':
                         if (message.filter) {
-                            localStorage.setItem('claudePilot.debugFilter', JSON.stringify(message.filter));
+                            localStorage.setItem('alterminal.debugFilter', JSON.stringify(message.filter));
                             console.log('📝 Debug filter set to:', message.filter);
                         } else {
-                            localStorage.removeItem('claudePilot.debugFilter');
+                            localStorage.removeItem('alterminal.debugFilter');
                             console.log('📝 Debug filter cleared');
                         }
                         break;
@@ -278,7 +278,7 @@ class TabManager {
      * Show current debug filter status on startup
      */
     showDebugFilterStatus() {
-        const currentFilter = localStorage.getItem('claudePilot.debugFilter');
+        const currentFilter = localStorage.getItem('alterminal.debugFilter');
         if (currentFilter) {
             try {
                 const filterEmojis = JSON.parse(currentFilter);
@@ -419,28 +419,34 @@ class TabManager {
     /**
      * Create a new terminal tab
      */
-    createNewTab(terminalType = 'claude') {
-        Logger.debug('📝 createNewTab called with type:', terminalType);
+    createNewTab(terminalType = 'default', launchCommand = null) {
+        Logger.debug('📝 createNewTab called with type:', terminalType, 'command:', launchCommand);
         const tabId = this.nextTabId++;
         
-        // Generate label based on terminal type
+        // Generate label based on terminal type and launch command
         let label;
         switch (terminalType) {
             case 'shell':
                 label = 'Shell';
                 break;
-            case 'continue':
-                label = 'Claude (Continue)';
+            case 'command':
+                if (launchCommand) {
+                    // Use first word of command as label
+                    const commandName = launchCommand.split(' ')[0];
+                    label = commandName.charAt(0).toUpperCase() + commandName.slice(1);
+                } else {
+                    label = 'Command';
+                }
                 break;
-            case 'claude':
+            case 'default':
             default:
-                label = 'Claude Session';
+                label = 'Terminal';
                 break;
         }
         
         // Create unified terminal instance (handles both frontend and backend)
         Logger.debug('🏗️ About to create TerminalInstance with id:', tabId, 'label:', label, 'type:', terminalType);
-        const terminal = new TerminalInstance(tabId, label, this.vscode, this.terminalTheme, this.getThemeColor, terminalType);
+        const terminal = new TerminalInstance(tabId, label, this.vscode, this.terminalTheme, this.getThemeColor, terminalType, { customCommand: launchCommand });
         Logger.debug('🏗️ TerminalInstance created successfully:', terminal);
         
         // Create container and attach terminal
@@ -684,30 +690,35 @@ class TabManager {
         }
         
         for (const [id, terminal] of this.terminals) {
-            // Serialize raw (TerminalInstance handles gating to avoid incomplete CSI sequences)
-            let serialized = terminal.serialize();
-            if (serialized == null) {
-                const preserved = priorContentById.get(id);
-                if (preserved) {
-                    Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
-                    serialized = preserved;
-                } else {
-                    serialized = '';
+            // Get the complete terminal state (handles content serialization logic internally)
+            const terminalData = terminal.getState();
+            
+            // For default terminals (no launch command), handle content preservation and trimming
+            if (!terminal.launchCommand) {
+                let serialized = terminal.serialize();
+                if (serialized == null) {
+                    const preserved = priorContentById.get(id);
+                    if (preserved) {
+                        Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
+                        serialized = preserved;
+                    } else {
+                        serialized = '';
+                    }
                 }
+                // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
+                if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
+                    const lines = serialized.split('\n');
+                    if (lines.length > 40) serialized = lines.slice(-40).join('\n');
+                }
+                terminalData.rawContent = serialized;
             }
-            // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
-            if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
-                const lines = serialized.split('\n');
-                if (lines.length > 40) serialized = lines.slice(-40).join('\n');
-            }
-            const terminalData = {
-                id: terminal.id,
-                label: terminal.label,
-                rawContent: serialized,
-                terminalType: terminal.terminalType || 'claude',
-                terminalModes: terminal._terminalModes || 0
-            };
-            Logger.debug(`Saving terminal ${id}:`, { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType, hasContent: !!terminalData.rawContent });
+            
+            Logger.debug(`Saving terminal ${id}:`, { 
+                id: terminalData.id, 
+                label: terminalData.label, 
+                launchCommand: terminalData.launchCommand,
+                hasContent: !!terminalData.rawContent 
+            });
             terminals.push(terminalData);
         }
         
@@ -728,9 +739,9 @@ class TabManager {
         return {
             terminals: [{
                 id: 1,
-                label: 'Claude Session',
+                label: 'Terminal',
                 rawContent: '',
-                terminalType: 'claude'
+                terminalType: 'default'
             }],
             activeTabId: 1,
             timestamp: Date.now()
@@ -780,7 +791,7 @@ class TabManager {
                 this.vscode,
                 this.terminalTheme,
                 this.getThemeColor,
-                terminalData.terminalType || 'claude',
+                terminalData.terminalType || 'default',
                 { autoStartPty: false } // delay PTY spawn until after restored content is written
             );
             Logger.debug('🔄 TerminalInstance created from restore:', terminal);
@@ -789,31 +800,20 @@ class TabManager {
             const container = this.createTerminalContainer(terminalData.id);
             terminal.attachToContainer(container);
             
-            // Restore terminal content using new format
-            terminal.label = terminalData.label;
-            terminal.terminalType = terminalData.terminalType || 'claude';
+            // Restore terminal state (includes label, terminalType, launchCommand, and modes)
+            terminal.restoreFromState(terminalData);
             
-            // Restore terminal modes from saved state
-            if (terminalData.terminalModes !== undefined) {
-                terminal._terminalModes = terminalData.terminalModes;
-                Logger.debug('🔄 Restored terminal modes for terminal', terminalData.id, 'modes:', terminalData.terminalModes);
-            }
-            
-            // Decide what content to load without mutating persisted snapshot
-            let contentToLoad = terminalData.rawContent || '';
-
-            if (contentToLoad) {
-                Logger.debug('🔄 Restoring content for terminal', terminalData.id, 'with content length:', contentToLoad.length);
-                if (isColdBoot) {
-                    Logger.debug('🏁 Injecting one-time history banner (cold boot)');
-                    contentToLoad += '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
-                }
-            } else {
-                Logger.debug('🔄 No persisted content for terminal', terminalData.id, '- starting PTY on open');
+            // Handle cold boot banner for default terminals only
+            if (isColdBoot && !terminal.launchCommand && terminalData.rawContent) {
+                Logger.debug('🏁 Adding cold boot banner to default terminal', terminalData.id);
+                // Add banner to the serialized content for default terminals
+                const originalContent = terminalData.rawContent;
+                terminalData.rawContent = originalContent + '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
+                // Re-run restoreFromState with updated content
+                terminal.restoreFromState(terminalData);
             }
             
             terminal.whenOpened.then(() => {
-                terminal.deserialize(contentToLoad);
                 try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error:', e); }
             });
             

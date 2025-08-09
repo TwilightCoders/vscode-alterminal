@@ -1,5 +1,5 @@
 /**
- * Claude Pilot Initialization Script
+ * Alterminal Initialization Script
  * 
  * This script runs when the webview loads and:
  * 1. Sets up terminal theme from VS Code colors
@@ -64,7 +64,7 @@ if (document.readyState === 'loading') {
 }
 
 function initializeAll() {
-    console.log('🚀 Starting Claude Pilot initialization');
+    console.log('🚀 Starting Alterminal initialization');
     console.log('DOM readyState:', document.readyState);
     console.log('Available globals:', { Terminal: window.Terminal, FitAddon: window.FitAddon });
     

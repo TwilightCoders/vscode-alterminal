@@ -52,7 +52,7 @@ export class TabTitleProvider {
     private config: vscode.WorkspaceConfiguration;
 
     constructor() {
-        this.config = vscode.workspace.getConfiguration('claudePilot');
+        this.config = vscode.workspace.getConfiguration('alterminal');
         this.registerBuiltinTokens();
     }
 
@@ -83,7 +83,7 @@ export class TabTitleProvider {
      * Update configuration (refreshes from VS Code settings)
      */
     updateConfiguration(): void {
-        this.config = vscode.workspace.getConfiguration('claudePilot');
+        this.config = vscode.workspace.getConfiguration('alterminal');
     }
 
     /**

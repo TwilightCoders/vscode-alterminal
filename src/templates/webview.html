@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src vscode-webview: https://*.vscode-cdn.net data:; style-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; script-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; connect-src 'none'; img-src vscode-webview: https://*.vscode-cdn.net data:;">
-    <title>Claude Code Terminal</title>
+    <title>Alterminal</title>
     <!-- Timestamp {{timestamp}} to force webview refresh -->
     <link rel="stylesheet" href="{{codiconCssUri}}" />
     <link rel="stylesheet" href="{{xtermCssUri}}" />
@@ -15,7 +15,7 @@
             height: 100vh;
             box-sizing: border-box;
             overflow: hidden;
-            background-color: var(--vscode-terminal-background, #1e1e1e);
+            background-color: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
             color: var(--vscode-terminal-foreground, #cccccc);
             font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
         }
