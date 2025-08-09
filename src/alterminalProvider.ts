@@ -96,8 +96,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             stateResponse: (msg: any) => this._handleBackupStateUpdate(msg.state),
             webviewReady: () => {
                 this.restoreWebviewState();
-                // Check GitHub authentication after webview is ready
-                this._checkGitHubAuthentication();
+                // Check for developer mode
+                this._checkDeveloperMode();
             },
             switchTab: () => {}, // No-op - handled in webview
             playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
@@ -194,7 +194,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
                 vscode.window.showInformationMessage('Alterminal restarted successfully!');
                 
             } catch (error) {
-                console.error('Error during refresh:', error);
+                Logger.error('Error during refresh:', error);
                 vscode.window.showErrorMessage(`Failed to restart Alterminal: ${error}`);
             }
         });
@@ -494,36 +494,18 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
     
     /**
-     * Check GitHub authentication and log user ID for developer detection
+     * Check for developer mode using VS Code extension development mode
      */
-    private async _checkGitHubAuthentication() {
-        try {
-            console.log('Attempting GitHub authentication check...');
-            
-            // Check available GitHub accounts (this works!)
-            const authProviders = await vscode.authentication.getAccounts('github');
-            console.log('Available GitHub accounts:', authProviders);
-            
-            // Check if developer (you) is signed in
-            console.log('=== DEVELOPER DETECTION DEBUG ===');
-            const isDeveloper = authProviders.some(account => 
-                account.id === '1700514'
-            );
-            console.log('=== DEVELOPER DETECTION ===');
-            console.log('Is Developer (volte):', isDeveloper);
-            console.log('==========================');
-            
-            // Send developer status to webview
-            if (this._view) {
-                this._view.webview.postMessage({
-                    command: 'setDeveloperMode',
-                    enabled: isDeveloper
-                });
-                console.log('Developer mode', isDeveloper ? 'enabled' : 'disabled', 'for webview');
-            }
-            
-        } catch (error) {
-            console.log('GitHub authentication check failed:', error);
+    private async _checkDeveloperMode() {
+        const isDeveloper = this._context.extensionMode === vscode.ExtensionMode.Development;
+        
+        // Send developer status to webview
+        if (this._view) {
+            this._view.webview.postMessage({
+                command: 'setDeveloperMode',
+                enabled: isDeveloper
+            });
+            Logger.debug('Developer mode', isDeveloper ? 'enabled' : 'disabled');
         }
     }
 
