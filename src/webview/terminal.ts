@@ -69,19 +69,7 @@ export class TerminalInstance {
     this.linkProvider = new FilePathLinkProvider(this, vscode, id);
     this.modeProvider = new AnsiModeProvider(this, vscode, id);
         
-        // Terminal mode tracking (bitmask for space efficiency)
-        this._terminalModes = 0; // All modes start disabled
-        
-        // Mode bit positions
-        this.MODES = {
-            FOCUS_REPORTING: 1 << 0,      // ESC[?1004h/l - bit 0
-            MOUSE_CLICK_TRACKING: 1 << 1, // ESC[?1000h/l - bit 1
-            MOUSE_DRAG_TRACKING: 1 << 2,  // ESC[?1002h/l - bit 2
-            MOUSE_MOTION_TRACKING: 1 << 3, // ESC[?1003h/l - bit 3
-            SGR_MOUSE_MODE: 1 << 4,       // ESC[?1006h/l - bit 4
-            ALTERNATE_SCREEN: 1 << 5,     // ESC[?1049h/l - bit 5
-            BRACKETED_PASTE: 1 << 6       // ESC[?2004h/l - bit 6
-        };
+    // (Legacy inline mode tracking removed – handled by modeProvider)
     this._lastWriteTs = 0; // timestamp of last data write
     this._pendingStableSnapshot = ''; // cache last stable snapshot
     this._saveDebounceTimer = null; // debounce handle
@@ -483,120 +471,12 @@ export class TerminalInstance {
         }
     }
     
-    /**
-     * Set a terminal mode bit
-     */
-    setMode(bit, enabled) {
-        if (enabled) {
-            this._terminalModes |= bit; // Set bit
-        } else {
-            this._terminalModes &= ~bit; // Clear bit
-        }
-    }
-    
-    /**
-     * Check if a terminal mode is enabled
-     */
-    hasMode(bit) {
-        return (this._terminalModes & bit) !== 0;
-    }
-    
-    /**
-     * Parse and track terminal modes from escape sequences
-     */
-    parseAndTrackModes(data) {
-        // Match terminal mode sequences: ESC[?<number><h|l>
-        const modeRegex = /\x1b\[\?(\d+)([hl])/g;
-        let match;
-        
-        while ((match = modeRegex.exec(data)) !== null) {
-            const modeNumber = match[1];
-            const action = match[2]; // 'h' = enable, 'l' = disable
-            const enable = action === 'h';
-            
-            switch (modeNumber) {
-                case '1004': // Focus reporting
-                    this.setMode(this.MODES.FOCUS_REPORTING, enable);
-                    Logger.debug(`Terminal ${this.id}: Focus reporting ${enable ? 'enabled' : 'disabled'}`);
-                    break;
-                case '1000': // Mouse click tracking  
-                    this.setMode(this.MODES.MOUSE_CLICK_TRACKING, enable);
-                    break;
-                case '1002': // Mouse drag tracking
-                    this.setMode(this.MODES.MOUSE_DRAG_TRACKING, enable);
-                    break;
-                case '1003': // Mouse motion tracking
-                    this.setMode(this.MODES.MOUSE_MOTION_TRACKING, enable);
-                    break;
-                case '1006': // SGR mouse mode
-                    this.setMode(this.MODES.SGR_MOUSE_MODE, enable);
-                    break;
-                case '1049': // Alternate screen
-                    this.setMode(this.MODES.ALTERNATE_SCREEN, enable);
-                    break;
-                case '2004': // Bracketed paste
-                    this.setMode(this.MODES.BRACKETED_PASTE, enable);
-                    break;
-                default:
-                    // Unknown mode, log for future handling
-                    Logger.debug(`Terminal ${this.id}: Unknown terminal mode: ${modeNumber}${action}`);
-            }
-        }
-    }
-    
-    /**
-     * Strip terminal mode sequences from data (for clean storage)
-     */
-    stripModeSequences(data) {
-        // Remove the mode sequences we're tracking separately
-        return data.replace(/\x1b\[\?(1004|1000|1002|1003|1006|1049|2004)[hl]/g, '');
-    }
-    
-    /**
-     * Restore terminal modes after deserializing content
-     */
-    /**
-     * Write mode sequences directly to xterm without processing
-     */
-    _writeModeDirect(sequence) {
-        // Write directly to xterm.js without going through our write() method
-        // This prevents mode sequences from being parsed/displayed during restoration
-        if (this.terminal && this.terminal.write) {
-            this.terminal.write(sequence);
-        }
-    }
-    
-    restoreTerminalModes() {
-        if (!this.terminal) return;
-        
-        try {
-            // Restore each tracked mode that was enabled directly
-            if (this.hasMode(this.MODES.FOCUS_REPORTING)) {
-                Logger.debug(`Terminal ${this.id}: Restoring focus reporting mode`);
-                this._writeModeDirect('\x1b[?1004h');
-            }
-            if (this.hasMode(this.MODES.MOUSE_CLICK_TRACKING)) {
-                this._writeModeDirect('\x1b[?1000h');
-            }
-            if (this.hasMode(this.MODES.MOUSE_DRAG_TRACKING)) {
-                this._writeModeDirect('\x1b[?1002h');
-            }
-            if (this.hasMode(this.MODES.MOUSE_MOTION_TRACKING)) {
-                this._writeModeDirect('\x1b[?1003h');
-            }
-            if (this.hasMode(this.MODES.SGR_MOUSE_MODE)) {
-                this._writeModeDirect('\x1b[?1006h');
-            }
-            if (this.hasMode(this.MODES.ALTERNATE_SCREEN)) {
-                this._writeModeDirect('\x1b[?1049h');
-            }
-            if (this.hasMode(this.MODES.BRACKETED_PASTE)) {
-                this._writeModeDirect('\x1b[?2004h');
-            }
-        } catch (error) {
-            Logger.error(`Failed to restore terminal modes for ${this.id}:`, error);
-        }
-    }
+    // --- Mode management (delegated to modeProvider) ---
+    setMode(bit, enabled) { this.modeProvider.setMode(bit, enabled); }
+    hasMode(bit) { return this.modeProvider.hasMode(bit); }
+    parseAndTrackModes(data) { this.modeProvider.parseAndTrackModes(data); }
+    stripModeSequences(data) { return this.modeProvider.stripModeSequences(data); }
+    restoreTerminalModes() { this.modeProvider.restoreModes(); }
     
     /**
      * Write data to the terminal
