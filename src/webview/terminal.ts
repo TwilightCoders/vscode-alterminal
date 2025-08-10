@@ -1,5 +1,9 @@
 // @ts-nocheck
 import { InputHandler } from './inputHandler.js';
+import { TerminalLifecycleManager } from './lifecycleManager.js';
+import { FilePathLinkProvider } from './linkProvider.js';
+import { AnsiModeProvider } from './modeProvider.js';
+import { Logger } from './logger.js';
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
