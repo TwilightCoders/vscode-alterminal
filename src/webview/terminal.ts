@@ -63,6 +63,12 @@ export class TerminalInstance {
         
         // Tab indicators handled by IndicatorManager
         
+    // Providers (modular responsibilities - incremental integration)
+    // (Legacy inline mode/link/lifecycle logic retained for now; future commits remove it.)
+    this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
+    this.linkProvider = new FilePathLinkProvider(this, vscode, id);
+    this.modeProvider = new AnsiModeProvider(this, vscode, id);
+        
         // Terminal mode tracking (bitmask for space efficiency)
         this._terminalModes = 0; // All modes start disabled
         
