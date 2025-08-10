@@ -435,10 +435,8 @@ export class TerminalInstance {
                 this.terminal.open(container);
                 performance.mark(`t${this.id}-open`);
                 
-                // Set up file path links immediately after opening
-                // The terminal is now attached to DOM and ready for link providers
-                Logger.debug('🔗 Setting up file path links after terminal.open()');
-                this.setupFilePathLinks();
+                // Delegate file path link registration to FilePathLinkProvider abstraction
+                try { this.linkProvider?.setupFilePathLinks?.(); } catch (e) { Logger.warn('Link provider setup failed:', e); }
 
                 // Visibility-aware fitting & refresh
                 this._installVisibilityHandlers();
@@ -787,33 +785,8 @@ export class TerminalInstance {
             this.renderDisposable = null;
         }
         
-        // Dispose link providers
-        if (this.linkProviders) {
-            this.linkProviders.forEach(({ provider, disposable }) => {
-                try {
-                    if (disposable && disposable.dispose) {
-                        disposable.dispose();
-                        Logger.debug('Disposed link provider');
-                    }
-                } catch (error) {
-                    Logger.error('Error disposing link provider:', error);
-                }
-            });
-            this.linkProviders = [];
-        }
-        
-        // Dispose link matchers (fallback)
-        if (this.linkMatcherIds && this.terminal && this.terminal.deregisterLinkMatcher) {
-            this.linkMatcherIds.forEach(matcherId => {
-                try {
-                    this.terminal.deregisterLinkMatcher(matcherId);
-                    Logger.debug(`Deregistered link matcher ${matcherId}`);
-                } catch (error) {
-                    Logger.error(`Error deregistering link matcher ${matcherId}:`, error);
-                }
-            });
-            this.linkMatcherIds = [];
-        }
+    // Delegate disposal to external linkProvider (legacy inline methods retained but not invoked)
+    try { this.linkProvider?.dispose?.(); } catch (_) {}
     }
     
     /**
