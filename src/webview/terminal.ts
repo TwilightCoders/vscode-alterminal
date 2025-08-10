@@ -33,12 +33,12 @@ export class TerminalInstance {
         const { autoStartPty = true, customCommand = null } = options;
         this.launchCommand = customCommand;
         // SUCCESS! Our code is running and hover is working!
-        Logger.debug('🚀 TerminalInstance constructor called with id:', id, 'type:', terminalType);
-        Logger.debug('🚀 Debug mode check:', localStorage.getItem('alterminal.debug'));
+    Logger.debug('TerminalInstance constructor id:', id, 'type:', terminalType);
+    Logger.debug('Debug mode flag:', localStorage.getItem('alterminal.debug'));
         
     // Respect existing debug mode flag (no forced enable in production)
         
-        Logger.debug('🆕 Creating new TerminalInstance with id:', id, 'type:', terminalType);
+    Logger.debug('Creating new TerminalInstance with id:', id, 'type:', terminalType);
         this.id = id;
         this.label = label;
         this.vscode = vscode;
@@ -63,32 +63,24 @@ export class TerminalInstance {
         
         // Tab indicators handled by IndicatorManager
         
-    // Providers (modular responsibilities - incremental integration)
-    // (Legacy inline mode/link/lifecycle logic retained for now; future commits remove it.)
-    this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
-    this.linkProvider = new FilePathLinkProvider(this, vscode, id);
-    this.modeProvider = new AnsiModeProvider(this, vscode, id);
+        // Providers for separation of concerns
+        this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
+        this.linkProvider = new FilePathLinkProvider(this, vscode, id);
+        this.modeProvider = new AnsiModeProvider(this, vscode, id);
         
-    // (Legacy inline mode tracking removed – handled by modeProvider)
-    this._lastWriteTs = 0; // timestamp of last data write
-    this._pendingStableSnapshot = ''; // cache last stable snapshot
-    this._saveDebounceTimer = null; // debounce handle
-    // Boot / readiness state to avoid capturing transient init control sequences
-    this._booting = true;               // true until we detect a stable prompt
-    this._bootReady = false;            // flips when prompt detected & idle
-    this._bootIdleTimer = null;         // timer to evaluate readiness after idle
-    this._bootLastActivity = Date.now();// last PTY output time during boot
-    this._bootSnapshotTaken = false;    // ensure snapshot taken exactly once at readiness
-    // Prompt heuristic: common final prompt chars optionally followed by a space; allow color codes before
-    this._promptRegex = /(?:\x1b\[[0-9;]*m)*.*([#%$>]) ?$/;
-    this._createdAt = Date.now();
-    this._inAltScreen = false;        // track application alternate screen (curses, TUIs)
-    this._lastNormalScreenSnapshot = ''; // last snapshot taken outside alt-screen
-    // Event / promise lifecycle
-    this._listeners = new Map();
-    this.whenOpened = new Promise(r => { this._openedResolve = r; });
-    this.whenBootReady = new Promise(r => { this._bootReadyResolve = r; });
-    this._pendingAltExit = false; // alt-screen exit awaiting stabilized render
+        // Legacy state management (will be refactored out)
+        this._lastWriteTs = 0; // timestamp of last data write
+        this._pendingStableSnapshot = ''; // cache last stable snapshot
+        this._createdAt = Date.now();
+        
+        // Debounce timers for various operations
+        this._debounceTimers = new Map();
+        this._lastNormalScreenSnapshot = ''; // last snapshot taken outside alt-screen
+        // Event / promise lifecycle
+        this._listeners = new Map();
+        this.whenOpened = new Promise(r => { this._openedResolve = r; });
+        this.whenBootReady = new Promise(r => { this._bootReadyResolve = r; });
+        this._pendingAltExit = false; // alt-screen exit awaiting stabilized render
         
         // DOM container
         this.terminalContainer = null;
@@ -99,6 +91,19 @@ export class TerminalInstance {
         
         // Initialize the complete terminal (frontend + backend)
         this.initialize();
+        // One-time creation inspection log (shallow properties + direct reference)
+        try {
+            const shallow = {} as any;
+            Object.keys(this).forEach(k => {
+                if (typeof (this as any)[k] !== 'function') {
+                    // Avoid huge nested objects
+                    const val = (this as any)[k];
+                    if (val && typeof val === 'object' && (k === 'terminal' || k.endsWith('Addon'))) return; // skip heavy objects
+                    shallow[k] = val;
+                }
+            });
+            console.log('TerminalInstance created', { id: this.id, label: this.label, type: this.terminalType, shallow, instance: this });
+        } catch (_) {}
         if (autoStartPty) {
             this.createPtyProcess();
         } else {
@@ -114,43 +119,61 @@ export class TerminalInstance {
     _markBootReady() { if (this._bootReadyResolve) this._bootReadyResolve(); this._emit('bootReady'); }
     
     /**
+     * Reusable debounce utility for any operation
+     * @param key - Unique key to identify the debounced operation
+     * @param delay - Delay in milliseconds
+     * @param callback - Function to call after delay
+     */
+    debounce(key, delay, callback) {
+        // Clear any existing timer for this key
+        if (this._debounceTimers.has(key)) {
+            clearTimeout(this._debounceTimers.get(key));
+        }
+        
+        // Set new timer
+        const timer = setTimeout(() => {
+            this._debounceTimers.delete(key);
+            callback();
+        }, delay);
+        
+        this._debounceTimers.set(key, timer);
+    }
+    
+    /**
      * Initialize the terminal with all addons and configuration
      */
     initialize() {
-        Logger.debug('🚀 Starting terminal initialization for terminal', this.id);
+    Logger.debug('Starting terminal initialization for terminal', this.id);
         try {
             performance.mark(`t${this.id}-init-start`);
             let XTerminal = null;
             
-            Logger.debug('🚀 Checking for Terminal constructors...');
-            Logger.debug('🚀 window.Terminal:', typeof window.Terminal, window.Terminal);
-            Logger.debug('🚀 globalThis keys with "term":', Object.keys(globalThis).filter(k => k.toLowerCase().includes('term')));
-            Logger.debug('🚀 All available globals:', Object.getOwnPropertyNames(window).slice(0, 20));
+            Logger.debug('Locating Terminal constructors...');
             
             // Check various possible locations
             if (window.Terminal && typeof window.Terminal === 'function') {
                 XTerminal = window.Terminal;
-                Logger.debug('🚀 Found Terminal on window');
+                Logger.debug('Found Terminal on window');
             } else if (globalThis.Terminal && typeof globalThis.Terminal === 'function') {
                 XTerminal = globalThis.Terminal;
-                Logger.debug('🚀 Found Terminal on globalThis');
+                Logger.debug('Found Terminal on globalThis');
             } else if (self.Terminal && typeof self.Terminal === 'function') {
                 XTerminal = self.Terminal;
-                Logger.debug('🚀 Found Terminal on self');
+                Logger.debug('Found Terminal on self');
             } else {
                 // Try to find any object that might be the Terminal
                 const possibleTerminal = window.Terminal || globalThis.Terminal;
-                Logger.debug('🚀 Possible Terminal object:', possibleTerminal);
+                Logger.debug('Possible Terminal object candidate');
                 
                 if (possibleTerminal && possibleTerminal.Terminal) {
                     XTerminal = possibleTerminal.Terminal;
-                    Logger.debug('🚀 Found nested Terminal constructor');
+                    Logger.debug('Found nested Terminal constructor');
                 } else {
                     throw new Error('Terminal constructor not found. window.Terminal type: ' + typeof window.Terminal + ', available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes('term')).join(', '));
                 }
             }
             
-            Logger.debug('🚀 Using Terminal constructor:', XTerminal);
+            Logger.debug('Using Terminal constructor');
             
             // Create terminal with proper configuration
             this.terminal = new XTerminal({
@@ -174,6 +197,7 @@ export class TerminalInstance {
             this.serializeAddon = new SerializeAddon.SerializeAddon();
             this.unicodeAddon = new Unicode11Addon.Unicode11Addon();
             
+                
             
             // Configure WebLinksAddon for web URLs only
             this.webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => {
@@ -192,15 +216,15 @@ export class TerminalInstance {
             }
             
             // Load addons
-            Logger.debug('🚀 Loading addons...');
+            Logger.debug('Loading addons');
             this.terminal.loadAddon(this.fitAddon);
-            Logger.debug('🚀 Loaded FitAddon');
+            Logger.debug('Loaded FitAddon');
             this.terminal.loadAddon(this.serializeAddon);
-            Logger.debug('🚀 Loaded SerializeAddon');
+            Logger.debug('Loaded SerializeAddon');
             this.terminal.loadAddon(this.unicodeAddon);
-            Logger.debug('🚀 Loaded UnicodeAddon');
+            Logger.debug('Loaded UnicodeAddon');
             this.terminal.loadAddon(this.webLinksAddon);
-            Logger.debug('🚀 Loaded WebLinksAddon');
+            Logger.debug('Loaded WebLinksAddon');
             
             // Note: File path link setup moved to after terminal attachment
             
@@ -208,6 +232,20 @@ export class TerminalInstance {
             
             // Set up event handlers
             this.setupEventHandlers();
+            
+            // Initialize providers
+            // Listen to lifecycle events BEFORE calling initialize to avoid missing early bootReady
+            this.lifecycleManager.on('bootReady', () => {
+                this._markBootReady();
+                // Take initial stable snapshot when ready
+                if (window.tabManager && window.tabManager.saveToLocalState) {
+                    window.tabManager.saveToLocalState();
+                }
+                try { this.serialize(); } catch (_) {}
+            });
+            this.lifecycleManager.initialize();
+            this.linkProvider.initialize();
+            this.modeProvider.initialize();
             
             // Activate Unicode 11 support (based on xterm.js PR #2568)
             if (this.terminal.unicode) {
@@ -222,167 +260,19 @@ export class TerminalInstance {
     }
     
     /**
-     * Dispose of existing file path link providers
+     * Dispose of existing file path link providers (delegated to linkProvider)
      */
     disposeFilePathLinks() {
-        // Dispose link providers
-        if (this.linkProviders) {
-            this.linkProviders.forEach(({ provider, disposable }) => {
-                try {
-                    if (disposable && disposable.dispose) {
-                        disposable.dispose();
-                        Logger.debug('Disposed link provider');
-                    }
-                } catch (error) {
-                    Logger.error('Error disposing link provider:', error);
-                }
-            });
-            this.linkProviders = [];
-        }
-        
-        // Dispose link matchers (fallback)
-        if (this.linkMatcherIds && this.terminal && this.terminal.deregisterLinkMatcher) {
-            this.linkMatcherIds.forEach(matcherId => {
-                try {
-                    this.terminal.deregisterLinkMatcher(matcherId);
-                    Logger.debug('Deregistered link matcher:', matcherId);
-                } catch (error) {
-                    Logger.error('Error deregistering link matcher:', error);
-                }
-            });
-            this.linkMatcherIds = [];
-        }
+        this.linkProvider.dispose();
     }
     
     /**
-     * Set up file path link detection with clean regex patterns
+     * Set up file path link detection (delegated to linkProvider)
      */
     setupFilePathLinks() {
-        Logger.debug('🔗 Setting up file path links (combined) for terminal', this.id);
-        if (!this.terminal) return;
-        this.disposeFilePathLinks();
-        if (typeof this.terminal.registerLinkProvider !== 'function') {
-            this.setupFilePathLinksWithMatcher();
-            return;
-        }
-        const COMBINED = /(\b[\.~]?\/[^\s"'`]*(?:\s[^\s"'`]*)*|[a-z0-9_][^\s\/]*\.[a-z0-9]+|[a-zA-Z]:\\[^\s"'`]+)/gi;
-        const UNIVERSAL = /[^\s"'`]+/g;
-        const provider = {
-            provideLinks: (y, callback) => {
-                const line = this.terminal.buffer.active.getLine(y - 1);
-                if (!line) return callback(undefined);
-                const lineText = line.translateToString();
-                const isCmd = window.linkModeState && (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed);
-                const regex = isCmd ? UNIVERSAL : COMBINED;
-                const links = [];
-                let match;
-                const r = new RegExp(regex.source, regex.flags);
-                while ((match = r.exec(lineText)) !== null) {
-                    const raw = match[0];
-                    const trimmed = raw.trim();
-                    if (!trimmed) continue;
-                    const leading = raw.match(/^\s*/)[0].length;
-                    const startIndex = match.index + leading;
-                    // Validation: skip tokens with dangerous shell metachars when not in cmd mode
-                    if (!isCmd && /[;&|`]/.test(trimmed)) continue;
-                    const underline = isCmd || (window.workspaceFileCache && window.workspaceFileCache.has(trimmed));
-                    if (!underline) continue;
-                    links.push({
-                        range: { start: { x: startIndex + 1, y }, end: { x: startIndex + trimmed.length, y } },
-                        text: trimmed,
-                        decorations: { underline: true },
-                        activate: () => {
-                            const cmdPressed = window.linkModeState && (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed);
-                            if (!cmdPressed) {
-                                this.vscode.postMessage({ command: 'openFile', filePath: trimmed });
-                            }
-                        },
-                        hover: () => {
-                            const container = document.getElementById('container');
-                            if (isCmd) container?.classList.add('cmd-mode'); else container?.classList.remove('cmd-mode');
-                        },
-                        leave: () => {
-                            document.getElementById('container')?.classList.remove('cmd-mode');
-                        }
-                    });
-                }
-                callback(links.length ? links : undefined);
-            }
-        };
-        const disposable = this.terminal.registerLinkProvider(provider);
-        this.linkProviders = [disposable];
-        Logger.debug('🔗 Combined link provider registered');
+        this.linkProvider.setupFilePathLinks();
     }
 
-    /**
-     * Fallback method using registerLinkMatcher (for when registerLinkProvider fails)
-     */
-    setupFilePathLinksWithMatcher() {
-        Logger.debug('Setting up file path links with registerLinkMatcher fallback');
-        
-        if (!this.terminal) {
-            Logger.error('No terminal available');
-            return;
-        }
-        
-        if (typeof this.terminal.registerLinkMatcher !== 'function') {
-            Logger.error('registerLinkMatcher not available either - no link support');
-            return;
-        }
-        
-        try {
-            // Simpler, more specific file path patterns
-            const patterns = [
-                { regex: /\/[a-zA-Z0-9\._\-\/]+\.[a-zA-Z0-9]+/g, type: 'absolute' },  // /path/to/file.ext
-                { regex: /\.\/[a-zA-Z0-9\._\-\/]+/g, type: 'relative' },              // ./path/file
-                { regex: /\.\.\/[a-zA-Z0-9\._\-\/]+/g, type: 'relative-up' },         // ../path/file
-                { regex: /~\/[a-zA-Z0-9\._\-\/]+/g, type: 'home' },                   // ~/path/file
-            ];
-            
-            // Track matcher IDs for cleanup
-            if (!this.linkMatcherIds) {
-                this.linkMatcherIds = [];
-            }
-            
-            patterns.forEach(pattern => {
-                try {
-                    Logger.debug(`Registering matcher for ${pattern.type} with regex:`, pattern.regex);
-                    
-                    const matcherId = this.terminal.registerLinkMatcher(
-                        pattern.regex, 
-                        (event, uri) => {
-                            Logger.debug(`File path link clicked (${pattern.type}): "${uri}"`);
-                            this.vscode.postMessage({ command: 'openFile', filePath: uri });
-                        },
-                        {
-                            validationCallback: (uri, callback) => {
-                                Logger.debug(`Validating ${pattern.type} path: "${uri}"`);
-                                callback(true); // Always validate as true for now
-                            },
-                            tooltipCallback: (event, uri) => {
-                                Logger.debug(`Hovering over ${pattern.type} path: "${uri}"`);
-                            },
-                            priority: 10
-                        }
-                    );
-                    
-                    if (matcherId !== undefined) {
-                        Logger.debug(`Successfully registered ${pattern.type} path matcher with ID ${matcherId}`);
-                        this.linkMatcherIds.push(matcherId);
-                    } else {
-                        Logger.warn(`registerLinkMatcher returned undefined for ${pattern.type}`);
-                    }
-                } catch (matcherError) {
-                    Logger.error(`Failed to register ${pattern.type} path matcher:`, matcherError);
-                }
-            });
-            
-            Logger.debug(`Registered ${this.linkMatcherIds.length} link matchers`);
-            
-        } catch (error) {
-            Logger.error('Failed to setup file path links with matcher fallback:', error);
-        }
-    }
     
     /**
      * Set up terminal event handlers with proper disposal management
@@ -420,6 +310,18 @@ export class TerminalInstance {
                 }
             }
         });
+        
+        // Set up buffer change detection using onData event
+        if (typeof this.terminal.onData === 'function') {
+            this.dataDisposable = this.terminal.onData(() => {
+                // Debounce buffer saves to avoid excessive saving during rapid terminal output
+                this.debounce('bufferSave', 750, () => {
+                    if (window.tabManager?.saveToLocalState) {
+                        window.tabManager.saveToLocalState();
+                    }
+                });
+            });
+        }
     }
     
     /**
@@ -435,8 +337,10 @@ export class TerminalInstance {
                 this.terminal.open(container);
                 performance.mark(`t${this.id}-open`);
                 
-                // Delegate file path link registration to FilePathLinkProvider abstraction
-                try { this.linkProvider?.setupFilePathLinks?.(); } catch (e) { Logger.warn('Link provider setup failed:', e); }
+                // Set up file path links immediately after opening
+                // The terminal is now attached to DOM and ready for link providers
+                Logger.debug('🔗 Setting up file path links after terminal.open()');
+                this.setupFilePathLinks();
 
                 // Visibility-aware fitting & refresh
                 this._installVisibilityHandlers();
@@ -450,7 +354,7 @@ export class TerminalInstance {
                         // First render -> opened
                         this._markOpened();
                         // Handle deferred alt-screen exit snapshot after a clean render
-                        if (this._pendingAltExit && !this._inAltScreen) {
+                        if (this._pendingAltExit && !this.modeProvider.hasMode(this.modeProvider.MODES.ALTERNATE_SCREEN)) {
                             this._pendingAltExit = false;
                             try { this.serialize(); if (window.tabManager) window.tabManager.saveToLocalState(); } catch(_) {}
                             this._emit('altScreenExit');
@@ -469,12 +373,40 @@ export class TerminalInstance {
         }
     }
     
-    // --- Mode management (delegated to modeProvider) ---
-    setMode(bit, enabled) { this.modeProvider.setMode(bit, enabled); }
-    hasMode(bit) { return this.modeProvider.hasMode(bit); }
-    parseAndTrackModes(data) { this.modeProvider.parseAndTrackModes(data); }
-    stripModeSequences(data) { return this.modeProvider.stripModeSequences(data); }
-    restoreTerminalModes() { this.modeProvider.restoreModes(); }
+    /**
+     * Set a terminal mode bit (delegated to modeProvider)
+     */
+    setMode(bit, enabled) {
+        this.modeProvider.setMode(bit, enabled);
+    }
+    
+    /**
+     * Check if a terminal mode is enabled (delegated to modeProvider)
+     */
+    hasMode(bit) {
+        return this.modeProvider.hasMode(bit);
+    }
+    
+    /**
+     * Parse and track terminal modes from escape sequences (delegated to modeProvider)
+     */
+    parseAndTrackModes(data) {
+        this.modeProvider.parseAndTrackModes(data);
+    }
+    
+    /**
+     * Strip terminal mode sequences from data (delegated to modeProvider)
+     */
+    stripModeSequences(data) {
+        return this.modeProvider.stripModeSequences(data);
+    }
+    
+    /**
+     * Restore terminal modes after deserializing content (delegated to modeProvider)
+     */
+    restoreTerminalModes() {
+        this.modeProvider.restoreModes();
+    }
     
     /**
      * Write data to the terminal
@@ -485,29 +417,26 @@ export class TerminalInstance {
             // 1. Parse and track terminal modes for state management
             this.parseAndTrackModes(data);
             
-            // 2. Detect alt-screen enter/leave sequences in outbound PTY data (output side)
-            // Enter: CSI ? 1049 h (and sometimes 47/1047 h)
-            // Leave: CSI ? 1049 l (and 47/1047 l)
+            // 2. Detect alt-screen enter/leave sequences - use modeProvider
+            const wasInAltScreen = this.modeProvider.hasMode(this.modeProvider.MODES.ALTERNATE_SCREEN);
             if (/\x1b\[\?1049h|\x1b\[\?47h|\x1b\[\?1047h/.test(data)) {
-                this._inAltScreen = true;
-                if (this._pendingStableSnapshot) this._lastNormalScreenSnapshot = this._pendingStableSnapshot;
+                if (!wasInAltScreen && this._pendingStableSnapshot) {
+                    this._lastNormalScreenSnapshot = this._pendingStableSnapshot;
+                }
             }
             if (/\x1b\[\?1049l|\x1b\[\?47l|\x1b\[\?1047l/.test(data)) {
-                this._inAltScreen = false;
                 this._pendingAltExit = true; // handled at next render
             }
             
-            // 3. Write original data to terminal (let xterm.js handle modes properly)
-            this.terminal.write(data);
+            // 3. Strip mode sequences and write clean data to terminal for display
+            const cleanData = this.stripModeSequences(data);
+            this.terminal.write(cleanData);
             this._lastWriteTs = Date.now();
             
             
-            if (this._booting) {
-                this._bootLastActivity = Date.now();
-                this._scheduleBootReadinessCheck();
-            } else {
-                this._scheduleDebouncedSave();
-            }
+            
+            // Lifecycle manager is now ready immediately - no boot detection needed
+            // Buffer change events will handle state saving automatically
         } catch (error) {
             Logger.error(`Failed to write to terminal ${this.id}:`, error);
         }
@@ -547,7 +476,18 @@ export class TerminalInstance {
         
         try {
             this.terminal.clear();
-            // Terminal cleared
+            
+            // Clear our cached snapshots since terminal is now empty
+            this._pendingStableSnapshot = '';
+            this._lastNormalScreenSnapshot = '';
+            
+            // Trigger immediate state save to persist the cleared state
+            this.serialize();
+            if (window.tabManager && window.tabManager.saveToLocalState) {
+                window.tabManager.saveToLocalState();
+            }
+            
+            Logger.debug(`Terminal ${this.id} cleared and state saved`);
         } catch (error) {
             Logger.error(`Failed to clear terminal ${this.id}:`, error);
         }
@@ -594,16 +534,15 @@ export class TerminalInstance {
     serialize() {
         if (!this.serializeAddon) return null;
         try {
-            if (this._booting && !this._bootReady) {
-                // Suppress early snapshots; return last stable snapshot (may be empty)
+            if (!this.lifecycleManager.isReady) {
                 return this._pendingStableSnapshot || null;
             }
-            // If in alternate screen, don't capture transient full-screen UI; return last normal snapshot
-            if (this._inAltScreen) {
+            // Avoid capturing transient full-screen apps
+            if (this.modeProvider.hasMode(this.modeProvider.MODES.ALTERNATE_SCREEN)) {
                 return this._lastNormalScreenSnapshot || this._pendingStableSnapshot || null;
             }
+            // Rate-limit immediate re-snapshots after writes
             const now = Date.now();
-            // If we wrote very recently, reuse last stable snapshot to avoid partial escape capture
             if (now - this._lastWriteTs < 120 && this._pendingStableSnapshot) {
                 return this._pendingStableSnapshot;
             }
@@ -612,20 +551,17 @@ export class TerminalInstance {
                 excludeModes: false,
                 excludeAltBuffer: true
             });
-            // Gating: skip updating snapshot if ending incomplete escape
+            // Guard against incomplete escape sequence at end
             if (/\x1b$/.test(serialized) || /\x1b\[[0-9;?]*$/.test(serialized)) {
                 Logger.debug(`Skip snapshot t${this.id}: trailing incomplete escape`);
                 return this._pendingStableSnapshot || null;
             }
-            
-            // Strip terminal mode sequences for clean storage (but keep content)
             const cleanSerialized = this.stripModeSequences(serialized);
-            
             const lines = cleanSerialized ? cleanSerialized.split('\n').length : 0;
             const lastLine = cleanSerialized ? cleanSerialized.split('\n').slice(-2)[0] : 'none';
-            Logger.debug(`Serialized terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
+            Logger.debug(`Serialized terminal ${this.id}: ${lines} lines, length: ${cleanSerialized?.length || 0}, last line: "${lastLine}"`);
             this._pendingStableSnapshot = cleanSerialized;
-            this._lastNormalScreenSnapshot = cleanSerialized; // update last normal snapshot
+            this._lastNormalScreenSnapshot = cleanSerialized;
             return cleanSerialized;
         } catch (error) {
             Logger.error(`Failed to serialize terminal ${this.id}:`, error);
@@ -633,55 +569,7 @@ export class TerminalInstance {
         }
     }
 
-    _scheduleDebouncedSave() {
-        if (this._saveDebounceTimer) {
-            clearTimeout(this._saveDebounceTimer);
-        }
-        this._saveDebounceTimer = setTimeout(() => {
-            if (window.tabManager && window.tabManager.saveToLocalState) {
-                window.tabManager.saveToLocalState();
-            }
-        }, 750);
-    }
 
-    _scheduleBootReadinessCheck() {
-        if (this._bootIdleTimer) {
-            clearTimeout(this._bootIdleTimer);
-        }
-        // Wait 500ms idle after last activity to evaluate readiness
-        this._bootIdleTimer = setTimeout(() => {
-            try {
-                const buffer = this.terminal.buffer?.active;
-                if (!buffer) return;
-                const line = buffer.getLine(buffer.cursorY);
-                const text = line ? line.translateToString().trimEnd() : '';
-                // Heuristic: prompt line ends with common prompt char + space and cursor at line end
-                const cursorAtEnd = buffer.cursorX === (line ? line.translateToString().length : 0);
-                const elapsed = Date.now() - this._createdAt;
-                const promptMatch = this._promptRegex.test(text) && cursorAtEnd;
-                const timeoutFallback = elapsed > 4000; // 4s fallback to avoid indefinite suppression
-                if (promptMatch || timeoutFallback) {
-                    this._bootReady = true;
-                    this._booting = false;
-                    this._markBootReady();
-                    if (!this._bootSnapshotTaken) {
-                        // Take initial stable snapshot & persist
-                        this._bootSnapshotTaken = true;
-                        if (window.tabManager && window.tabManager.saveToLocalState) {
-                            window.tabManager.saveToLocalState();
-                        }
-                        // Also refresh stable snapshot immediately
-                        try { this.serialize(); } catch (_) {}
-                    }
-                } else {
-                    // Not ready; reschedule (still within boot window)
-                    this._scheduleBootReadinessCheck();
-                }
-            } catch (e) {
-                console.error('Boot readiness check failed:', e);
-            }
-        }, 500);
-    }
     
     /**
      * Restore terminal content from serialized state
@@ -697,8 +585,11 @@ export class TerminalInstance {
             const lastLine = serializedContent.split('\n').slice(-2)[0]; // -2 because last is usually empty
             Logger.debug(`Deserializing terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
             
-            // Write content (don't trigger state save during restoration)
-            this.terminal.write(serializedContent);
+            // Strip any lingering mode sequences from stored content before restoring
+            const cleanContent = this.stripModeSequences(serializedContent);
+            
+            // Write clean content (don't trigger state save during restoration)
+            this.terminal.write(cleanContent);
             
             // Restore terminal modes after content with slight delay to ensure terminal is ready
             setTimeout(() => {
@@ -706,9 +597,9 @@ export class TerminalInstance {
             }, 100);
             
             window.dispatchEvent(new Event('resize'));
-            // Establish baseline snapshot so early saves can preserve history even if boot gating suppresses live serialization
+            // Establish baseline snapshot with clean content
             try {
-                this._pendingStableSnapshot = serializedContent;
+                this._pendingStableSnapshot = cleanContent;
             } catch (_) {}
         } catch (error) {
             Logger.error(`Failed to deserialize terminal ${this.id}:`, error);
@@ -719,13 +610,22 @@ export class TerminalInstance {
      * Get terminal state for persistence
      */
     getState() {
+        const serializedContent = this.command ? '' : (this.serialize() || '');
+        Logger.debug(`🔍 Terminal ${this.id} getState():`, {
+            id: this.id,
+            label: this.label,
+            hascommand: !!this.command,
+            serializedLength: serializedContent.length,
+            serializedPreview: serializedContent.substring(0, 100) + '...',
+            modes: this.modeProvider.getState()
+        });
         return {
             id: this.id,
             label: this.label,
             // Only serialize content for default terminals - launch command terminals start fresh
-            rawContent: this.launchCommand ? '' : (this.serialize() || ''),
-            terminalModes: this._terminalModes, // Include terminal modes bitmask
-            launchCommand: this.launchCommand
+            buffer: serializedContent,
+            modes: this.modeProvider.getState(), // Include terminal modes bitmask
+            command: this.command
         };
     }
     
@@ -737,56 +637,70 @@ export class TerminalInstance {
         
         this.label = state.label || this.label;
         
-        // Restore terminal modes bitmask
-        this._terminalModes = state.terminalModes || 0;
+        // Restore terminal modes through modeProvider  
+        this.modeProvider.restoreState(state.modes || state.terminalModes || 0); // Support both new and old property names
         
         // Restore launch command and derive terminal type
-        this.launchCommand = state.launchCommand || state.customCommand || this.launchCommand; // Support old customCommand for migration
-        this.terminalType = this.launchCommand ? 'command' : 'default';
+        this.command = state.command || state.command || state.customCommand || this.command; // Support migration from old names
+        this.terminalType = this.command ? 'command' : 'default';
         
         // For terminals with launch commands, start fresh instead of restoring old content
-        if (this.launchCommand) {
-            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`);
+        if (this.command) {
+            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.command}" instead of restoring content`);
             // PTY will be created with the launch command when terminal opens
         } else {
             // For default terminals, restore the saved content
-            const contentToRestore = state.rawContent || state.serializedContent;
+            const contentToRestore = state.buffer || state.rawContent || state.serializedContent; // Support migration from old names
             if (contentToRestore) this.deserialize(contentToRestore);
         }
+    }
+
+    disposeEventHandler(handler) {
+        if (handler) {
+            handler.dispose();
+            return null;
+        }
+        return handler;
     }
     
     /**
      * Dispose of event handlers
      */
     disposeEventHandlers() {
-        // Dispose input handler
-        if (this.inputHandler) {
-            this.inputHandler.dispose();
-            this.inputHandler = null;
+        // Dispose all event handler disposables
+        this.inputHandler = this.disposeEventHandler(this.inputHandler);
+        this.dataDisposable = this.disposeEventHandler(this.dataDisposable);
+        this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
+        this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
+        this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
+        
+        // Dispose link providers
+        if (this.linkProviders) {
+            this.linkProviders.forEach(({ provider, disposable }) => {
+                try {
+                    if (disposable && disposable.dispose) {
+                        disposable.dispose();
+                        Logger.debug('Disposed link provider');
+                    }
+                } catch (error) {
+                    Logger.error('Error disposing link provider:', error);
+                }
+            });
+            this.linkProviders = [];
         }
         
-        if (this.dataDisposable) {
-            this.dataDisposable.dispose();
-            this.dataDisposable = null;
+        // Dispose link matchers (fallback)
+        if (this.linkMatcherIds && this.terminal && this.terminal.deregisterLinkMatcher) {
+            this.linkMatcherIds.forEach(matcherId => {
+                try {
+                    this.terminal.deregisterLinkMatcher(matcherId);
+                    Logger.debug(`Deregistered link matcher ${matcherId}`);
+                } catch (error) {
+                    Logger.error(`Error deregistering link matcher ${matcherId}:`, error);
+                }
+            });
+            this.linkMatcherIds = [];
         }
-        
-        if (this.resizeDisposable) {
-            this.resizeDisposable.dispose();
-            this.resizeDisposable = null;
-        }
-        
-        if (this.bellDisposable) {
-            this.bellDisposable.dispose();
-            this.bellDisposable = null;
-        }
-        
-        if (this.renderDisposable) {
-            this.renderDisposable.dispose();
-            this.renderDisposable = null;
-        }
-        
-    // Delegate disposal to external linkProvider (legacy inline methods retained but not invoked)
-    try { this.linkProvider?.dispose?.(); } catch (_) {}
     }
     
     /**
@@ -797,7 +711,7 @@ export class TerminalInstance {
             command: 'createPty', 
             tabId: this.id,
             terminalType: this.terminalType,
-            customCommand: this.launchCommand
+            customCommand: this.command
         });
     }
 
@@ -838,8 +752,17 @@ export class TerminalInstance {
             // Dispose PTY process first
             this.disposePtyProcess();
             
+            // Dispose providers
+            this.lifecycleManager.dispose();
+            this.linkProvider.dispose(); 
+            this.modeProvider.dispose();
+            
             // Dispose event handlers
             this.disposeEventHandlers();
+            
+            // Clear all debounce timers
+            this._debounceTimers.forEach(timer => clearTimeout(timer));
+            this._debounceTimers.clear();
             
             // Dispose terminal
             if (this.terminal) {

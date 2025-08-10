@@ -71,6 +71,7 @@ export class TabManager {
             Logger.debug('📨 Webview received message:', message.command);
             
             try {
+                const currentState = this.saveAllStates();
                 switch (message.command) {
                     case 'restoreState':
                         Logger.debug('🔄 Received restoreState terminals:', message.state?.terminals?.length, 'existing:', this.terminals.size, 'providerColdFlag:', !!message.cold);
@@ -161,8 +162,6 @@ export class TabManager {
                         
                     case 'requestState':
                         this.ensureInitialized();
-                        
-                        const currentState = this.saveAllStates();
                         this.vscode.postMessage({ 
                             command: 'stateResponse', 
                             state: currentState 
@@ -227,6 +226,7 @@ export class TabManager {
                         Logger.warn('Unknown command received:', message.command);
                         break;
                 }
+                this.saveToLocalState();
             } catch (error) {
                 Logger.error('Message handling error:', error);
             }
@@ -440,12 +440,6 @@ export class TabManager {
         
         // Update tab bar visibility
         this.updateTabBarVisibility();
-        
-        // Save state after creating new tab (synchronous now)
-        Logger.debug('New tab created, saving state...');
-        this.saveToLocalState();
-        
-        // PTY process is now created by the Terminal instance itself
     }
     
     /**
@@ -471,14 +465,6 @@ export class TabManager {
         
         // Clear notifications for the newly active tab
         this.clearNotificationsOnActivation(tabId);
-        
-        // Tab switching is now purely UI-level, no need to notify extension host
-        // Persist active tab change immediately so reload restores correct tab
-        try {
-            this.saveToLocalState();
-        } catch (e) {
-            Logger.warn('Could not persist state after tab switch:', e);
-        }
     }
     
     
@@ -512,11 +498,7 @@ export class TabManager {
         }
         
         // Update tab bar visibility
-        this.updateTabBarVisibility();
-        
-        this.saveToLocalState();
-        
-        // PTY disposal is now handled by the Terminal instance itself
+        this.updateTabBarVisibility();        
     }
 
     /**
@@ -685,13 +667,14 @@ export class TabManager {
     saveAllStates() {
         Logger.debug('TabManager.saveAllStates() - Current terminals:', this.terminals.size);
         const terminals = [];
-        // Map prior persisted rawContent by id so we don't erase history when serialize is suppressed
+    // Map prior persisted buffer by id so we don't erase history when serialize is suppressed
         let priorContentById = new Map();
         try {
             const priorState = vscode.getState && vscode.getState();
             if (priorState && priorState.fullTabState && Array.isArray(priorState.fullTabState.terminals)) {
                 for (const t of priorState.fullTabState.terminals) {
-                    priorContentById.set(t.id, t.rawContent || '');
+                    // Support both old and new property names during migration
+                    priorContentById.set(t.id, t.buffer || '');
                 }
             }
         } catch (e) {
@@ -703,31 +686,34 @@ export class TabManager {
             const terminalData = terminal.getState();
             
             // For default terminals (no launch command), handle content preservation and trimming
-            if (!terminal.launchCommand) {
+            if (!terminal.command) {
                 let serialized = terminal.serialize();
-                if (serialized == null) {
-                    const preserved = priorContentById.get(id);
-                    if (preserved) {
-                        Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
-                        serialized = preserved;
-                    } else {
-                        serialized = '';
-                    }
-                }
-                // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
-                if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
-                    const lines = serialized.split('\n');
-                    if (lines.length > 40) serialized = lines.slice(-40).join('\n');
-                }
-                terminalData.rawContent = serialized;
+                // Logger.warn(`Saving terminal: `, terminal);
+                // if (serialized == null) {
+                //     const preserved = priorContentById.get(id);
+                //     if (preserved) {
+                //         Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
+                //         serialized = preserved;
+                //     } else {
+                //         serialized = '';
+                //     }
+                // }
+                // // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
+                // if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
+                //     const lines = serialized.split('\n');
+                //     if (lines.length > 40) serialized = lines.slice(-40).join('\n');
+                // }
+                // Use new property names but support old names for backward compatibility
+                terminalData.buffer = serialized;
             }
-            
-            Logger.debug(`Saving terminal ${id}:`, { 
-                id: terminalData.id, 
-                label: terminalData.label, 
-                launchCommand: terminalData.launchCommand,
-                hasContent: !!terminalData.rawContent 
-            });
+
+            // Logger.warn(`Saving terminal ${id}:`, { 
+            //     id: terminalData.id, 
+            //     label: terminalData.label, 
+            //     command: terminalData.command,
+            //     buffer: terminalData.buffer?.substring(0, 100) + '...',
+            //     bufferLength: terminalData.buffer?.length || 0
+            // });
             terminals.push(terminalData);
         }
         
@@ -749,7 +735,7 @@ export class TabManager {
             terminals: [{
                 id: 1,
                 label: 'Terminal',
-                rawContent: '',
+                buffer: '', // unified property name for serialized content
                 terminalType: 'default'
             }],
             activeTabId: 1,
@@ -789,8 +775,8 @@ export class TabManager {
         }
         
         // Recreate terminals from saved state (in the saved order)
-    Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
-    let maxRestoreDelay = 0;
+        Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
+        let maxRestoreDelay = 0;
     for (const terminalData of savedState.terminals) {
             Logger.debug('🔄 Creating terminal from state:', { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType });
             Logger.debug('🔄 About to create TerminalInstance from restore...');
@@ -803,7 +789,7 @@ export class TabManager {
                 terminalData.terminalType || 'default',
                 { autoStartPty: false } // delay PTY spawn until after restored content is written
             );
-            Logger.debug('🔄 TerminalInstance created from restore:', terminal);
+            Logger.warn('🔄 TerminalInstance created from restore:', terminal);
             
             // Create container and attach
             const container = this.createTerminalContainer(terminalData.id);
@@ -812,13 +798,13 @@ export class TabManager {
             // Restore terminal state (includes label, terminalType, launchCommand, and modes)
             terminal.restoreFromState(terminalData);
             
-            // Handle cold boot banner for default terminals only
-            if (isColdBoot && !terminal.launchCommand && terminalData.rawContent) {
+            // Handle cold boot banner for default terminals only (use unified buffer prop)
+            const existingContent = terminalData.buffer || terminalData.rawContent || terminalData.serializedContent;
+            if (isColdBoot && !terminal.launchCommand && existingContent) {
                 Logger.debug('🏁 Adding cold boot banner to default terminal', terminalData.id);
-                // Add banner to the serialized content for default terminals
-                const originalContent = terminalData.rawContent;
-                terminalData.rawContent = originalContent + '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
-                // Re-run restoreFromState with updated content
+                const decorated = existingContent + '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
+                // Mutate buffer for consistency then re-run restore
+                terminalData.buffer = decorated;
                 terminal.restoreFromState(terminalData);
             }
             
@@ -842,7 +828,7 @@ export class TabManager {
         }
         
         // Delay switching to active tab until after all terminals have been restored
-        const targetActiveTabId = savedState.activeTabId && this.terminals.has(savedState.activeTabId) 
+    const targetActiveTabId = savedState.activeTabId && this.terminals.has(savedState.activeTabId) 
             ? savedState.activeTabId 
             : Array.from(this.terminals.keys())[0];
         
@@ -865,14 +851,17 @@ export class TabManager {
             timestamp: Date.now()
         });
     
-        // Once all terminals are boot ready, take a single baseline save
+        // Immediate post-restore baseline save (terminals mark ready instantly now)
         try {
-            const allBootPromises = Array.from(this.terminals.values()).map(t => t.whenBootReady.catch(()=>{}));
-            Promise.all(allBootPromises).then(() => {
-                Logger.debug('🧷 Post-restore baseline save (event-driven)');
-                this.saveToLocalState();
-            });
-        } catch (e) { Logger.warn('Baseline save scheduling failed:', e); }
+            for (const [id, term] of this.terminals) {
+                try {
+                    const state = term.getState();
+                    Logger.debug('🔍 Restored terminal verification', { id, label: state.label, bufferLength: (state.buffer||'').length });
+                } catch (_) {}
+            }
+        } catch (_) {}
+        Logger.debug('🧷 Post-restore immediate baseline save');
+        this.saveToLocalState();
         Logger.debug('Restore complete - Final terminal count:', this.terminals.size, 'Active tab:', this.activeTabId);
     }
     

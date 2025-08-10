@@ -17,7 +17,9 @@ import * as vscode from 'vscode';
 export interface SerializedTerminal {
     id: number;
     label: string;
-    rawContent: string;
+    buffer: string; // New simplified name
+    modes?: number; // Terminal modes bitmask
+    command?: string; // Launch command
     terminalType?: string;
 }
 
@@ -174,7 +176,7 @@ export class WebviewViewSerializer {
         
         for (const [id, terminal] of tabManager.terminals) {
             const serializedTerminal = this.serializeTerminalContent(terminal);
-            console.log(`💾 Serialized terminal ${id}:`, { id: serializedTerminal.id, label: serializedTerminal.label, hasContent: !!serializedTerminal.rawContent });
+            console.log(`💾 Serialized terminal ${id}:`, { id: serializedTerminal.id, label: serializedTerminal.label, hasContent: !!serializedTerminal.buffer });
             terminals.push(serializedTerminal);
         }
         
@@ -238,11 +240,14 @@ export class WebviewViewSerializer {
      * Serialize individual terminal content and metadata
      */
     private serializeTerminalContent(terminal: any): SerializedTerminal {
+        console.log('🔄 Serializing terminal content:', terminal.id);
+        const terminalState = terminal.getState ? terminal.getState() : null;
         return {
             id: terminal.id,
             label: terminal.label,
-            rawContent: terminal.serialize() || '',
-            terminalType: terminal.terminalType || 'default'
+            buffer: terminal.serialize() || '',
+            modes: terminalState?.modes,
+            command: terminalState?.command
         };
     }
 }

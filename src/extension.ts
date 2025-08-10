@@ -11,7 +11,6 @@ export function activate(context: vscode.ExtensionContext) {
     const isDebugMode = process.env.NODE_ENV === 'development' || 
                        context.extensionMode === vscode.ExtensionMode.Development;
     
-    
     // Set debug mode context for conditional UI
     vscode.commands.executeCommand('setContext', 'alterminal.debugMode', isDebugMode);
     
