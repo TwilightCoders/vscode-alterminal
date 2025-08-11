@@ -32,7 +32,7 @@ export class ContextMenu {
      * @param {number} options.x - Mouse X position
      * @param {number} options.y - Mouse Y position
      */
-    showTabContextMenu({ tabId, terminalType, command, x, y }) {
+    showTabContextMenu({ tabId, terminalType, launchCommand, x, y }) {
         // Send message to extension host to show native context menu
         this.vscode.postMessage({
             command: 'showContextMenu',
@@ -40,7 +40,7 @@ export class ContextMenu {
             data: {
                 tabId,
                 terminalType,
-                command,
+                launchCommand,
                 position: { x, y }
             }
         });

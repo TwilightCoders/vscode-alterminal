@@ -173,7 +173,7 @@ export class TabManager {
                         break;
                         
                     case 'createNewTab':
-                        this.createNewTab(message.terminalType, message.customCommand);
+                        this.createNewTab(message.terminalType, message.launchCommand);
                         break;
                         
                     case 'switchToTab':
@@ -415,8 +415,7 @@ export class TabManager {
         }
         
         // Create unified terminal instance (handles both frontend and backend)
-        Logger.debug('🏗️ About to create TerminalInstance with id:', tabId, 'label:', label, 'type:', terminalType);
-        const terminal = new TerminalInstance(tabId, label, this.vscode, this.terminalTheme, this.getThemeColor, terminalType, { customCommand: launchCommand });
+        const terminal = new TerminalInstance(tabId, label, this.vscode, this.terminalTheme, this.getThemeColor, terminalType, { launchCommand });
         Logger.debug('🏗️ TerminalInstance created successfully:', terminal);
         
         // Create container and attach terminal
@@ -686,7 +685,7 @@ export class TabManager {
             const terminalData = terminal.getState();
             
             // For default terminals (no launch command), handle content preservation and trimming
-            if (!terminal.command) {
+            if (!terminal.launchCommand) {
                 let serialized = terminal.serialize();
                 // Logger.warn(`Saving terminal: `, terminal);
                 // if (serialized == null) {
@@ -795,22 +794,32 @@ export class TabManager {
             const container = this.createTerminalContainer(terminalData.id);
             terminal.attachToContainer(container);
             
-            // Restore terminal state (includes label, terminalType, launchCommand, and modes)
+            // Inject cold boot banner BEFORE first restore to avoid duplicate content writes
+            if (isColdBoot && !terminalData.launchCommand) {
+                const existingContent = terminalData.buffer;
+                    if (existingContent) {
+                        Logger.debug('🏁 Decorating cold boot content prior to restore for terminal', terminalData.id);
+                        terminalData.buffer = existingContent + '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
+                }
+            }
+
+            // Restore terminal state (includes label, terminalType, launchCommand, and modes) exactly once
             terminal.restoreFromState(terminalData);
             
-            // Handle cold boot banner for default terminals only (use unified buffer prop)
-            const existingContent = terminalData.buffer || terminalData.rawContent || terminalData.serializedContent;
-            if (isColdBoot && !terminal.launchCommand && existingContent) {
-                Logger.debug('🏁 Adding cold boot banner to default terminal', terminalData.id);
-                const decorated = existingContent + '\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n';
-                // Mutate buffer for consistency then re-run restore
-                terminalData.buffer = decorated;
-                terminal.restoreFromState(terminalData);
+            if (terminal.whenOpened && typeof terminal.whenOpened.then === 'function') {
+                terminal.whenOpened.then(() => {
+                    try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error:', e); }
+                    try {
+                        const snap = terminal.serialize();
+                        if (snap && snap.length) {
+                            Logger.debug(`📌 Anchored snapshot post-open for terminal ${terminal.id} (chars=${snap.length})`);
+                        }
+                    } catch(_) {}
+                });
+            } else {
+                // Fallback immediate start if promise missing
+                try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error (no whenOpened):', e); }
             }
-            
-            terminal.whenOpened.then(() => {
-                try { terminal.startDeferredPtyIfNeeded(); } catch (e) { Logger.error('Deferred PTY start error:', e); }
-            });
             
             // Update next tab ID if needed
             if (terminalData.id >= this.nextTabId) {
@@ -943,7 +952,7 @@ export class TabManager {
             contextType: 'tab',
             tabId: tabId.toString(),
             terminalType: terminal?.launchCommand ? 'command' : 'shell',
-            command: terminal?.launchCommand || null,
+            launchCommand: terminal?.launchCommand || null,
             preventDefaultContextMenuItems: true
         }));
         

@@ -240,12 +240,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         }
     }
     
-    public createNewTabWithCommand(command: string) {
+    public createNewTabWithCommand(cmd: string) {
         if (this._view) {
             this._view.webview.postMessage({ 
                 command: 'createNewTab',
                 terminalType: 'command',
-                customCommand: command
+                launchCommand: cmd
             });
         }
     }
@@ -672,7 +672,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
             // Check if command exists in saved commands
             const savedCommands = this._commandManager.getSavedCommands();
-            const isSaved = savedCommands.some(cmd => cmd.command === msg.launchCommand);
+            const isSaved = savedCommands.some(cmd => cmd.launchCommand === msg.launchCommand);
             
             // Send response back to webview
             if (this._view) {
@@ -713,23 +713,19 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     private async _handleContextMenuSaveCommand(args: any) {
         try {
             const tabId = args?.tabId;
-            const command = args?.command;
+            const launchCommand = args?.launchCommand;
             
-            if (!command) {
-                Logger.warn('Cannot save command: no command provided in context');
+            if (!launchCommand) {
+                Logger.warn('Cannot save command: no launchCommand provided in context');
                 vscode.window.showErrorMessage('No command to save');
                 return;
             }
 
-            // Use CommandManager to save the command
-            await this._commandManager.saveCommand(command);
-            
-            // Show success message
+            await this._commandManager.saveCommand(launchCommand);
             vscode.window.showInformationMessage(
-                `Command "${command}" saved to quick launch menu!`
+                `Command "${launchCommand}" saved to quick launch menu!`
             );
-            
-            Logger.info(`Context menu - Command saved from tab ${tabId}: ${command}`);
+            Logger.info(`Context menu - Command saved from tab ${tabId}: ${launchCommand}`);
         } catch (error) {
             Logger.error('Failed to save command from context menu:', error);
             vscode.window.showErrorMessage('Failed to save command. Please try again.');

@@ -30,15 +30,8 @@ import { Logger } from './logger.js';
 
 export class TerminalInstance {
     constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'default', options = {}) {
-        const { autoStartPty = true, customCommand = null } = options;
-        this.launchCommand = customCommand;
-        // SUCCESS! Our code is running and hover is working!
-    Logger.debug('TerminalInstance constructor id:', id, 'type:', terminalType);
-    Logger.debug('Debug mode flag:', localStorage.getItem('alterminal.debug'));
-        
-    // Respect existing debug mode flag (no forced enable in production)
-        
-    Logger.debug('Creating new TerminalInstance with id:', id, 'type:', terminalType);
+        const { autoStartPty = true, launchCommand = null } = options;
+        this.launchCommand = launchCommand;
         this.id = id;
         this.label = label;
         this.vscode = vscode;
@@ -623,9 +616,9 @@ export class TerminalInstance {
             id: this.id,
             label: this.label,
             // Only serialize content for default terminals - launch command terminals start fresh
-            buffer: serializedContent,
+            buffer: this.launchCommand ? '' : (this.serialize() || ''), // Only serialize content for default terminals - launch command terminals start fresh
             modes: this.modeProvider.getState(), // Include terminal modes bitmask
-            command: this.command
+            launchCommand: this.launchCommand
         };
     }
     
@@ -641,16 +634,13 @@ export class TerminalInstance {
         this.modeProvider.restoreState(state.modes || state.terminalModes || 0); // Support both new and old property names
         
         // Restore launch command and derive terminal type
-        this.command = state.command || state.command || state.customCommand || this.command; // Support migration from old names
-        this.terminalType = this.command ? 'command' : 'default';
+        this.launchCommand = state.launchCommand || this.launchCommand;
+        this.terminalType = this.launchCommand ? 'command' : 'default';
         
-        // For terminals with launch commands, start fresh instead of restoring old content
-        if (this.command) {
-            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.command}" instead of restoring content`);
-            // PTY will be created with the launch command when terminal opens
+        if (this.launchCommand) {
+            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`);
         } else {
-            // For default terminals, restore the saved content
-            const contentToRestore = state.buffer || state.rawContent || state.serializedContent; // Support migration from old names
+            const contentToRestore = state.buffer;
             if (contentToRestore) this.deserialize(contentToRestore);
         }
     }

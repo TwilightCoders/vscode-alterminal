@@ -89,8 +89,7 @@ export interface ITerminalOptions {
     title?: string;
     icon?: string;
     terminalType: 'shell' | 'command' | 'default';
-    command?: string;          // canonical launch command
-    customCommand?: string;    // legacy alias
+    command?: string;          // launch command (unified)
     autoStartPty?: boolean;
 }
 

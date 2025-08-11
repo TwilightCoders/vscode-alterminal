@@ -65,7 +65,8 @@ export class PtyManager {
     public async handleMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'createPty':
-                this.createPtyProcess(message.tabId, message.terminalType, message.customCommand);
+                // Single canonical field now: launchCommand (older aliases removed)
+                this.createPtyProcess(message.tabId, message.terminalType, message.launchCommand);
                 break;
             case 'disposePty':
                 this.disposePtyProcess(message.tabId);
@@ -110,7 +111,7 @@ export class PtyManager {
     }
 
 
-    public createPtyProcess(tabId: number, terminalType: string = 'default', customCommand?: string): void {
+    public createPtyProcess(tabId: number, terminalType: string = 'default', launchCommand?: string): void {
         // Only create new PTY process if one doesn't exist for this tab
         if (!this._ptyProcesses.has(tabId)) {
             // Store terminal type for this tab
@@ -124,12 +125,12 @@ export class PtyManager {
             
             switch (terminalType) {
                 case 'command':
-                    // Use custom command if provided, otherwise default to shell
-                    if (customCommand) {
-                        const parts = customCommand.split(' ');
+                    // Use provided command if given, otherwise default to shell
+                    if (launchCommand) {
+                        const parts = launchCommand.split(' ');
                         command = parts[0];
                         args = parts.slice(1);
-                        Logger.debug(`Using custom command: ${command} with args:`, args);
+                        Logger.debug(`Using launch command: ${command} with args:`, args);
                     } else {
                         // Default to shell if no command specified
                         command = userShell;

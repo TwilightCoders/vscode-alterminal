@@ -143,7 +143,7 @@ export class TabTitleManager {
         this.contextMenu.showTabContextMenu({
             tabId: this.tabId,
             terminalType: this.getTerminalType(),
-            command: this.terminal?.launchCommand || null,
+            launchCommand: this.terminal?.launchCommand || null,
             x,
             y
         });

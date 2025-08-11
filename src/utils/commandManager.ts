@@ -22,7 +22,7 @@
 import * as vscode from 'vscode';
 
 interface SavedCommand {
-    command: string;
+    launchCommand: string;
     label: string;
     count: number;
     lastUsed: string;
