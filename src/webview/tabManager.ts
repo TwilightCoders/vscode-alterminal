@@ -281,6 +281,7 @@ export class TabManager {
 
           case "setDeveloperMode":
             window.DEVELOPER_MODE = message.enabled;
+            try { Logger.configureDevMode(message.enabled); } catch { /* ignore */ }
             break;
           case "collectPerformance":
             this._reportPerformance();

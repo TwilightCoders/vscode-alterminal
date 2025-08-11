@@ -8,18 +8,30 @@
 
 export class Logger {
   private static debugFilter: string[] | null = null;
+  // Memoized debug mode cache (undefined = not yet computed)
+  private static _debugMode: boolean | undefined;
+
+  // External configuration hook so other code (e.g., TabManager message handler) can set dev mode once
+  static configureDevMode(enabled: boolean) {
+    this._debugMode = enabled;
+    try { (globalThis as any).__ALTERMINAL_DEV_MODE = enabled; } catch { /* ignore */ }
+  }
 
   private static isDebugMode(): boolean {
-    // Check localStorage for debug mode in webview context
-    try {
-      return (
-        localStorage.getItem("alterminal.debug") === "true" ||
-        localStorage.getItem("vscode.debug") === "true" ||
-        (globalThis as any).isDevelopment === true
-      );
-    } catch {
-      return false;
+    if (this._debugMode == undefined) {
+      try {
+        // Prefer explicit global flag populated by configureDevMode
+        if ((globalThis as any).__ALTERMINAL_DEV_MODE !== undefined) {
+          this._debugMode = !!(globalThis as any).__ALTERMINAL_DEV_MODE;
+        } else {
+          this._debugMode =
+            localStorage.getItem("alterminal.debug") === "true" ||
+            localStorage.getItem("vscode.debug") === "true" ||
+            (globalThis as any).isDevelopment === true;
+        }
+      } catch { this._debugMode = false; }
     }
+    return this._debugMode;
   }
 
   static isDebugModeEnabled(): boolean {
@@ -97,8 +109,15 @@ export class Logger {
   static forceDebugMode(enabled: boolean): void {
     try {
       localStorage.setItem("alterminal.debug", enabled.toString());
+      // Update cached value immediately so subsequent calls reflect change
+      this._debugMode = enabled;
     } catch {
       // Ignore localStorage errors
     }
+  }
+
+  // Allow external explicit invalidation if environment changes outside forceDebugMode
+  static invalidateDebugModeCache(): void {
+    this._debugMode = undefined;
   }
 }

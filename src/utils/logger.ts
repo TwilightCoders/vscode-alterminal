@@ -7,10 +7,31 @@
 
 export class Logger {
   private static debugFilter: string[] | null = null;
+  private static devMode: boolean | null = null; // explicit runtime flag
+  private static configured = false;
+
+  /** Configure logger with explicit dev/prod mode (call once at activation). */
+  static configure(isDev: boolean) {
+    this.devMode = isDev;
+    this.configured = true;
+    if (!isDev) {
+      // Hard-disable noisy levels for perf; keep warn/error always.
+      // Reassign only if not already no-op to avoid breaking references.
+      // Use function expressions to preserve 'this' independence.
+      if (this.debug !== this._noop) this.debug = this._noop;
+      if (this.info !== this._noop) this.info = this._noop;
+      if (this.trace !== this._traceNoopWrapper) this.trace = this._traceNoopWrapper as any;
+    }
+  }
+
+  private static _noop = (..._args: any[]) => {};
+  private static _traceNoopWrapper = (_message: string, ..._args: any[]) => {};
 
   private static isDebugMode(): boolean {
-    // Check if we're in VS Code extension development mode
-    return process.env.NODE_ENV === "development";
+  // Prefer explicit runtime flag if configured
+  if (this.devMode !== null) return this.devMode;
+  // Fallback to environment variable heuristic
+  return process.env.NODE_ENV === "development";
   }
 
   private static getDebugFilter(): string[] | null {
@@ -69,6 +90,9 @@ export class Logger {
       console.log(`[TRACE] ${message}`, ...args);
     }
   }
+
+  /** Public cheap guard for hot-path caller side wrapping */
+  static isDebugEnabled(): boolean { return this.isDebugMode(); }
 }
 
 // For webview context (JavaScript)
