@@ -1,17 +1,45 @@
 // Isomorphic Debouncer usable in both extension (Node) and webview (browser)
 // Avoid explicit NodeJS.Timeout typing so bundlers don't inject node typings into the webview bundle.
-export type DebounceOptions = { leading?: boolean; trailing?: boolean; maxWait?: number };
+export type DebounceOptions = {
+  leading?: boolean;
+  trailing?: boolean;
+  maxWait?: number;
+};
 type Timer = ReturnType<typeof setTimeout> | null;
-interface Entry { timer: Timer; lastInvoke: number; lastCall: number; maxTimer: Timer; fn: (...args:any[])=>any; opts: DebounceOptions; lastArgs: any[]; leadingInvoked: boolean; }
+interface Entry {
+  timer: Timer;
+  lastInvoke: number;
+  lastCall: number;
+  maxTimer: Timer;
+  fn: (...args: any[]) => any;
+  opts: DebounceOptions;
+  lastArgs: any[];
+  leadingInvoked: boolean;
+}
 
 export class Debouncer {
   private static _entries = new Map<string, Entry>();
 
-  static debounce<T extends (...args: any[]) => any>(key: string, wait: number, fn: T, opts: DebounceOptions = {}, ...args: Parameters<T>) {
+  static debounce<T extends (...args: any[]) => any>(
+    key: string,
+    wait: number,
+    fn: T,
+    opts: DebounceOptions = {},
+    ...args: Parameters<T>
+  ) {
     let entry = this._entries.get(key);
     const now = Date.now();
     if (!entry) {
-      entry = { timer: null, maxTimer: null, lastInvoke: 0, lastCall: 0, fn, opts: { trailing: true, ...opts }, lastArgs: [], leadingInvoked: false };
+      entry = {
+        timer: null,
+        maxTimer: null,
+        lastInvoke: 0,
+        lastCall: 0,
+        fn,
+        opts: { trailing: true, ...opts },
+        lastArgs: [],
+        leadingInvoked: false,
+      };
       this._entries.set(key, entry);
     } else {
       entry.fn = fn;
@@ -42,7 +70,10 @@ export class Debouncer {
 
     if (entry.opts.maxWait && !entry.maxTimer) {
       entry.maxTimer = setTimeout(() => {
-        if (entry!.timer) { clearTimeout(entry!.timer as any); entry!.timer = null; }
+        if (entry!.timer) {
+          clearTimeout(entry!.timer as any);
+          entry!.timer = null;
+        }
         invoke();
       }, entry.opts.maxWait);
     }
@@ -51,8 +82,14 @@ export class Debouncer {
   static flush(key: string) {
     const entry = this._entries.get(key);
     if (!entry) return;
-    if (entry.timer) { clearTimeout(entry.timer as any); entry.timer = null; }
-    if (entry.maxTimer) { clearTimeout(entry.maxTimer as any); entry.maxTimer = null; }
+    if (entry.timer) {
+      clearTimeout(entry.timer as any);
+      entry.timer = null;
+    }
+    if (entry.maxTimer) {
+      clearTimeout(entry.maxTimer as any);
+      entry.maxTimer = null;
+    }
     entry.fn(...entry.lastArgs);
     entry.lastInvoke = Date.now();
     entry.leadingInvoked = false;

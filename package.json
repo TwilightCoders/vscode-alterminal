@@ -190,7 +190,7 @@
           "group": "1_terminals@1"
         },
         {
-          "command": "alterminal.saveCurrentCommand", 
+          "command": "alterminal.saveCurrentCommand",
           "group": "2_commands@1"
         }
       ],
@@ -309,7 +309,7 @@
                 "description": "The command to execute"
               },
               "label": {
-                "type": "string", 
+                "type": "string",
                 "description": "Display label for the command"
               },
               "count": {

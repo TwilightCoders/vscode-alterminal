@@ -1,26 +1,26 @@
 // @ts-nocheck
-import { InputHandler } from './inputHandler.js';
-import { TerminalLifecycleManager } from './lifecycleManager.js';
-import { FilePathLinkProvider } from './linkProvider.js';
-import { AnsiModeProvider } from './modeProvider.js';
-import { Logger } from './logger.js';
-import { Debouncer } from '../utils/debouncer.js';
+import { InputHandler } from "./inputHandler.js";
+import { TerminalLifecycleManager } from "./lifecycleManager.js";
+import { FilePathLinkProvider } from "./linkProvider.js";
+import { AnsiModeProvider } from "./modeProvider.js";
+import { Logger } from "./logger.js";
+import { Debouncer } from "../utils/debouncer.js";
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
- * 
+ *
  * Purpose:
  * - Complete terminal instance managing both xterm.js display AND PTY backend
  * - Unified lifecycle - one terminal = one xterm.js + one PTY process
  * - Clean API for all terminal operations without artificial frontend/backend split
- * 
+ *
  * Responsibilities:
  * - Create and configure xterm.js terminal with all addons
  * - Coordinate with extension host to create and manage its own PTY process
  * - Handle all terminal events, state, and lifecycle as one cohesive unit
  * - Serialize/deserialize complete terminal state (both display and PTY state)
  * - Clean disposal of both frontend and backend resources
- * 
+ *
  * Key Features:
  * - Unified terminal instance (no more TerminalWrapper + PtyManager split)
  * - Self-manages both UI and PTY through extension messaging
@@ -30,680 +30,792 @@ import { Debouncer } from '../utils/debouncer.js';
  */
 
 export class TerminalInstance {
-    constructor(id, label, vscode, terminalTheme, getThemeColor, terminalType = 'default', options = {}) {
-        const { autoStartPty = true, launchCommand = null } = options;
-        this.launchCommand = launchCommand;
-        this.id = id;
-        this.label = label;
-        this.vscode = vscode;
-        this.terminalTheme = terminalTheme;
-        this.getThemeColor = getThemeColor;
-        this.terminalType = terminalType;
-        
-        // Terminal and addons (created in _createTerminal)
-        this.terminal = null;
-        this.fitAddon = null;
-        this.serializeAddon = null;
-        this.unicodeAddon = null;
-        this.webLinksAddon = null;
+  constructor(
+    id,
+    label,
+    vscode,
+    terminalTheme,
+    getThemeColor,
+    terminalType = "default",
+    options = {},
+  ) {
+    const { autoStartPty = true, launchCommand = null } = options;
+    this.launchCommand = launchCommand;
+    this.id = id;
+    this.label = label;
+    this.vscode = vscode;
+    this.terminalTheme = terminalTheme;
+    this.getThemeColor = getThemeColor;
+    this.terminalType = terminalType;
 
-        // Providers
-        this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
-        this.linkProvider = new FilePathLinkProvider(this, vscode, id);
-        this.modeProvider = new AnsiModeProvider(this, vscode, id);
+    // Terminal and addons (created in _createTerminal)
+    this.terminal = null;
+    this.fitAddon = null;
+    this.serializeAddon = null;
+    this.unicodeAddon = null;
+    this.webLinksAddon = null;
 
-        // Simplified history flags
-        this._simpleHistory = true;
-        this._didInit = false;
+    // Providers
+    this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
+    this.linkProvider = new FilePathLinkProvider(this, vscode, id);
+    this.modeProvider = new AnsiModeProvider(this, vscode, id);
+
+    // Simplified history flags
+    this._simpleHistory = true;
+    this._didInit = false;
     // If autoStartPty is false we defer spawning until restoration completes.
     // If true we spawn when the terminal is first marked opened.
     this._pendingPtyStart = !autoStartPty;
 
-        // Invoke initialization
-        this.initialize();
+    // Invoke initialization
+    this.initialize();
 
-        // Lifecycle promises compatibility (ensure whenOpened exists)
-        if (!this.whenOpened) {
-            this.whenOpened = new Promise(res => { this._openedResolve = res; });
-        }
+    // Lifecycle promises compatibility (ensure whenOpened exists)
+    if (!this.whenOpened) {
+      this.whenOpened = new Promise((res) => {
+        this._openedResolve = res;
+      });
     }
+  }
 
-    initialize() {
-        if (this._didInit) return;
-        this._didInit = true;
-        this._createTerminal();
-    }
+  initialize() {
+    if (this._didInit) return;
+    this._didInit = true;
+    this._createTerminal();
+  }
 
-    _createTerminal() {
+  _createTerminal() {
+    try {
+      let XTerminal = null;
+      if (window.Terminal && typeof window.Terminal === "function")
+        XTerminal = window.Terminal;
+      else if (globalThis.Terminal && typeof globalThis.Terminal === "function")
+        XTerminal = globalThis.Terminal;
+      else if (self.Terminal && typeof self.Terminal === "function")
+        XTerminal = self.Terminal;
+      else {
+        const possible = window.Terminal || globalThis.Terminal;
+        if (possible && possible.Terminal) XTerminal = possible.Terminal;
+        else throw new Error("Terminal constructor not found");
+      }
+      this.terminal = new XTerminal({
+        cursorBlink: true,
+        fontSize:
+          parseInt(
+            this.getThemeColor("--vscode-editor-font-size", "14").replace(
+              "px",
+              "",
+            ),
+          ) || 14,
+        fontFamily: this.getThemeColor(
+          "--vscode-editor-font-family",
+          "Consolas, Monaco, Menlo, monospace",
+        ),
+        theme: this.terminalTheme,
+        scrollback: window.scrollbackLines || 1000,
+        scrollOnUserInput: true,
+        sendFocus: true,
+        allowTransparency: false,
+        windowsMode: false,
+        experimentalCharAtlas: "dynamic",
+        allowProposedApi: true,
+        convertEol: true,
+        disableStdin: false,
+      });
+      this.fitAddon = new FitAddon.FitAddon();
+      this.serializeAddon = new SerializeAddon.SerializeAddon();
+      this.unicodeAddon = new Unicode11Addon.Unicode11Addon();
+      this.webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => {
+        this.vscode.postMessage({ command: "openUrl", url: uri });
+        return false;
+      });
+      try {
+        const webglAddon = new WebglAddon.WebglAddon();
+        this.terminal.loadAddon(webglAddon);
+      } catch {
         try {
-            let XTerminal = null;
-            if (window.Terminal && typeof window.Terminal === 'function') XTerminal = window.Terminal;
-            else if (globalThis.Terminal && typeof globalThis.Terminal === 'function') XTerminal = globalThis.Terminal;
-            else if (self.Terminal && typeof self.Terminal === 'function') XTerminal = self.Terminal;
-            else {
-                const possible = window.Terminal || globalThis.Terminal;
-                if (possible && possible.Terminal) XTerminal = possible.Terminal; else throw new Error('Terminal constructor not found');
-            }
-            this.terminal = new XTerminal({
-                cursorBlink: true,
-                fontSize: parseInt(this.getThemeColor('--vscode-editor-font-size', '14').replace('px','')) || 14,
-                fontFamily: this.getThemeColor('--vscode-editor-font-family', 'Consolas, Monaco, Menlo, monospace'),
-                theme: this.terminalTheme,
-                scrollback: window.scrollbackLines || 1000,
-                scrollOnUserInput: true,
-                sendFocus: true,
-                allowTransparency: false,
-                windowsMode: false,
-                experimentalCharAtlas: 'dynamic',
-                allowProposedApi: true,
-                convertEol: true,
-                disableStdin: false
-            });
-            this.fitAddon = new FitAddon.FitAddon();
-            this.serializeAddon = new SerializeAddon.SerializeAddon();
-            this.unicodeAddon = new Unicode11Addon.Unicode11Addon();
-            this.webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => { this.vscode.postMessage({ command: 'openUrl', url: uri }); return false; });
-            try { const webglAddon = new WebglAddon.WebglAddon(); this.terminal.loadAddon(webglAddon); } catch { try { const canvasAddon = new CanvasAddon.CanvasAddon(); this.terminal.loadAddon(canvasAddon); } catch {} }
-            this.terminal.loadAddon(this.fitAddon);
-            this.terminal.loadAddon(this.serializeAddon);
-            this.terminal.loadAddon(this.unicodeAddon);
-            this.terminal.loadAddon(this.webLinksAddon);
-            this.setupEventHandlers();
-            this.lifecycleManager.on('bootReady', () => { if (window.tabManager?.saveToLocalState) { try { window.tabManager.saveToLocalState(); } catch {} } });
-            this.lifecycleManager.initialize();
-            this.linkProvider.initialize();
-            this.modeProvider.initialize();
-            if (this.terminal.unicode) this.terminal.unicode.activeVersion = '11';
-        } catch (e) {
-            Logger.error('Terminal init failed', e);
+          const canvasAddon = new CanvasAddon.CanvasAddon();
+          this.terminal.loadAddon(canvasAddon);
+        } catch {}
+      }
+      this.terminal.loadAddon(this.fitAddon);
+      this.terminal.loadAddon(this.serializeAddon);
+      this.terminal.loadAddon(this.unicodeAddon);
+      this.terminal.loadAddon(this.webLinksAddon);
+      this.setupEventHandlers();
+      this.lifecycleManager.on("bootReady", () => {
+        if (window.tabManager?.saveToLocalState) {
+          try {
+            window.tabManager.saveToLocalState();
+          } catch {}
         }
+      });
+      this.lifecycleManager.initialize();
+      this.linkProvider.initialize();
+      this.modeProvider.initialize();
+      if (this.terminal.unicode) this.terminal.unicode.activeVersion = "11";
+    } catch (e) {
+      Logger.error("Terminal init failed", e);
     }
-    
-    /**
-     * Dispose of existing file path link providers (delegated to linkProvider)
-     */
-    disposeFilePathLinks() {
-        this.linkProvider.dispose();
-    }
-    
-    /**
-     * Set up file path link detection (delegated to linkProvider)
-     */
-    setupFilePathLinks() {
-        this.linkProvider.setupFilePathLinks();
-    }
+  }
 
-    
-    /**
-     * Set up terminal event handlers with proper disposal management
-     */
-    setupEventHandlers() {
-        // Dispose existing handlers first
-        this.disposeEventHandlers();
-        
-        // Set up input handling (keyboard, file drops, etc.)
-        this.inputHandler = new InputHandler(
-            this.terminal,
-            this.id,
-            (msg) => this.vscode.postMessage(msg),
-            () => {
-                if (window.tabManager && window.tabManager.saveToLocalState) {
-                    window.tabManager.saveToLocalState();
-                }
+  /**
+   * Dispose of existing file path link providers (delegated to linkProvider)
+   */
+  disposeFilePathLinks() {
+    this.linkProvider.dispose();
+  }
+
+  /**
+   * Set up file path link detection (delegated to linkProvider)
+   */
+  setupFilePathLinks() {
+    this.linkProvider.setupFilePathLinks();
+  }
+
+  /**
+   * Set up terminal event handlers with proper disposal management
+   */
+  setupEventHandlers() {
+    // Dispose existing handlers first
+    this.disposeEventHandlers();
+
+    // Set up input handling (keyboard, file drops, etc.)
+    this.inputHandler = new InputHandler(
+      this.terminal,
+      this.id,
+      (msg) => this.vscode.postMessage(msg),
+      () => {
+        if (window.tabManager && window.tabManager.saveToLocalState) {
+          window.tabManager.saveToLocalState();
+        }
+      },
+    );
+
+    // Set up resize handler - coordinate with PTY backend
+    this.resizeDisposable = this.terminal.onResize((size) => {
+      // Notify our PTY process of resize
+      this.sendResizeToPty(size.cols, size.rows);
+    });
+
+    // Set up bell handler - listen for terminal bell events
+    this.bellDisposable = this.terminal.onBell(() => {
+      const timestamp = new Date().toISOString();
+      // Only show indicator if tab is not currently active
+      if (!this.isActive) {
+        // Show bell notification on inactive tabs
+        if (this.onBellReceived) {
+          this.onBellReceived(this.id);
+        }
+      }
+    });
+
+    // Set up buffer change detection using onData event
+    if (typeof this.terminal.onData === "function") {
+      this.dataDisposable = this.terminal.onData(() => {
+        // Debounce buffer saves to avoid excessive saving during rapid terminal output
+        Debouncer.debounce(
+          `term-save-${this.id}`,
+          750,
+          () => {
+            if (window.tabManager?.scheduleSaveState) {
+              try {
+                window.tabManager.scheduleSaveState("terminalData");
+              } catch (_) {}
+            } else if (window.tabManager?.saveToLocalState) {
+              try {
+                window.tabManager.saveToLocalState();
+              } catch (_) {}
             }
+          },
+          { maxWait: 5000 },
         );
-        
-        // Set up resize handler - coordinate with PTY backend
-        this.resizeDisposable = this.terminal.onResize((size) => {
-            // Notify our PTY process of resize
-            this.sendResizeToPty(size.cols, size.rows);
+      });
+    }
+  }
+
+  /**
+   * Create and attach terminal to DOM container
+   */
+  attachToContainer(container) {
+    if (!this.terminal || !container) return;
+
+    try {
+      this.terminalContainer = container;
+      // Only open if terminal is not already opened
+      if (!this.terminal.element) {
+        this.terminal.open(container);
+        performance.mark(`t${this.id}-open`);
+
+        // Set up file path links immediately after opening
+        // The terminal is now attached to DOM and ready for link providers
+        Logger.debug("🔗 Setting up file path links after terminal.open()");
+        this.setupFilePathLinks();
+
+        // Visibility-aware fitting & refresh
+        this._installVisibilityHandlers();
+
+        // Kick off multi-pass stabilization redraw (addresses blank-on-move)
+        this._scheduleRedrawSequence();
+
+        // Also listen for terminal render events to ensure links work if content changes
+        if (typeof this.terminal.onRender === "function") {
+          this.renderDisposable = this.terminal.onRender(() => {
+            this._markOpened();
+          });
+        }
+      }
+
+      // Fit the terminal to container
+      if (
+        this.fitAddon &&
+        container.offsetWidth > 0 &&
+        container.offsetHeight > 0
+      )
+        this.fitAddon.fit();
+    } catch (error) {
+      Logger.error(`Failed to attach terminal ${this.id} to container:`, error);
+    }
+  }
+
+  _markOpened() {
+    if (this._openedResolved) return;
+    this._openedResolved = true;
+    if (this._openedResolve) {
+      try {
+        this._openedResolve();
+      } catch {}
+    }
+    // Start PTY immediately if not deferred
+    try {
+      if (!this._pendingPtyStart) {
+        this.createPtyProcess();
+      }
+    } catch (e) {
+      Logger.error("Immediate PTY start failed:", e);
+    }
+  }
+
+  /**
+   * Set a terminal mode bit (delegated to modeProvider)
+   */
+  setMode(bit, enabled) {
+    this.modeProvider.setMode(bit, enabled);
+  }
+
+  /**
+   * Check if a terminal mode is enabled (delegated to modeProvider)
+   */
+  hasMode(bit) {
+    return this.modeProvider.hasMode(bit);
+  }
+
+  /**
+   * Parse and track terminal modes from escape sequences (delegated to modeProvider)
+   */
+  parseAndTrackModes(data) {
+    this.modeProvider.parseAndTrackModes(data);
+  }
+
+  /**
+   * Strip terminal mode sequences from data (delegated to modeProvider)
+   */
+  stripModeSequences(data) {
+    return this.modeProvider.stripModeSequences(data);
+  }
+
+  /**
+   * Restore terminal modes after deserializing content (delegated to modeProvider)
+   */
+  restoreTerminalModes() {
+    this.modeProvider.restoreModes();
+  }
+
+  /**
+   * Write data to the terminal
+   */
+  write(data) {
+    if (!this.terminal) return;
+    try {
+      // In simple history mode we bypass mode tracking/stripping entirely for raw fidelity
+      if (!this._simpleHistory) {
+        this.parseAndTrackModes(data);
+        data = this.stripModeSequences(data);
+      }
+      this.terminal.write(data);
+      this._lastWriteTs = Date.now();
+      Debouncer.debounce(
+        `term-save-${this.id}`,
+        600,
+        () => {
+          try {
+            if (window.tabManager?.scheduleSaveState)
+              window.tabManager.scheduleSaveState("terminalWrite");
+            else if (window.tabManager?.saveToLocalState)
+              window.tabManager.saveToLocalState();
+          } catch (_) {}
+        },
+        { maxWait: 4000 },
+      );
+    } catch (error) {
+      Logger.error(`Failed to write to terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Focus the terminal
+   */
+  focus() {
+    if (!this.terminal) return;
+
+    try {
+      this.terminal.focus();
+    } catch (error) {
+      Logger.error(`Failed to focus terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Fit the terminal to its container
+   */
+  fit() {
+    if (!this.fitAddon) return;
+
+    try {
+      this.fitAddon.fit();
+    } catch (error) {
+      Logger.error(`Failed to fit terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Clear the terminal
+   */
+  clear() {
+    if (!this.terminal) return;
+
+    try {
+      this.terminal.clear();
+      // Don't immediately wipe snapshots; the shell usually redraws a fresh prompt shortly after clear
+      // Instead schedule a short delayed snapshot capture so the prompt line is preserved
+      setTimeout(() => {
+        try {
+          const snap = this.serialize();
+          if (snap && snap.trim().length > 0) {
+            if (window.tabManager?.scheduleSaveState) {
+              window.tabManager.scheduleSaveState("terminalClear");
+            }
+            Logger.debug(
+              `🧹 Post-clear snapshot captured for terminal ${this.id} (chars=${snap.length})`,
+            );
+          } else {
+            Logger.debug(
+              `🧹 Post-clear snapshot still empty for terminal ${this.id}`,
+            );
+          }
+        } catch (_) {}
+      }, 60); // small delay to allow prompt redraw
+
+      Logger.debug(`Terminal ${this.id} cleared and state saved`);
+    } catch (error) {
+      Logger.error(`Failed to clear terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Set active/inactive state
+   */
+  setActive(active) {
+    this.isActive = active;
+    if (this.terminalContainer) {
+      this.terminalContainer.style.display = active ? "block" : "none";
+    }
+
+    if (active) {
+      // Clear all indicators when tab becomes active
+
+      queueMicrotask(() => {
+        if (this.terminal) {
+          // this.terminal.refresh(0, this.terminal.rows - 1);
+        }
+        requestAnimationFrame(() => {
+          this.fit();
+          this.focus();
+          try {
+            performance.mark(`t${this.id}-active`);
+            if (window.tabManager && window.tabManager._recordTerminalTiming) {
+              window.tabManager._recordTerminalTiming(this.id);
+            }
+          } catch (e) {}
+          // Additional staged redraws to combat late layout thrash
+          this._scheduleRedrawSequence();
         });
-        
-        // Set up bell handler - listen for terminal bell events
-        this.bellDisposable = this.terminal.onBell(() => {
-            const timestamp = new Date().toISOString();
-            // Only show indicator if tab is not currently active
-            if (!this.isActive) {
-                // Show bell notification on inactive tabs
-                if (this.onBellReceived) {
-                    this.onBellReceived(this.id);
-                }
-            }
+      });
+    }
+  }
+
+  /**
+   * Serialize terminal state for persistence
+   */
+  serialize() {
+    if (!this.serializeAddon) return null;
+    try {
+      const raw = this.serializeAddon.serialize({
+        scrollback: window.scrollbackLines || 1000,
+        excludeAltBuffer: true,
+        excludeModes: false,
+      });
+      return this._simpleHistory ? raw : this.stripModeSequences(raw);
+    } catch (e) {
+      Logger.error("Serialize failed:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Restore terminal content from serialized state
+   */
+  deserialize(serializedContent) {
+    if (!this.terminal || !serializedContent) {
+      return;
+    }
+
+    try {
+      // Debug: Log deserialization info
+      const lines = serializedContent.split("\n").length;
+      const lastLine = serializedContent.split("\n").slice(-2)[0]; // -2 because last is usually empty
+      Logger.debug(
+        `Deserializing terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`,
+      );
+      if (lines === 0 || !serializedContent.trim()) {
+        Logger.debug(
+          `⚠️ Deserialization content appears empty for terminal ${this.id}`,
+        );
+      }
+
+      // Strip any lingering mode sequences from stored content before restoring
+      const cleanContent = this.stripModeSequences(serializedContent);
+
+      // Write clean content (don't trigger state save during restoration)
+      this.terminal.write(cleanContent);
+      Logger.debug(
+        `✅ Wrote restored content to terminal ${this.id} (chars=${cleanContent.length})`,
+      );
+
+      // Restore terminal modes after content with slight delay to ensure terminal is ready
+      setTimeout(() => {
+        this.restoreTerminalModes();
+      }, 100);
+
+      window.dispatchEvent(new Event("resize"));
+    } catch (error) {
+      Logger.error(`Failed to deserialize terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Get terminal state for persistence
+   */
+  getState() {
+    const state = {
+      id: this.id,
+      label: this.label,
+      buffer: this.launchCommand ? "" : this.serialize() || "", // Only serialize content for default terminals - launch command terminals start fresh
+      modes: this.modeProvider.getState(), // Include terminal modes bitmask
+      launchCommand: this.launchCommand,
+    };
+    Logger.debug(`🔍 Terminal ${this.id} getState(): `, state);
+    return state;
+  }
+
+  /**
+   * Restore terminal from state
+   */
+  restoreFromState(state) {
+    if (!state) return;
+
+    this.label = state.label || this.label;
+
+    // Restore terminal modes through modeProvider
+    this.modeProvider.restoreState(state.modes || 0);
+
+    // Restore launch command and derive terminal type
+    this.launchCommand = state.launchCommand || this.launchCommand;
+    this.terminalType = this.launchCommand ? "command" : "default";
+
+    if (this.launchCommand) {
+      Logger.debug(
+        `Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`,
+      );
+    } else {
+      const contentToRestore = state.buffer;
+      if (contentToRestore) this.deserialize(contentToRestore);
+    }
+  }
+
+  disposeEventHandler(handler) {
+    if (handler) {
+      handler.dispose();
+      return null;
+    }
+    return handler;
+  }
+
+  /**
+   * Dispose of event handlers
+   */
+  disposeEventHandlers() {
+    // Dispose all event handler disposables
+    this.inputHandler = this.disposeEventHandler(this.inputHandler);
+    this.dataDisposable = this.disposeEventHandler(this.dataDisposable);
+    this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
+    this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
+    this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
+
+    // Dispose link providers
+    if (this.linkProviders) {
+      this.linkProviders.forEach(({ provider, disposable }) => {
+        try {
+          if (disposable && disposable.dispose) {
+            disposable.dispose();
+            Logger.debug("Disposed link provider");
+          }
+        } catch (error) {
+          Logger.error("Error disposing link provider:", error);
+        }
+      });
+      this.linkProviders = [];
+    }
+
+    // Dispose link matchers (fallback)
+    if (
+      this.linkMatcherIds &&
+      this.terminal &&
+      this.terminal.deregisterLinkMatcher
+    ) {
+      this.linkMatcherIds.forEach((matcherId) => {
+        try {
+          this.terminal.deregisterLinkMatcher(matcherId);
+          Logger.debug(`Deregistered link matcher ${matcherId}`);
+        } catch (error) {
+          Logger.error(`Error deregistering link matcher ${matcherId}:`, error);
+        }
+      });
+      this.linkMatcherIds = [];
+    }
+  }
+
+  /**
+   * Create PTY process for this terminal
+   */
+  createPtyProcess() {
+    if (this._ptyStarted) return;
+    this._ptyStarted = true;
+    Logger.debug(`🚀 Spawning PTY for terminal ${this.id}`, {
+      type: this.terminalType,
+      launchCommand: this.launchCommand,
+      keys: Object.keys(this || {}),
+    });
+    this.vscode.postMessage({
+      command: "createPty",
+      tabId: this.id,
+      terminalType: this.terminalType,
+      launchCommand: this.launchCommand,
+    });
+  }
+
+  startDeferredPtyIfNeeded() {
+    if (this._pendingPtyStart) {
+      this._pendingPtyStart = false;
+      this.createPtyProcess();
+    }
+  }
+
+  /**
+   * Send resize to PTY process
+   */
+  sendResizeToPty(cols, rows) {
+    this.vscode.postMessage({
+      command: "resize",
+      cols: cols,
+      rows: rows,
+      tabId: this.id,
+    });
+  }
+
+  /**
+   * Dispose PTY process
+   */
+  disposePtyProcess() {
+    this.vscode.postMessage({
+      command: "disposePty",
+      tabId: this.id,
+    });
+  }
+
+  /**
+   * Dispose of all resources (both frontend and backend)
+   */
+  dispose() {
+    try {
+      // Dispose PTY process first
+      this.disposePtyProcess();
+
+      // Dispose providers
+      this.lifecycleManager.dispose();
+      this.linkProvider.dispose();
+      this.modeProvider.dispose();
+
+      // Dispose event handlers
+      this.disposeEventHandlers();
+
+      // No per-instance debounce timers to clear (shared Debouncer manages its own entries)
+
+      // Dispose terminal
+      if (this.terminal) {
+        this.terminal.dispose();
+        this.terminal = null;
+      }
+
+      // Remove container
+      if (this.terminalContainer && this.terminalContainer.parentNode) {
+        this.terminalContainer.parentNode.removeChild(this.terminalContainer);
+        this.terminalContainer = null;
+      }
+
+      // Clear all indicators
+
+      // Clear references
+      this.fitAddon = null;
+      this.serializeAddon = null;
+      this.webLinksAddon = null;
+    } catch (error) {
+      Logger.error(`Failed to dispose terminal ${this.id}:`, error);
+    }
+  }
+
+  _installVisibilityHandlers() {
+    if (this._visibilityInstalled) return;
+    this._visibilityInstalled = true;
+    const container = document.getElementById("container");
+    if (container && "ResizeObserver" in window) {
+      const ro = new ResizeObserver(() => {
+        if (this.isActive) {
+          this.fit();
+          // If width/height just became non-zero, force redraw sequence
+          if (
+            this.terminalContainer &&
+            this.terminalContainer.offsetWidth > 0 &&
+            this.terminalContainer.offsetHeight > 0
+          ) {
+            this._scheduleRedrawSequence();
+          }
+        }
+      });
+      ro.observe(container);
+      this._resizeObserver = ro;
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && this.isActive) {
+        requestAnimationFrame(() => {
+          if (this.terminal) {
+            // this.terminal.refresh(0, this.terminal.rows - 1);
+            this.fit();
+            this._scheduleRedrawSequence();
+          }
         });
-        
-        // Set up buffer change detection using onData event
-        if (typeof this.terminal.onData === 'function') {
-            this.dataDisposable = this.terminal.onData(() => {
-                // Debounce buffer saves to avoid excessive saving during rapid terminal output
-                Debouncer.debounce(`term-save-${this.id}`, 750, () => {
-                    if (window.tabManager?.scheduleSaveState) {
-                        try { window.tabManager.scheduleSaveState('terminalData'); } catch(_) {}
-                    } else if (window.tabManager?.saveToLocalState) {
-                        try { window.tabManager.saveToLocalState(); } catch(_) {}
-                    }
-                }, { maxWait: 5000 });
-            });
-        }
-    }
-    
-    /**
-     * Create and attach terminal to DOM container
-     */
-    attachToContainer(container) {
-        if (!this.terminal || !container) return;
-        
-        try {
-            this.terminalContainer = container;
-            // Only open if terminal is not already opened
-            if (!this.terminal.element) {
-                this.terminal.open(container);
-                performance.mark(`t${this.id}-open`);
-                
-                // Set up file path links immediately after opening
-                // The terminal is now attached to DOM and ready for link providers
-                Logger.debug('🔗 Setting up file path links after terminal.open()');
-                this.setupFilePathLinks();
-
-                // Visibility-aware fitting & refresh
-                this._installVisibilityHandlers();
-
-                // Kick off multi-pass stabilization redraw (addresses blank-on-move)
-                this._scheduleRedrawSequence();
-                
-                // Also listen for terminal render events to ensure links work if content changes
-                if (typeof this.terminal.onRender === 'function') {
-                    this.renderDisposable = this.terminal.onRender(() => {
-                        this._markOpened();
-                    });
-                }
+      }
+    });
+    // WebGL context loss fallback
+    const attachWebglHandlers = () => {
+      const cvs = this.terminalContainer?.querySelectorAll("canvas") || [];
+      if (!cvs.length) return false;
+      cvs.forEach((cv) => {
+        cv.addEventListener(
+          "webglcontextlost",
+          (e) => {
+            e.preventDefault();
+            Logger.warn("WebGL context lost – falling back to canvas");
+            try {
+              const canvasAddon = new CanvasAddon.CanvasAddon();
+              this.terminal.loadAddon(canvasAddon);
+              this.fit();
+              this._scheduleRedrawSequence();
+            } catch (err) {
+              Logger.error("Failed canvas fallback:", err);
             }
-            
-            // Fit the terminal to container
-            if (this.fitAddon && container.offsetWidth > 0 && container.offsetHeight > 0) this.fitAddon.fit();
-        } catch (error) {
-            Logger.error(`Failed to attach terminal ${this.id} to container:`, error);
-        }
+          },
+          { passive: false },
+        );
+      });
+      return true;
+    };
+    // Try now, else poll a few animation frames
+    if (!attachWebglHandlers()) {
+      let attempts = 0;
+      const poll = () => {
+        if (attachWebglHandlers()) return;
+        if (++attempts < 10) requestAnimationFrame(poll);
+      };
+      requestAnimationFrame(poll);
     }
 
-    _markOpened() {
-        if (this._openedResolved) return;
-        this._openedResolved = true;
-        if (this._openedResolve) { try { this._openedResolve(); } catch {} }
-        // Start PTY immediately if not deferred
-        try {
-            if (!this._pendingPtyStart) {
-                this.createPtyProcess();
-            }
-        } catch (e) { Logger.error('Immediate PTY start failed:', e); }
+    // Mutation observer to detect panel moves or DOM reparenting
+    try {
+      const observer = new MutationObserver(() => {
+        if (!this.isActive) return;
+        if (!this.terminalContainer) return;
+        if (
+          this.terminalContainer.offsetWidth === 0 ||
+          this.terminalContainer.offsetHeight === 0
+        )
+          return;
+        // Trigger opportunistic redraw
+        this._scheduleRedrawSequence();
+      });
+      observer.observe(document.body, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+      this._mutationObserver = observer;
+    } catch (e) {
+      Logger.debug("MutationObserver unavailable:", e);
     }
-    
-    /**
-     * Set a terminal mode bit (delegated to modeProvider)
-     */
-    setMode(bit, enabled) {
-        this.modeProvider.setMode(bit, enabled);
-    }
-    
-    /**
-     * Check if a terminal mode is enabled (delegated to modeProvider)
-     */
-    hasMode(bit) {
-        return this.modeProvider.hasMode(bit);
-    }
-    
-    /**
-     * Parse and track terminal modes from escape sequences (delegated to modeProvider)
-     */
-    parseAndTrackModes(data) {
-        this.modeProvider.parseAndTrackModes(data);
-    }
-    
-    /**
-     * Strip terminal mode sequences from data (delegated to modeProvider)
-     */
-    stripModeSequences(data) {
-        return this.modeProvider.stripModeSequences(data);
-    }
-    
-    /**
-     * Restore terminal modes after deserializing content (delegated to modeProvider)
-     */
-    restoreTerminalModes() {
-        this.modeProvider.restoreModes();
-    }
-    
-    /**
-     * Write data to the terminal
-     */
-    write(data) {
-        if (!this.terminal) return;
-        try {
-            // In simple history mode we bypass mode tracking/stripping entirely for raw fidelity
-            if (!this._simpleHistory) {
-                this.parseAndTrackModes(data);
-                data = this.stripModeSequences(data);
-            }
-            this.terminal.write(data);
-            this._lastWriteTs = Date.now();
-            Debouncer.debounce(`term-save-${this.id}`, 600, () => {
-                try {
-                    if (window.tabManager?.scheduleSaveState) window.tabManager.scheduleSaveState('terminalWrite');
-                    else if (window.tabManager?.saveToLocalState) window.tabManager.saveToLocalState();
-                } catch(_) {}
-            }, { maxWait: 4000 });
-        } catch (error) {
-            Logger.error(`Failed to write to terminal ${this.id}:`, error);
-        }
-    }
-    
-    /**
-     * Focus the terminal
-     */
-    focus() {
-        if (!this.terminal) return;
-        
-        try {
-            this.terminal.focus();
-        } catch (error) {
-            Logger.error(`Failed to focus terminal ${this.id}:`, error);
-        }
-    }
-    
-    /**
-     * Fit the terminal to its container
-     */
-    fit() {
-        if (!this.fitAddon) return;
-        
-        try {
-            this.fitAddon.fit();
-        } catch (error) {
-            Logger.error(`Failed to fit terminal ${this.id}:`, error);
-        }
-    }
-    
-    /**
-     * Clear the terminal
-     */
-    clear() {
-        if (!this.terminal) return;
-        
-        try {
-            this.terminal.clear();
-            // Don't immediately wipe snapshots; the shell usually redraws a fresh prompt shortly after clear
-            // Instead schedule a short delayed snapshot capture so the prompt line is preserved
-            setTimeout(() => {
-                try {
-                    const snap = this.serialize();
-                    if (snap && snap.trim().length > 0) {
-                        if (window.tabManager?.scheduleSaveState) { window.tabManager.scheduleSaveState('terminalClear'); }
-                        Logger.debug(`🧹 Post-clear snapshot captured for terminal ${this.id} (chars=${snap.length})`);
-                    } else {
-                        Logger.debug(`🧹 Post-clear snapshot still empty for terminal ${this.id}`);
-                    }
-                } catch(_) {}
-            }, 60); // small delay to allow prompt redraw
-            
-            Logger.debug(`Terminal ${this.id} cleared and state saved`);
-        } catch (error) {
-            Logger.error(`Failed to clear terminal ${this.id}:`, error);
-        }
-    }
-    
-    /**
-     * Set active/inactive state
-     */
-    setActive(active) {
-        this.isActive = active;
-        if (this.terminalContainer) {
-            this.terminalContainer.style.display = active ? 'block' : 'none';
-        }
-        
-        if (active) {
-            // Clear all indicators when tab becomes active
-            
-            queueMicrotask(() => {
-                if (this.terminal) {
-                    // this.terminal.refresh(0, this.terminal.rows - 1);
-                }
-                requestAnimationFrame(() => {
-                    this.fit();
-                    this.focus();
-                    try {
-                        performance.mark(`t${this.id}-active`);
-                        if (window.tabManager && window.tabManager._recordTerminalTiming) {
-                            window.tabManager._recordTerminalTiming(this.id);
-                        }
-                    } catch (e) {}
-                    // Additional staged redraws to combat late layout thrash
-                    this._scheduleRedrawSequence();
-                });
-            });
-        }
-    }
-    
+  }
 
-    
-    
-    /**
-     * Serialize terminal state for persistence
-     */
-    serialize() {
-        if (!this.serializeAddon) return null;
-        try {
-            const raw = this.serializeAddon.serialize({
-                scrollback: window.scrollbackLines || 1000,
-                excludeAltBuffer: true,
-                excludeModes: false
-            });
-            return this._simpleHistory ? raw : this.stripModeSequences(raw);
-        } catch (e) {
-            Logger.error('Serialize failed:', e);
-            return null;
-        }
-    }
+  _scheduleRedrawSequence() {
+    this._runStabilizedRedraw();
+  }
 
-
-    
-    /**
-     * Restore terminal content from serialized state
-     */
-    deserialize(serializedContent) {
-        if (!this.terminal || !serializedContent) {
-            return;
-        }
-        
-        try {
-            // Debug: Log deserialization info
-            const lines = serializedContent.split('\n').length;
-            const lastLine = serializedContent.split('\n').slice(-2)[0]; // -2 because last is usually empty
-            Logger.debug(`Deserializing terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`);
-            if (lines === 0 || !serializedContent.trim()) {
-                Logger.debug(`⚠️ Deserialization content appears empty for terminal ${this.id}`);
-            }
-            
-            // Strip any lingering mode sequences from stored content before restoring
-            const cleanContent = this.stripModeSequences(serializedContent);
-            
-            // Write clean content (don't trigger state save during restoration)
-            this.terminal.write(cleanContent);
-            Logger.debug(`✅ Wrote restored content to terminal ${this.id} (chars=${cleanContent.length})`);
-            
-            // Restore terminal modes after content with slight delay to ensure terminal is ready
-            setTimeout(() => {
-                this.restoreTerminalModes();
-            }, 100);
-            
-            window.dispatchEvent(new Event('resize'));
-        } catch (error) {
-            Logger.error(`Failed to deserialize terminal ${this.id}:`, error);
-        }
-    }
-    
-    /**
-     * Get terminal state for persistence
-     */
-    getState() {
-        const state = {
-            id: this.id,
-            label: this.label,
-            buffer: this.launchCommand ? '' : (this.serialize() || ''), // Only serialize content for default terminals - launch command terminals start fresh
-            modes: this.modeProvider.getState(), // Include terminal modes bitmask
-            launchCommand: this.launchCommand
-        };
-        Logger.debug(`🔍 Terminal ${this.id} getState(): `, state);
-        return state;
-    }
-    
-    /**
-     * Restore terminal from state
-     */
-    restoreFromState(state) {
-        if (!state) return;
-        
-        this.label = state.label || this.label;
-        
-        // Restore terminal modes through modeProvider  
-        this.modeProvider.restoreState(state.modes || 0);
-        
-        // Restore launch command and derive terminal type
-        this.launchCommand = state.launchCommand || this.launchCommand;
-        this.terminalType = this.launchCommand ? 'command' : 'default';
-        
-        if (this.launchCommand) {
-            Logger.debug(`Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`);
-        } else {
-            const contentToRestore = state.buffer;
-            if (contentToRestore) this.deserialize(contentToRestore);
-        }
-    }
-
-    disposeEventHandler(handler) {
-        if (handler) {
-            handler.dispose();
-            return null;
-        }
-        return handler;
-    }
-    
-    /**
-     * Dispose of event handlers
-     */
-    disposeEventHandlers() {
-        // Dispose all event handler disposables
-        this.inputHandler = this.disposeEventHandler(this.inputHandler);
-        this.dataDisposable = this.disposeEventHandler(this.dataDisposable);
-        this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
-        this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
-        this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
-        
-        // Dispose link providers
-        if (this.linkProviders) {
-            this.linkProviders.forEach(({ provider, disposable }) => {
-                try {
-                    if (disposable && disposable.dispose) {
-                        disposable.dispose();
-                        Logger.debug('Disposed link provider');
-                    }
-                } catch (error) {
-                    Logger.error('Error disposing link provider:', error);
-                }
-            });
-            this.linkProviders = [];
-        }
-        
-        // Dispose link matchers (fallback)
-        if (this.linkMatcherIds && this.terminal && this.terminal.deregisterLinkMatcher) {
-            this.linkMatcherIds.forEach(matcherId => {
-                try {
-                    this.terminal.deregisterLinkMatcher(matcherId);
-                    Logger.debug(`Deregistered link matcher ${matcherId}`);
-                } catch (error) {
-                    Logger.error(`Error deregistering link matcher ${matcherId}:`, error);
-                }
-            });
-            this.linkMatcherIds = [];
-        }
-    }
-    
-    /**
-     * Create PTY process for this terminal
-     */
-    createPtyProcess() {
-        if (this._ptyStarted) return;
-        this._ptyStarted = true;
-        Logger.debug(`🚀 Spawning PTY for terminal ${this.id}`, {
-            type: this.terminalType,
-            launchCommand: this.launchCommand,
-            keys: Object.keys(this || {})
-        });
-        this.vscode.postMessage({ 
-            command: 'createPty', 
-            tabId: this.id,
-            terminalType: this.terminalType,
-            launchCommand: this.launchCommand
-        });
-    }
-
-    startDeferredPtyIfNeeded() {
-        if (this._pendingPtyStart) {
-            this._pendingPtyStart = false;
-            this.createPtyProcess();
-        }
-    }
-    
-    /**
-     * Send resize to PTY process
-     */
-    sendResizeToPty(cols, rows) {
-        this.vscode.postMessage({ 
-            command: 'resize', 
-            cols: cols, 
-            rows: rows, 
-            tabId: this.id 
-        });
-    }
-    
-    /**
-     * Dispose PTY process
-     */
-    disposePtyProcess() {
-        this.vscode.postMessage({ 
-            command: 'disposePty', 
-            tabId: this.id 
-        });
-    }
-    
-    /**
-     * Dispose of all resources (both frontend and backend)
-     */
-    dispose() {
-        try {
-            // Dispose PTY process first
-            this.disposePtyProcess();
-            
-            // Dispose providers
-            this.lifecycleManager.dispose();
-            this.linkProvider.dispose(); 
-            this.modeProvider.dispose();
-            
-            // Dispose event handlers
-            this.disposeEventHandlers();
-            
-            // No per-instance debounce timers to clear (shared Debouncer manages its own entries)
-            
-            // Dispose terminal
-            if (this.terminal) {
-                this.terminal.dispose();
-                this.terminal = null;
-            }
-            
-            // Remove container
-            if (this.terminalContainer && this.terminalContainer.parentNode) {
-                this.terminalContainer.parentNode.removeChild(this.terminalContainer);
-                this.terminalContainer = null;
-            }
-            
-            // Clear all indicators
-            
-            // Clear references
-            this.fitAddon = null;
-            this.serializeAddon = null;
-            this.webLinksAddon = null;
-            
-        } catch (error) {
-            Logger.error(`Failed to dispose terminal ${this.id}:`, error);
-        }
-    }
-
-    _installVisibilityHandlers() {
-        if (this._visibilityInstalled) return;
-        this._visibilityInstalled = true;
-        const container = document.getElementById('container');
-        if (container && 'ResizeObserver' in window) {
-            const ro = new ResizeObserver(() => {
-                if (this.isActive) {
-                    this.fit();
-                    // If width/height just became non-zero, force redraw sequence
-                    if (this.terminalContainer && this.terminalContainer.offsetWidth > 0 && this.terminalContainer.offsetHeight > 0) {
-                        this._scheduleRedrawSequence();
-                    }
-                }
-            });
-            ro.observe(container);
-            this._resizeObserver = ro;
-        }
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && this.isActive) {
-                requestAnimationFrame(() => {
-                    if (this.terminal) {
-                        // this.terminal.refresh(0, this.terminal.rows - 1);
-                        this.fit();
-                        this._scheduleRedrawSequence();
-                    }
-                });
-            }
-        });
-        // WebGL context loss fallback
-        const attachWebglHandlers = () => {
-            const cvs = this.terminalContainer?.querySelectorAll('canvas') || [];
-            if (!cvs.length) return false;
-            cvs.forEach(cv => {
-                cv.addEventListener('webglcontextlost', (e) => {
-                    e.preventDefault();
-                    Logger.warn('WebGL context lost – falling back to canvas');
-                    try {
-                        const canvasAddon = new CanvasAddon.CanvasAddon();
-                        this.terminal.loadAddon(canvasAddon);
-                        this.fit();
-                        this._scheduleRedrawSequence();
-                    } catch (err) { Logger.error('Failed canvas fallback:', err); }
-                }, { passive: false });
-            });
-            return true;
-        };
-        // Try now, else poll a few animation frames
-        if (!attachWebglHandlers()) {
-            let attempts = 0;
-            const poll = () => {
-                if (attachWebglHandlers()) return;
-                if (++attempts < 10) requestAnimationFrame(poll);
-            };
-            requestAnimationFrame(poll);
-        }
-
-        // Mutation observer to detect panel moves or DOM reparenting
-        try {
-            const observer = new MutationObserver(() => {
-                if (!this.isActive) return;
-                if (!this.terminalContainer) return;
-                if (this.terminalContainer.offsetWidth === 0 || this.terminalContainer.offsetHeight === 0) return;
-                // Trigger opportunistic redraw
-                this._scheduleRedrawSequence();
-            });
-            observer.observe(document.body, { attributes: true, childList: true, subtree: true });
-            this._mutationObserver = observer;
-        } catch (e) {
-            Logger.debug('MutationObserver unavailable:', e);
-        }
-    }
-
-    _scheduleRedrawSequence() { this._runStabilizedRedraw(); }
-
-    _runStabilizedRedraw() {
-        if (!this.terminal || this._stabilizing) return;
-        this._stabilizing = true;
-        let stable = 0, attempts = 0, lastW = -1, lastH = -1;
-        const step = () => {
-            if (!this.terminal || !this.isActive) { this._stabilizing = false; return; }
-            const w = this.terminalContainer?.offsetWidth || 0;
-            const h = this.terminalContainer?.offsetHeight || 0;
-            // try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
-            if (w === lastW && h === lastH) stable++; else { stable = 0; lastW = w; lastH = h; }
-            attempts++;
-            if (stable >= 2 || attempts >= 10) { this._stabilizing = false; return; }
-            requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-    }
+  _runStabilizedRedraw() {
+    if (!this.terminal || this._stabilizing) return;
+    this._stabilizing = true;
+    let stable = 0,
+      attempts = 0,
+      lastW = -1,
+      lastH = -1;
+    const step = () => {
+      if (!this.terminal || !this.isActive) {
+        this._stabilizing = false;
+        return;
+      }
+      const w = this.terminalContainer?.offsetWidth || 0;
+      const h = this.terminalContainer?.offsetHeight || 0;
+      // try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
+      if (w === lastW && h === lastH) stable++;
+      else {
+        stable = 0;
+        lastW = w;
+        lastH = h;
+      }
+      attempts++;
+      if (stable >= 2 || attempts >= 10) {
+        this._stabilizing = false;
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 }

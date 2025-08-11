@@ -3,10 +3,7 @@
     "module": "CommonJS",
     "target": "ES2020",
     "outDir": "out",
-    "lib": [
-      "ES2020",
-      "DOM"
-    ],
+    "lib": ["ES2020", "DOM"],
     "sourceMap": true,
     "rootDir": "src",
     "strict": false,
@@ -15,13 +12,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    ".vscode-test", 
-    "vendor",
-    "src/webview/**/*"
-  ]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", ".vscode-test", "vendor", "src/webview/**/*"]
 }

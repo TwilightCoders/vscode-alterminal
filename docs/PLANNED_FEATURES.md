@@ -3,10 +3,13 @@
 ## Default Tab Groups Configuration
 
 ### Overview
+
 Allow users to configure default tab groups that automatically open when VS Code starts or when a project/workspace is opened. This feature would provide project-specific terminal setups and consistent development environments across team members.
 
 ### Technical Feasibility
+
 ✅ **Fully Doable** - VS Code provides all necessary APIs:
+
 - `vscode.workspace.onDidChangeWorkspaceFolders` - Workspace change events
 - `vscode.window.onDidChangeActiveTextEditor` - Editor state changes
 - `vscode.workspace.getConfiguration()` - Settings management
@@ -16,6 +19,7 @@ Allow users to configure default tab groups that automatically open when VS Code
 ### Configuration Levels
 
 #### 1. User-Level Defaults (Global)
+
 ```json
 {
   "claudePilot.defaultTabGroups.global": {
@@ -38,6 +42,7 @@ Allow users to configure default tab groups that automatically open when VS Code
 ```
 
 #### 2. Workspace-Level Configuration
+
 ```json
 // .vscode/settings.json
 {
@@ -68,6 +73,7 @@ Allow users to configure default tab groups that automatically open when VS Code
 ```
 
 #### 3. Project-Level Templates (`.claudepilot/tabs.json`)
+
 ```json
 {
   "version": "1.0",
@@ -96,11 +102,7 @@ Allow users to configure default tab groups that automatically open when VS Code
       "cwd": "${workspaceFolder}"
     }
   ],
-  "dependencies": [
-    "node",
-    "npm",
-    "docker"
-  ]
+  "dependencies": ["node", "npm", "docker"]
 }
 ```
 
@@ -109,37 +111,45 @@ Allow users to configure default tab groups that automatically open when VS Code
 #### Core Components
 
 1. **ConfigurationManager** (`src/config/tabGroupManager.ts`)
+
    ```typescript
    export class TabGroupConfigManager {
-     async loadConfiguration(): Promise<TabGroupConfig>
-     async saveConfiguration(config: TabGroupConfig): Promise<void>
-     resolveConfiguration(): TabGroupConfig // Merge global + workspace + project
-     validateConfiguration(config: TabGroupConfig): ValidationResult
+     async loadConfiguration(): Promise<TabGroupConfig>;
+     async saveConfiguration(config: TabGroupConfig): Promise<void>;
+     resolveConfiguration(): TabGroupConfig; // Merge global + workspace + project
+     validateConfiguration(config: TabGroupConfig): ValidationResult;
    }
    ```
 
 2. **Template System** (`src/templates/tabGroupTemplates.ts`)
+
    ```typescript
    export class TabGroupTemplateManager {
-     async createFromTemplate(templateName: string): Promise<void>
-     async saveAsTemplate(name: string, description: string): Promise<void>
-     listAvailableTemplates(): TabGroupTemplate[]
-     importTemplate(filePath: string): Promise<TabGroupTemplate>
+     async createFromTemplate(templateName: string): Promise<void>;
+     async saveAsTemplate(name: string, description: string): Promise<void>;
+     listAvailableTemplates(): TabGroupTemplate[];
+     importTemplate(filePath: string): Promise<TabGroupTemplate>;
    }
    ```
 
 3. **Workspace Integration** (`src/workspace/workspaceManager.ts`)
+
    ```typescript
    export class WorkspaceTabManager {
-     async onWorkspaceOpened(): Promise<void>
-     async createDefaultTabs(): Promise<void>
-     async detectProjectType(): Promise<ProjectType>
-     resolveVariables(command: string, cwd: string): { command: string, cwd: string }
+     async onWorkspaceOpened(): Promise<void>;
+     async createDefaultTabs(): Promise<void>;
+     async detectProjectType(): Promise<ProjectType>;
+     resolveVariables(
+       command: string,
+       cwd: string,
+     ): { command: string; cwd: string };
    }
    ```
 
 #### Variable Resolution
+
 Support for common VS Code variables:
+
 - `${workspaceFolder}` - Root workspace directory
 - `${workspaceFolderBasename}` - Workspace folder name
 - `${file}` - Current file path
@@ -151,6 +161,7 @@ Support for common VS Code variables:
 ### User Experience Features
 
 #### VS Code Command Palette Integration
+
 ```
 > Claude Pilot: Configure Default Tab Groups
 > Claude Pilot: Save Current Tabs as Template
@@ -160,20 +171,25 @@ Support for common VS Code variables:
 ```
 
 #### Settings UI Integration
+
 - Contribute to VS Code settings editor with custom UI
 - Visual tab group editor with drag-drop reordering
 - Command picker with autocomplete
 - Live preview of resolved variables
 
 #### Automatic Project Detection
+
 Smart defaults based on project structure:
+
 ```typescript
 const projectDetectors = {
-  'node': () => fs.existsSync('package.json'),
-  'python': () => fs.existsSync('requirements.txt') || fs.existsSync('pyproject.toml'),
-  'rust': () => fs.existsSync('Cargo.toml'),
-  'go': () => fs.existsSync('go.mod'),
-  'docker': () => fs.existsSync('Dockerfile') || fs.existsSync('docker-compose.yml')
+  node: () => fs.existsSync("package.json"),
+  python: () =>
+    fs.existsSync("requirements.txt") || fs.existsSync("pyproject.toml"),
+  rust: () => fs.existsSync("Cargo.toml"),
+  go: () => fs.existsSync("go.mod"),
+  docker: () =>
+    fs.existsSync("Dockerfile") || fs.existsSync("docker-compose.yml"),
 };
 ```
 
@@ -207,24 +223,28 @@ interface TabConfiguration {
 ### Implementation Phases
 
 #### Phase 1: Core Infrastructure
+
 - Basic configuration loading and saving
 - Variable resolution system
 - Workspace event integration
 - Simple tab group creation
 
 #### Phase 2: Template System
+
 - Template creation and management
 - Import/export functionality
 - Project type detection
 - Built-in templates for common frameworks
 
 #### Phase 3: Advanced Features
+
 - Settings UI integration
 - Command palette commands
 - Dependency checking
 - Advanced variable resolution
 
 #### Phase 4: Team Collaboration
+
 - Shared template repositories
 - Team-wide configuration sync
 - Configuration validation and linting
@@ -233,18 +253,19 @@ interface TabConfiguration {
 ### Technical Implementation Details
 
 #### Extension Activation
+
 ```typescript
 // src/extension.ts
 export async function activate(context: vscode.ExtensionContext) {
   const workspaceManager = new WorkspaceTabManager(context);
-  
+
   // Auto-create tabs on workspace open
   context.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders(
-      () => workspaceManager.onWorkspaceOpened()
-    )
+    vscode.workspace.onDidChangeWorkspaceFolders(() =>
+      workspaceManager.onWorkspaceOpened(),
+    ),
   );
-  
+
   // Auto-create on extension startup if workspace already open
   if (vscode.workspace.workspaceFolders?.length) {
     await workspaceManager.onWorkspaceOpened();
@@ -253,11 +274,13 @@ export async function activate(context: vscode.ExtensionContext) {
 ```
 
 #### Configuration Resolution Priority
+
 1. Project-level (`.claudepilot/tabs.json`) - Highest priority
 2. Workspace-level (`.vscode/settings.json`)
 3. User-level (VS Code settings) - Lowest priority
 
 #### Persistence Strategy
+
 - User settings: VS Code user settings
 - Workspace settings: `.vscode/settings.json`
 - Project templates: `.claudepilot/tabs.json` (version controlled)
