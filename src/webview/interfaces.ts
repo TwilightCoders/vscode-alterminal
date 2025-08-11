@@ -107,9 +107,7 @@ export interface ITerminalState {
     command?: string;       // launch command if command tab
     terminalState?: any;    // reserved for future xterm.js structural state
     // Deprecated migration fields (will be removed in a future version)
-    rawContent?: string;    // legacy content key
-    serializedContent?: string; // very old content key
-    terminalModes?: number; // legacy modes key
+    // (Removed legacy rawContent/serializedContent/terminalModes fields)
 }
 
 

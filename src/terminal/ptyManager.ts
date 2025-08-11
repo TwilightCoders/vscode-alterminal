@@ -176,10 +176,9 @@ export class PtyManager {
                     COLORTERM: 'truecolor',
                     TERM_PROGRAM: 'vscode',
                     TERM_PROGRAM_VERSION: vscode.version,
-            VSCODE_PID: process.pid.toString(),
-            PATH: process.env.PATH || '',
-            // Preserve user PS1; do NOT override (overrides can expose raw control chars)
-            SHELL: userShell
+                    VSCODE_PID: process.pid.toString(),
+                    PATH: process.env.PATH || '',
+                    SHELL: userShell
                 } as { [key: string]: string }
             });
 

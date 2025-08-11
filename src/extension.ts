@@ -55,17 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
             provider.createNewTab('shell');
         }),
         vscode.commands.registerCommand('alterminal.newTerminal.command', async () => {
-            const command = await vscode.window.showInputBox({
-                prompt: 'Enter the command to launch',
-                placeHolder: 'e.g., python, node, npm start, etc.',
-                validateInput: (value) => {
-                    return value.trim() ? null : 'Command cannot be empty';
-                }
-            });
-            
-            if (command) {
-                provider.createNewTabWithCommand(command.trim());
-            }
+            await provider.launchCommandPicker();
         }),
         vscode.commands.registerCommand('alterminal.openTerminal', async () => {
             await provider.openTerminal();
@@ -116,7 +106,8 @@ export function activate(context: vscode.ExtensionContext) {
             await provider.requestPerformanceReport();
         }),
         vscode.commands.registerCommand('alterminal.showSavedCommands', async () => {
-            await provider.showSavedCommands();
+            // Backwards compatibility: reuse unified picker
+            await provider.launchCommandPicker();
         }),
         vscode.commands.registerCommand('alterminal.saveCurrentCommand', async () => {
             await provider.saveCurrentCommand();

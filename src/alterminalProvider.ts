@@ -3,6 +3,7 @@ import { PtyManager } from './terminal/ptyManager';
 import { TemplateUtils } from './utils/templateUtils';
 import { Logger } from './utils/logger';
 import { CommandManager } from './utils/commandManager';
+import { Debouncer } from './utils/debouncer';
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'alterminalView';
@@ -120,6 +121,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
                 this.restoreWebviewState();
                 // Check for developer mode
                 this._checkDeveloperMode();
+                // Send saved commands list so webview can hide Save Command where appropriate
+                try {
+                    const saved = this._commandManager.getSavedCommands().map(c => c.launchCommand);
+                    this._view?.webview.postMessage({ command: 'savedCommandsList', commands: saved });
+                } catch (e) { Logger.warn('Failed sending savedCommandsList', e); }
             },
             switchTab: () => {}, // No-op - handled in webview
             playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
@@ -573,26 +579,26 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
     
     /**
-     * Update workspace state with current file cache (debounced)
+     * Update workspace state with current file cache (debounced via shared Debouncer)
      */
-    private _updateWorkspaceStateCache = this._debounce(() => {
-        const filePaths = Array.from(this._workspaceFiles);
-        this._context.workspaceState.update('alterminal.workspaceFiles', filePaths);
-        this._sendWorkspaceFileCache();
-    }, 500);
+    private _updateWorkspaceStateCache = () => {
+        Debouncer.debounce('workspace-files', 500, () => {
+            const filePaths = Array.from(this._workspaceFiles);
+            this._context.workspaceState.update('alterminal.workspaceFiles', filePaths);
+            this._sendWorkspaceFileCache();
+        });
+    };
     
     /**
      * Send workspace file cache to webview
      */
     private _sendWorkspaceFileCache() {
         if (!this._view) return;
-        
         const filePaths = Array.from(this._workspaceFiles);
         this._view.webview.postMessage({
             command: 'updateFileCache',
             files: filePaths
         });
-        
         Logger.debug(`📤 Sent ${filePaths.length} files to webview cache`);
     }
     
@@ -613,22 +619,13 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         Logger.debug(`🔍 File existence check: ${filePath} -> ${exists}`);
     }
     
-    /**
-     * Simple debounce utility
-     */
-    private _debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
-        let timeout: NodeJS.Timeout;
-        return ((...args: any[]) => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        }) as T;
-    }
+    // Removed legacy _debounce helper in favor of shared Debouncer
 
     public setDebugFilter(filter: string[] | null) {
         if (this._view) {
             this._view.webview.postMessage({ 
                 command: 'setDebugFilter', 
-                filter: filter 
+                filter 
             });
         }
     }
@@ -639,6 +636,81 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
     public async saveCurrentCommand() {
         await this._commandManager.showSaveCommandDialog();
+    }
+
+    /**
+     * Unified launcher: pick a saved command or type a new one inline.
+     * - Filters saved commands as user types
+     * - Enter with no selection launches typed command (unsaved)
+     * - Selecting saved command increments usage & launches
+     */
+    public async launchCommandPicker() {
+        try {
+            const saved = this._commandManager.getSavedCommands();
+            const qp = vscode.window.createQuickPick<{
+                label: string;
+                description: string;
+                detail?: string;
+                launchCommand: string;
+                saved: boolean;
+            }>();
+            qp.title = 'Launch Command';
+            qp.placeholder = 'Type a command to run or select a saved one';
+            qp.matchOnDescription = true;
+            const buildItems = (value: string) => {
+                const items = saved.map(c => ({
+                    label: c.label,
+                    description: c.launchCommand,
+                    detail: `Used ${c.usageCount} • Last ${new Date(c.lastUsed).toLocaleDateString()}`,
+                    launchCommand: c.launchCommand,
+                    saved: true
+                }));
+                const trimmed = value.trim();
+                if (trimmed && !saved.some(c => c.launchCommand === trimmed)) {
+                    items.unshift({
+                        label: `Run: ${trimmed}`,
+                        description: '(new command)',
+                        detail: 'Press Enter to launch (not yet saved)',
+                        launchCommand: trimmed,
+                        saved: false
+                    });
+                }
+                return items;
+            };
+            qp.items = buildItems('');
+            const disposables: vscode.Disposable[] = [];
+            disposables.push(
+                qp.onDidChangeValue(val => {
+                    qp.items = buildItems(val);
+                    // Auto-select exact match if exists
+                    const exact = saved.find(c => c.launchCommand === val.trim());
+                    if (exact) {
+                        const pick = qp.items.find(i => i.launchCommand === exact.launchCommand);
+                        if (pick) qp.selectedItems = [pick];
+                    }
+                }),
+                qp.onDidAccept(async () => {
+                    const sel = qp.selectedItems[0];
+                    const value = sel ? sel.launchCommand : qp.value.trim();
+                    if (!value) { return; }
+                    qp.busy = true;
+                    try {
+                        if (saved.some(c => c.launchCommand === value)) {
+                            await this._commandManager.launchSavedCommand(value);
+                        } else {
+                            this.createNewTabWithCommand(value);
+                        }
+                    } finally {
+                        qp.dispose();
+                    }
+                }),
+                qp.onDidHide(() => qp.dispose())
+            );
+            qp.show();
+        } catch (error) {
+            Logger.error('Failed to open launch command picker:', error);
+            vscode.window.showErrorMessage('Unable to open command launcher');
+        }
     }
 
     private async _handleSaveCommand(msg: any) {

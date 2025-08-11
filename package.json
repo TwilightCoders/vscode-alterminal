@@ -169,24 +169,19 @@
           "group": "navigation@2"
         },
         {
-          "command": "alterminal.showSavedCommands",
-          "when": "view == alterminalView && alterminal.hasSavedCommands",
-          "group": "navigation@3"
-        },
-        {
           "command": "alterminal.openSettings",
           "when": "view == alterminalView",
-          "group": "navigation@4"
+          "group": "navigation@3"
         },
         {
           "command": "alterminal.refresh",
           "when": "view == alterminalView",
-          "group": "navigation@5"
+          "group": "navigation@4"
         },
         {
           "submenu": "alterminal.debug",
           "when": "view == alterminalView && alterminal.debugMode",
-          "group": "navigation@6"
+          "group": "navigation@5"
         }
       ],
       "alterminal.newTerminal": [
@@ -235,7 +230,7 @@
       "webview/context": [
         {
           "command": "alterminal.saveTabCommand",
-          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab && terminalType == command",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab && terminalType == command && !savedCommand",
           "group": "1_tab@1"
         },
         {

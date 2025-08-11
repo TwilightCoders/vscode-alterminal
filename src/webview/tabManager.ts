@@ -1,6 +1,8 @@
 // @ts-nocheck
 import { TerminalInstance } from './terminal.js';
 import { TabTitleManager } from './tabTitleManager.js';
+// Import shared Debouncer (was missing, causing ReferenceError at runtime)
+import { Debouncer } from '../utils/debouncer.js';
 /**
  * Tab Manager Class (Refactored)
  * 
@@ -40,6 +42,8 @@ export class TabManager {
         this.activeTabId = null;
         this.nextTabId = 1;
         this.isInitialized = false;
+    // Track saved commands to set context flag even if list arrives before tabs created
+    this._savedCommandsSet = new Set();
     // Cold/warm restore tracking (minimal)
     this._historyBannerInjected = false; // guards single injection of History Restored banner for this restore cycle
     this._historyBannerShownEver = false; // persisted (via vscode.setState) across webview instances to avoid re-showing banner
@@ -61,6 +65,14 @@ export class TabManager {
     // Performance samples storage
     window.__terminalPerf = window.__terminalPerf || { samples: [] };
     }
+
+    _findTabIdByCommand(cmd) {
+        if (!cmd) return null;
+        for (const [id, term] of this.terminals) {
+            if (term.launchCommand === cmd) return id;
+        }
+        return null;
+    }
     
     /**
      * Setup message handling from extension host
@@ -73,11 +85,40 @@ export class TabManager {
             try {
                 const currentState = this.saveAllStates();
                 switch (message.command) {
+                    case 'savedCommandsList':
+                        try {
+                            this._savedCommandsSet = new Set(message.commands || []);
+                            for (const [id, term] of this.terminals) {
+                                if (term.launchCommand && this._savedCommandsSet.has(term.launchCommand)) {
+                                    const tabEl = document.querySelector(`.tab[data-tab-id="${id}"]`);
+                                    if (tabEl) {
+                                        const ctx = JSON.parse(tabEl.getAttribute('data-vscode-context'));
+                                        ctx.savedCommand = true;
+                                        tabEl.setAttribute('data-vscode-context', JSON.stringify(ctx));
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                        break;
                     case 'restoreState':
                         Logger.debug('🔄 Received restoreState terminals:', message.state?.terminals?.length, 'existing:', this.terminals.size, 'providerColdFlag:', !!message.cold);
                         if (this.terminals.size > 0) {
-                            Logger.debug('⏭️ Skipping restoreState (already have terminals) treating as warm focus');
-                            break;
+                            // Determine if what we have are just placeholder empty terminals (no buffer, default label)
+                            let onlyPlaceholders = true;
+                            for (const [, t] of this.terminals) {
+                                try {
+                                    const st = t.getState();
+                                    const hasContent = (st.buffer && st.buffer.trim().length > 0);
+                                    const nonDefaultLabel = st.label && st.label !== 'Terminal';
+                                    if (hasContent || nonDefaultLabel || t.launchCommand) { onlyPlaceholders = false; break; }
+                                } catch { onlyPlaceholders = false; break; }
+                            }
+                            if (!onlyPlaceholders) {
+                                Logger.debug('⏭️ Skipping restoreState (real terminals already present) treating as warm focus');
+                                break;
+                            } else {
+                                Logger.debug('♻️ Existing terminals are placeholders; proceeding with full restore');
+                            }
                         }
                         
                         // Try webview state first, then fall back to extension state
@@ -210,6 +251,20 @@ export class TabManager {
                     case 'commandSavedResponse':
                         Logger.debug('📋 Received command saved status:', message.launchCommand, message.isSaved);
                         this.updateSaveButtonVisibility(message.launchCommand, message.isSaved);
+                        if (message.launchCommand && message.isSaved) {
+                            // Keep internal set in sync so future tabs with same launchCommand start with saved flag
+                            this._savedCommandsSet.add(message.launchCommand);
+                        }
+                        // Update tab context JSON so VS Code context menu can hide Save Command when already saved
+                        try {
+                            const tabEl = document.querySelector(`.tab[data-tab-id="${this._findTabIdByCommand(message.launchCommand)}"]`);
+                            if (tabEl) {
+                                const ctx = JSON.parse(tabEl.getAttribute('data-vscode-context'));
+                                ctx.savedCommand = !!message.isSaved;
+                                tabEl.setAttribute('data-vscode-context', JSON.stringify(ctx));
+                            }
+                        } catch (_) { /* ignore */ }
+                        break;
                         break;
                         
                     case 'renameTab':
@@ -286,6 +341,20 @@ export class TabManager {
         
         // Setup keyboard shortcut passthrough
         this.setupKeyboardPassthrough();
+
+        // Flush any pending debounced saves just before the webview unloads (window/tab close, reload)
+        window.addEventListener('beforeunload', () => {
+            try {
+                // Force each terminal to produce a fresh snapshot (ignores debounce timers)
+                for (const [, term] of this.terminals) {
+                    try { term.serialize(); } catch(_) {}
+                }
+                // Persist immediately
+                this.saveToLocalState();
+            } catch (e) {
+                console.warn('beforeunload save failed', e);
+            }
+        });
     }
     
     /**
@@ -439,6 +508,9 @@ export class TabManager {
         
         // Update tab bar visibility
         this.updateTabBarVisibility();
+
+    // Persist state after creating a new tab
+    try { this.scheduleSaveState('createNewTab'); } catch (e) { Logger.warn('Failed to schedule save after createNewTab', e); }
     }
     
     /**
@@ -464,6 +536,9 @@ export class TabManager {
         
         // Clear notifications for the newly active tab
         this.clearNotificationsOnActivation(tabId);
+
+    // Schedule save reflecting activeTabId change
+    try { this.scheduleSaveState('switchToTab'); } catch (e) { Logger.warn('Failed to schedule save after switchToTab', e); }
     }
     
     
@@ -498,6 +573,9 @@ export class TabManager {
         
         // Update tab bar visibility
         this.updateTabBarVisibility();        
+
+    // Persist state after closing a tab
+    try { this.scheduleSaveState('closeTab'); } catch (e) { Logger.warn('Failed to schedule save after closeTab', e); }
     }
 
     /**
@@ -702,8 +780,16 @@ export class TabManager {
                 //     const lines = serialized.split('\n');
                 //     if (lines.length > 40) serialized = lines.slice(-40).join('\n');
                 // }
-                // Use new property names but support old names for backward compatibility
-                terminalData.buffer = serialized;
+                // Fallback preservation: if serialization suppressed / empty but we had prior content, keep it
+                if ((serialized == null || serialized.length === 0) && priorContentById.has(id)) {
+                    const preserved = priorContentById.get(id);
+                    if (preserved && preserved.length > 0) {
+                        Logger.debug(`🛟 Preserving prior snapshot for terminal ${id} (len=${preserved.length}) due to empty serialize()`);
+                        serialized = preserved;
+                    }
+                }
+                // Use new property name but support old names for backward compatibility
+                terminalData.buffer = serialized || '';
             }
 
             // Logger.warn(`Saving terminal ${id}:`, { 
@@ -776,7 +862,7 @@ export class TabManager {
         // Recreate terminals from saved state (in the saved order)
         Logger.debug('Starting to recreate', savedState.terminals.length, 'terminals');
         let maxRestoreDelay = 0;
-    for (const terminalData of savedState.terminals) {
+        for (const terminalData of savedState.terminals) {
             Logger.debug('🔄 Creating terminal from state:', { id: terminalData.id, label: terminalData.label, type: terminalData.terminalType });
             Logger.debug('🔄 About to create TerminalInstance from restore...');
             const terminal = new TerminalInstance(
@@ -907,6 +993,23 @@ export class TabManager {
             Logger.error('Failed to save state:', error);
         }
     }
+
+    /**
+     * Debounced global state save with maxWait safeguard so constant activity still persists.
+     */
+    scheduleSaveState(reason = 'unspecified') {
+        try {
+            Logger.debug(`🕒 scheduleSaveState called (reason=${reason})`);
+            Debouncer.debounce('global-state-save', 400, () => {
+                try {
+                    Logger.debug('💾 Performing debounced global save');
+                    this.saveToLocalState();
+                } catch (e) { Logger.warn('Global debounced save failed', e); }
+            }, { maxWait: 4000 });
+        } catch (e) {
+            Logger.warn('scheduleSaveState failed to enqueue', e);
+        }
+    }
     
     /**
      * Create a dedicated terminal container for a specific tab
@@ -947,12 +1050,14 @@ export class TabManager {
         tab.setAttribute('aria-label', `${label} tab`);
         
         // Set VS Code context for tab-specific context menu
+        const isSaved = terminal?.launchCommand && this._savedCommandsSet && this._savedCommandsSet.has(terminal.launchCommand);
         tab.setAttribute('data-vscode-context', JSON.stringify({
             webviewSection: 'alterminal',
             contextType: 'tab',
             tabId: tabId.toString(),
             terminalType: terminal?.launchCommand ? 'command' : 'shell',
             launchCommand: terminal?.launchCommand || null,
+            savedCommand: !!isSaved,
             preventDefaultContextMenuItems: true
         }));
         
@@ -967,7 +1072,7 @@ export class TabManager {
         
         // Set up callback for title changes (saves state after rename)
         tabTitleManager.setTitleChangeCallback((tabId) => {
-            this.saveToLocalState();
+            this.scheduleSaveState('titleChange');
         });
         
         // Create tab title (icon + label) using TabTitleManager
