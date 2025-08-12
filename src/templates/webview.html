@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src vscode-webview: https://*.vscode-cdn.net data:; style-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; script-src vscode-webview: https://*.vscode-cdn.net 'unsafe-inline'; connect-src 'none'; img-src vscode-webview: https://*.vscode-cdn.net data:;">
+    <title>Alterminal</title>
+    <!-- Timestamp {{timestamp}} to force webview refresh -->
+    <link rel="stylesheet" href="{{codiconCssUri}}" />
+    <link rel="stylesheet" href="{{xtermCssUri}}" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+            color: var(--vscode-terminal-foreground, #cccccc);
+            font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+        }
+        
+        .container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .container.vertical-tabs {
+            flex-direction: row;
+        }
+        
+        .tab-bar {
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            flex-shrink: 0;
+            min-height: 28px;
+            /* Allow height to expand when tabs wrap */
+            height: auto;
+            overflow: visible;
+            position: relative;
+            z-index: 10000;
+            /* Ensure background covers any wrapped rows so terminal isn't visible between tabs */
+            background: var(--vscode-editor-background, #1e1e1e);
+        }
+        
+        .tab-list {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            /* Enable wrapping to multiple rows when horizontal */
+            flex-wrap: wrap;
+            align-content: flex-start;
+        }
+        
+        .container.vertical-tabs .tab-bar {
+            border-bottom: none;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            width: 200px;
+            min-width: 190px;
+            height: 100vh;
+            flex-shrink: 0;
+        }
+        
+        .container.vertical-tabs .tab-list {
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .tab {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: var(--vscode-tab-inactiveBackground, rgba(45, 45, 45, 0.5));
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            border: none;
+            cursor: pointer;
+            padding: 6px 10px;
+            margin: 0;
+            min-width: 120px;
+            max-width: 300px;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            transition: all 0.1s ease;
+            position: relative;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: visible;
+            font-size: 12px;
+        }
+
+        /* When tabs wrap to multiple rows, add subtle separation */
+        .tab-bar .tab:nth-child(n+1) { border-top: none; }
+        .tab-bar.multi-row { padding-bottom: 2px; }
+
+        /* When wrapping occurs, let tabs flex to share full row width to avoid narrow columns over terminal */
+        .tab-bar.multi-row .tab {
+            flex: 1 1 0;
+            max-width: none;
+        }
+
+        /* Prevent extremely wide single tab dominating row after wrap */
+        .tab-bar.multi-row .tab { min-width: 140px; }
+
+        /* Detect multi-row via JS (class added) or fallback: if wrapping, last row gets extra bottom padding inherently */
+        
+        .container.vertical-tabs .tab {
+            border-right: none;
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            max-width: none;
+            width: 100%;
+            justify-content: space-between;
+            padding: 4px 0px;
+            min-height: 28px;
+        }
+        
+        .tab.active {
+            background-color: var(--vscode-tab-activeBackground, rgba(60, 60, 60, 0.8));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+            border-bottom-color: var(--vscode-tab-activeBorder, transparent);
+        }
+        
+        .tab:hover {
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+        }
+        
+        .tab:focus {
+            outline: none;
+            border-color: var(--vscode-focusBorder, #007acc) !important;
+            box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        /* TODO: Add drag and drop styles when implementing tab reordering
+        .tab.drag-over-left {
+            border-left: 2px solid var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        .tab.drag-over-right {
+            border-right: 2px solid var(--vscode-focusBorder, #007acc) !important;
+        }
+        
+        .tab[draggable="true"] {
+            cursor: grab;
+        }
+        
+        .tab[draggable="true"]:active {
+            cursor: grabbing;
+        }
+        */
+        
+        .tab-new {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            background-color: transparent;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            border: none;
+            min-width: 28px;
+            transition: all 0.2s ease;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 6px 10px;
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+        }
+        
+        .container.vertical-tabs .tab-new {
+            border-right: none;
+            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            width: 100%;
+        }
+        
+        .tab-new:hover {
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+        
+        .tab-label {
+            flex: 1;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            font-size: 13px;
+            line-height: 1.2;
+        }
+        
+        .container.vertical-tabs .tab-label {
+            flex: 1;
+            margin-right: 4px;
+            min-width: 0;
+            max-width: calc(100% - 40px);
+        }
+        
+        
+        /* Codicon font styling for close button */
+        .codicon {
+            font-family: "codicon";
+            font-display: swap;
+            font-style: normal;
+            font-variant: normal;
+            font-weight: normal;
+            font-size: inherit;
+            line-height: 1;
+            text-decoration: none;
+            text-rendering: auto;
+            text-align: start;
+            text-transform: none;
+            white-space: nowrap;
+            speak: none;
+            word-wrap: normal;
+            -webkit-font-feature-settings: "liga" off, "calt" off;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .codicon-trash:before {
+            content: "\ea81";
+        }
+
+        .codicon-terminal:before {
+            content: "\ea85";
+        }
+
+        .codicon-console:before {
+            content: "\ea6d";
+        }
+
+        .codicon-robot:before {
+            content: "\eaa2";
+        }
+
+        .codicon-rocket:before {
+            content: "\eb44";
+        }
+
+        .codicon-save:before {
+            content: "\ea71";
+        }
+
+        .codicon-settings-gear:before {
+            content: "\eb51";
+        }
+
+        .codicon-close:before {
+            content: "\ea76";
+        }
+
+        .codicon-bell:before {
+            content: "\ea85";
+        }
+
+        .codicon-bell-dot:before {
+            content: "\eb9a";
+        }
+        
+        /* Tab close button accessibility and interaction */
+        
+        /* Accessibility: Focus indicators */
+        .tab:focus,
+        .tab:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder, #007ACC);
+            outline-offset: -2px;
+        }
+        
+        
+
+        .tab-icon {
+            margin-right: 6px;
+            margin-left: 6px;
+            padding: 2px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            color: var(--vscode-tab-inactiveForeground, #cccccc);
+            background-color: transparent;
+            border: none;
+            line-height: 1;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .tab.active .tab-icon {
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        .tab-icon:hover {
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        .tab-icon:focus,
+        .tab-icon:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder, #007ACC);
+            outline-offset: 1px;
+            border-radius: 2px;
+        }
+
+        .tab-icon.notification {
+            color: #ff8c00;
+            animation: pulse-notification 2s infinite;
+        }
+
+        .tab.active .tab-icon.notification {
+            animation: none;
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        @keyframes pulse-notification {
+            0% { 
+                color: #ff8c00;
+                transform: scale(1);
+            }
+            50% { 
+                color: #ffb347;
+                transform: scale(1.1);
+            }
+            100% { 
+                color: #ff8c00;
+                transform: scale(1);
+            }
+        }
+
+        .tab-icon.notification .codicon {
+            transition: all 0.3s ease;
+        }
+
+        .tab-dropdown {
+            position: absolute;
+            background: var(--vscode-dropdown-background, #3c3c3c);
+            border: 1px solid var(--vscode-dropdown-border, #454545);
+            border-radius: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            min-width: 120px;
+            display: none;
+            flex-direction: column;
+            padding: 4px 0;
+            top: 100%;
+            left: 0;
+        }
+
+        .tab-dropdown.show {
+            display: flex;
+        }
+
+        .tab-dropdown-item {
+            padding: 6px 12px;
+            color: var(--vscode-dropdown-foreground, #cccccc);
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            background: transparent;
+            border: none;
+            text-align: left;
+            width: 100%;
+        }
+
+        .tab-dropdown-item:hover {
+            background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-list-hoverForeground, #ffffff);
+        }
+
+        .tab-dropdown-item:focus,
+        .tab-dropdown-item:focus-visible {
+            outline: none;
+            background: var(--vscode-list-focusBackground, #094771);
+            color: var(--vscode-list-focusForeground, #ffffff);
+        }
+
+        .tab-dropdown-item .codicon {
+            margin-right: 8px;
+            font-size: 14px;
+            width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tab-dropdown-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tab-dropdown-item.disabled:hover {
+            background: transparent;
+            color: var(--vscode-dropdown-foreground, #cccccc);
+        }
+        
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            .tab {
+                border: 1px solid var(--vscode-contrastBorder, transparent);
+            }
+            
+            .tab:focus,
+            .tab:focus-visible {
+                outline-width: 3px;
+            }
+            
+        }
+        
+        
+        .terminal-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .terminal-wrapper {
+            display: none;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        .terminal-wrapper.active {
+            display: block;
+        }
+        
+        .terminal-instance {
+            position: absolute;
+            width: calc(100% - 24px);
+            height: calc(100% - 24px);
+            top: 12px;
+            left: 12px;
+            box-sizing: border-box;
+        }
+        
+        .terminal-overlay {
+            /* position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--vscode-foreground, #ffffff);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            z-index: 5000; /* Above terminal instances but below tab bar (tab bar has 10000) */
+            /* pointer-events: none; Do not block drop events on container */
+        }
+        .terminal-overlay.show { display: flex; opacity: 1; }
+        
+    /* (show class now defined above for fade-in) */
+        
+        .version-display {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #888888);
+            opacity: 0.7;
+            pointer-events: none;
+            z-index: 10;
+            font-family: var(--vscode-font-family, sans-serif);
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: var(--vscode-foreground, #cccccc);
+        }
+        
+        /* Tab responsiveness */
+        @media (max-width: 800px) {
+            .container:not(.vertical-tabs) .tab {
+                min-width: 100px;
+                max-width: 200px;
+            }
+            
+            .container:not(.vertical-tabs) .tab-label {
+                font-size: 12px;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .container:not(.vertical-tabs) .tab {
+                min-width: 80px;
+                max-width: 150px;
+                padding: 8px 8px;
+            }
+        }
+        
+        /* Drag and drop styling - minimal visual feedback via background color only */
+        
+        
+        /* XTerm.js cursor override for file path links */
+        /* Normal mode: file paths get text cursor for selection */
+        .xterm-screen.xterm-cursor-pointer {
+            cursor: text !important;
+        }
+        
+        /* CMD mode: override with pointer cursor for clicking */
+        .cmd-mode .xterm-screen.xterm-cursor-pointer {
+            cursor: pointer !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">Loading terminal...</div>
+    
+    <div id="container" class="container" style="display: none;">
+        <nav id="tab-bar" class="tab-bar">
+            <ul class="tab-list" role="tablist">
+                <!-- Terminal tabs will be dynamically created here -->
+            </ul>
+        </nav>
+        <main class="terminal-container">
+            <!-- Terminal instances will be dynamically created here -->
+            <div class="version-display">v{{version}}</div>
+        </main>
+    </div>
+    <!-- Global file drop overlay -->
+    <div class="terminal-overlay" id="file-drop-overlay">
+    </div>
+    
+    <!-- Load xterm.js and addons -->
+    <script src="{{xtermUri}}"></script>
+    <script src="{{fitAddonUri}}"></script>
+    <script src="{{webglAddonUri}}"></script>
+    <script src="{{canvasAddonUri}}"></script>
+    <script src="{{webLinksAddonUri}}"></script>
+    <script src="{{serializeAddonUri}}"></script>
+    <script src="{{unicodeAddonUri}}"></script>
+    <script type="module">
+        // Import and make LinkProvider globally available for other modules
+        import { LinkProvider } from '{{linkProviderUri}}';
+        window.LinkProvider = LinkProvider;
+    </script>
+    <script>
+        // Acquire VS Code API and make it global for ES6 modules
+        window.vscode = acquireVsCodeApi();
+        
+        {{combinedScript}}
+    </script>
+    
+    <!-- Import map for ES6 module resolution -->
+    <script type="importmap">
+    {
+        "imports": {
+            "./inputHandler.js": "{{inputHandlerUri}}",
+            "./tabTitleManager.js": "{{tabTitleManagerUri}}",
+            "./terminal.js": "{{terminalUri}}",
+            "./tabManager.js": "{{tabManagerUri}}",
+            "./dragDropHandler.js": "{{dragDropHandlerUri}}",
+            "./init.js": "{{initUri}}"
+        }
+    }
+    </script>
+    
+    <!-- Load webview ES6 modules in dependency order -->
+    <script type="module" src="{{inputHandlerUri}}"></script>
+    <script type="module" src="{{tabTitleManagerUri}}"></script>
+    <script type="module" src="{{terminalUri}}"></script>
+    <script type="module" src="{{tabManagerUri}}"></script>
+    <script type="module" src="{{dragDropHandlerUri}}"></script>
+    <script type="module" src="{{initUri}}"></script>
+</body>
+</html>
