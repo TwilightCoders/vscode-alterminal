@@ -21,12 +21,6 @@ export function activate(context: vscode.ExtensionContext) {
     isDebugMode,
   );
 
-  // Force the view container to be visible
-  vscode.commands.executeCommand(
-    "setContext",
-    "alterminalContainer:visible",
-    true,
-  );
 
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
@@ -96,7 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("alterminal.focus", () => {
       vscode.commands.executeCommand(
-        "workbench.view.extension.alterminalContainer",
+        "alterminalView.focus",
       );
     }),
     vscode.commands.registerCommand("alterminal.openSettings", () => {

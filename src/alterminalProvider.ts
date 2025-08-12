@@ -300,13 +300,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   }
 
   public async openTerminal() {
-    if (this._view) {
-      this._view.show?.(true);
-    } else {
-      await vscode.commands.executeCommand(
-        "workbench.view.extension.alterminalContainer",
-      );
-    }
+    // Just focus the view, don't force show it
+    await vscode.commands.executeCommand("alterminalView.focus");
   }
 
   public sendFilePath(filePath: string, tabId: number) {

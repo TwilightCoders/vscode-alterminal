@@ -78,10 +78,34 @@ export class TemplateUtils {
     // Create logger script inline (no import needed)
     const combinedScript = createWebviewLogger();
 
-    // Read HTML template from file and interpolate variables (from src, not compiled)
-    const srcDir = path.join(__dirname, "..", "..", "src");
-    const templatePath = path.join(srcDir, "templates", "webview.html");
-    let htmlTemplate = fs.readFileSync(templatePath, "utf8");
+    // Read HTML template from file and interpolate variables.
+    // Try multiple locations to support both dev and packaged installs.
+    const candidateTemplatePaths = [
+      // Dev: run from source
+      path.join(__dirname, "..", "..", "src", "templates", "webview.html"),
+      // Packaged: src included in vsix due to .vscodeignore exception
+      path.join(extensionUri.fsPath, "src", "templates", "webview.html"),
+      // Fallback: if we ever move it to out/templates
+      path.join(__dirname, "..", "templates", "webview.html"),
+    ];
+
+    let htmlTemplate: string | null = null;
+    for (const p of candidateTemplatePaths) {
+      try {
+        if (fs.existsSync(p)) {
+          htmlTemplate = fs.readFileSync(p, "utf8");
+          break;
+        }
+      } catch {}
+    }
+
+    if (!htmlTemplate) {
+      throw new Error(
+        `Webview template not found in any known location. Tried: \n${candidateTemplatePaths.join(
+          "\n",
+        )}`,
+      );
+    }
 
     // Simple template interpolation - replace {{variableName}} with actual values
     const templateVars = {

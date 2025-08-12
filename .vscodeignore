@@ -1,6 +1,7 @@
 out/test/**
 out/**/*.map
 src/**
+!src/templates/webview.html
 .vscode-test/**
 .gitignore
 .yarnrc

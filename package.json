@@ -30,23 +30,14 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "alterminalContainer",
-          "title": "Alterminal",
-          "icon": "$(terminal)"
-        }
-      ]
-    },
     "views": {
-      "alterminalContainer": [
+      "panel": [
         {
           "id": "alterminalView",
           "name": "Alterminal",
           "type": "webview",
           "icon": "$(terminal)",
-          "retainContextWhenHidden": true
+          "initialSize": 1
         }
       ]
     },
