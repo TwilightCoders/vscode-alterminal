@@ -117,10 +117,16 @@ export class TerminalInstance {
         sendFocus: true,
         allowTransparency: false,
         windowsMode: false,
-        experimentalCharAtlas: "dynamic",
+        experimentalCharAtlas: "static",
         allowProposedApi: true,
         convertEol: true,
         disableStdin: false,
+        fastScrollModifier: "alt",
+        fastScrollSensitivity: 5,
+        scrollSensitivity: 3,
+        drawBoldTextInBrightColors: false,
+        minimumContrastRatio: 1,
+        overviewRulerWidth: 0,
       });
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
@@ -129,14 +135,23 @@ export class TerminalInstance {
         this.vscode.postMessage({ command: "openUrl", url: uri });
         return false;
       });
+      // Load renderer with preference for WebGL
+      let rendererLoaded = false;
       try {
         const webglAddon = new WebglAddon.WebglAddon();
         this.terminal.loadAddon(webglAddon);
-      } catch {
+        rendererLoaded = true;
+        Logger.debug(`Terminal ${this.id}: Using WebGL renderer`);
+      } catch (webglError) {
+        Logger.debug(`Terminal ${this.id}: WebGL failed, trying Canvas`);
         try {
           const canvasAddon = new CanvasAddon.CanvasAddon();
           this.terminal.loadAddon(canvasAddon);
-        } catch {}
+          rendererLoaded = true;
+          Logger.debug(`Terminal ${this.id}: Using Canvas renderer`);
+        } catch (canvasError) {
+          Logger.debug(`Terminal ${this.id}: Using DOM renderer (fallback)`);
+        }
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
@@ -193,9 +208,13 @@ export class TerminalInstance {
     );
 
     // Set up resize handler - coordinate with PTY backend
+    let resizeTimeout;
     this.resizeDisposable = this.terminal.onResize((size) => {
-      // Notify our PTY process of resize
-      this.sendResizeToPty(size.cols, size.rows);
+      // Debounce resize events to reduce flickering
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        this.sendResizeToPty(size.cols, size.rows);
+      }, 50);
     });
 
     // Set up bell handler - listen for terminal bell events
@@ -379,10 +398,20 @@ export class TerminalInstance {
    * Fit the terminal to its container
    */
   fit() {
-    if (!this.fitAddon) return;
-
+    if (!this.fitAddon || !this.terminal || !this.terminalContainer) return;
+    
+    // Only fit if container has meaningful dimensions
+    const containerWidth = this.terminalContainer.offsetWidth;
+    const containerHeight = this.terminalContainer.offsetHeight;
+    
+    if (containerWidth < 10 || containerHeight < 10) {
+      Logger.debug(`Terminal ${this.id}: Skipping fit - container too small (${containerWidth}x${containerHeight})`);
+      return;
+    }
+    
     try {
       this.fitAddon.fit();
+      Logger.debug(`Terminal ${this.id}: Fitted to ${containerWidth}x${containerHeight}`);
     } catch (error) {
       Logger.error(`Failed to fit terminal ${this.id}:`, error);
     }
@@ -701,7 +730,7 @@ export class TerminalInstance {
     if (container && "ResizeObserver" in window) {
       const ro = new ResizeObserver(() => {
         if (this.isActive) {
-          this.fit();
+          try { this.fit(); } catch (_) {}
           // If width/height just became non-zero, force redraw sequence
           if (
             this.terminalContainer &&
@@ -713,6 +742,10 @@ export class TerminalInstance {
         }
       });
       ro.observe(container);
+      // Also observe the terminal container directly for more accurate size changes
+      if (this.terminalContainer) {
+        try { ro.observe(this.terminalContainer); } catch (_) {}
+      }
       this._resizeObserver = ro;
     }
     document.addEventListener("visibilitychange", () => {
@@ -811,6 +844,9 @@ export class TerminalInstance {
       }
       attempts++;
       if (stable >= 2 || attempts >= 10) {
+        // Finalize with a fit and gentle refresh to ensure full viewport is used
+        try { this.fit(); } catch (_) {}
+        try { this.terminal.refresh(0, this.terminal.rows - 1); } catch (_) {}
         this._stabilizing = false;
         return;
       }

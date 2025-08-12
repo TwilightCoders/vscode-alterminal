@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Advanced terminal interface for VS Code - drag and drop between panels with command automation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -37,6 +37,7 @@
           "name": "Alterminal",
           "type": "webview",
           "icon": "$(terminal)",
+          "retainContextWhenHidden": true,
           "initialSize": 1
         }
       ]
