@@ -1,0 +1,360 @@
+{
+  "name": "alterminal",
+  "displayName": "Alterminal",
+  "description": "Advanced terminal interface for VS Code - drag and drop between panels with command automation",
+  "version": "0.1.0",
+  "preview": true,
+  "publisher": "twilightcoders",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/twilightcoders/alterminal"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "terminal",
+    "automation",
+    "command",
+    "developer-tools"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:alterminalView",
+    "onCommand:alterminal.openTerminal",
+    "onCommand:alterminal.focus"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "alterminalContainer",
+          "title": "Alterminal",
+          "icon": "$(terminal)"
+        }
+      ]
+    },
+    "views": {
+      "alterminalContainer": [
+        {
+          "id": "alterminalView",
+          "name": "Alterminal",
+          "type": "webview",
+          "icon": "$(terminal)",
+          "retainContextWhenHidden": true
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "alterminal.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "alterminal.newTab",
+        "title": "New Terminal Tab",
+        "icon": "$(add)"
+      },
+      {
+        "command": "alterminal.newTerminal.default",
+        "title": "New Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "alterminal.newTerminal.shell",
+        "title": "Shell Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "alterminal.newTerminal.command",
+        "title": "Launch Command",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "alterminal.openTerminal",
+        "title": "Open Alterminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "alterminal.debugState",
+        "title": "Debug: Show Saved State",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "alterminal.clearWorkspaceState",
+        "title": "Clear Workspace State",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "alterminal.testLinks",
+        "title": "Test WebLinks Addon",
+        "icon": "$(link)"
+      },
+      {
+        "command": "alterminal.setDebugFilter",
+        "title": "Set Debug Filter",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "alterminal.clearDebugFilter",
+        "title": "Clear Debug Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "alterminal.debugMenu",
+        "title": "Debug Menu",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "alterminal.focus",
+        "title": "Show Alterminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "alterminal.openSettings",
+        "title": "Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "alterminal.showSavedCommands",
+        "title": "Launch Saved Command",
+        "icon": "$(play)"
+      },
+      {
+        "command": "alterminal.saveCurrentCommand",
+        "title": "Save Current Command",
+        "icon": "$(save)"
+      },
+      {
+        "command": "alterminal.saveTabCommand",
+        "title": "Save Command",
+        "icon": "$(save)"
+      },
+      {
+        "command": "alterminal.renameTab",
+        "title": "Rename Tab",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "alterminal.closeTab",
+        "title": "Close Tab",
+        "icon": "$(close)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "alterminal.newTerminal",
+        "label": "More Options",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "id": "alterminal.debug",
+        "label": "Debug",
+        "icon": "$(bug)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "alterminal.newTerminal.default",
+          "when": "view == alterminalView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "alterminal.newTerminal.command",
+          "when": "view == alterminalView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "alterminal.openSettings",
+          "when": "view == alterminalView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "alterminal.refresh",
+          "when": "view == alterminalView",
+          "group": "navigation@4"
+        },
+        {
+          "submenu": "alterminal.debug",
+          "when": "view == alterminalView && alterminal.debugMode",
+          "group": "navigation@5"
+        }
+      ],
+      "alterminal.newTerminal": [
+        {
+          "command": "alterminal.newTerminal.shell",
+          "group": "1_terminals@1"
+        },
+        {
+          "command": "alterminal.saveCurrentCommand",
+          "group": "2_commands@1"
+        }
+      ],
+      "alterminal.debug": [
+        {
+          "command": "alterminal.debugState",
+          "group": "1_debug@1"
+        },
+        {
+          "command": "alterminal.clearWorkspaceState",
+          "group": "1_debug@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "alterminal.openTerminal",
+          "when": "true"
+        },
+        {
+          "command": "alterminal.focus",
+          "when": "true"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "alterminal.openTerminal",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "alterminal.openTerminal",
+          "when": "true",
+          "group": "navigation"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "alterminal.saveTabCommand",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab && terminalType == command && !savedCommand",
+          "group": "1_tab@1"
+        },
+        {
+          "command": "alterminal.renameTab",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "1_tab@2"
+        },
+        {
+          "command": "alterminal.closeTab",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "2_tab@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Alterminal",
+      "properties": {
+        "alterminal.tabLayout": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "horizontal",
+            "vertical"
+          ],
+          "default": "auto",
+          "description": "Tab layout orientation",
+          "enumDescriptions": [
+            "Automatically switch between horizontal and vertical based on panel size",
+            "Always use horizontal tabs (tabs on top)",
+            "Always use vertical tabs (tabs on left side)"
+          ]
+        },
+        "alterminal.tabTitle.template": {
+          "type": "string",
+          "default": "{n}{p? • {p}}",
+          "description": "Template for tab titles using tokens like {n} (name), {p} (process), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
+        },
+        "alterminal.tabTitle.maxLength": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 100,
+          "description": "Maximum length for tab titles before truncation"
+        },
+        "alterminal.tabTitle.truncateMode": {
+          "type": "string",
+          "enum": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "default": "end",
+          "description": "How to truncate long tab titles",
+          "enumDescriptions": [
+            "Truncate from the beginning: …end-of-title",
+            "Truncate from the middle: start…end",
+            "Truncate from the end: start-of-title…"
+          ]
+        },
+        "alterminal.terminal.scrollback": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Number of lines to keep in terminal scrollback buffer. Higher values use more memory but preserve more history."
+        },
+        "alterminal.savedCommands": {
+          "type": "array",
+          "default": [],
+          "description": "Saved terminal commands for quick launching",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The command to execute"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display label for the command"
+              },
+              "count": {
+                "type": "number",
+                "description": "Usage count"
+              },
+              "lastUsed": {
+                "type": "string",
+                "description": "Last used timestamp"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+  "compile": "node ./node_modules/typescript/lib/tsc.js -p ./ && node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
+  "compile:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./ && NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
+  "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
+  "watch:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -watch -p ./",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.1.0",
+    "@types/vscode": "^1.74.0",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^11.7.1",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "^1.1.0",
+    "@vscode/codicons": "^0.0.39",
+    "@xterm/addon-canvas": "^0.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/addon-unicode11": "^0.8.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.3.0",
+    "xterm-link-provider": "^1.3.1"
+  }
+}
