@@ -48,3 +48,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Working directory and backups
+working/
