@@ -1,0 +1,14 @@
+out/test/**
+out/**/*.map
+src/**
+.vscode-test/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+vendor/**
+!node_modules/@lydell/node-pty/**
+!node_modules/@xterm/**
