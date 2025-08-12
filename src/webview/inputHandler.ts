@@ -49,7 +49,7 @@ export class InputHandler {
    * Set up all input handling (keyboard, mouse, etc.)
    */
   setupInputHandling() {
-    // Set up custom key event handler for navigation keys
+    // Set up custom key event handler for navigation keys only (do not trap wheel/arrow keys)
     this.terminal.attachCustomKeyEventHandler((event) => {
       return this.handleKeyEvent(event);
     });
@@ -67,6 +67,10 @@ export class InputHandler {
    */
   handleKeyEvent(event) {
     if (event.type === "keydown") {
+      // Allow default terminal behavior for arrow keys so shell history works only when intended
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        return true; // don't intercept; xterm will handle + send to PTY
+      }
       switch (event.key) {
         case "Home":
           // Home: scroll to very top
