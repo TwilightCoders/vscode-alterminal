@@ -4,15 +4,23 @@ import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 
 export function activate(context: vscode.ExtensionContext) {
-  // Determine dev mode the same way we show state debug UI (extensionMode)
+  // Determine dev mode - enable for development, NODE_ENV, or preview versions
+  const packageJson = require('../package.json');
   const isDebugMode =
     context.extensionMode === vscode.ExtensionMode.Development ||
-    process.env.NODE_ENV === "development";
+    process.env.NODE_ENV === "development" ||
+    packageJson.preview === true;
 
   // Configure logger before any further logging
   Logger.configure(isDebugMode);
 
   Logger.info("🚀 Alterminal extension is now active!");
+  if (isDebugMode) {
+    const reason = context.extensionMode === vscode.ExtensionMode.Development ? "Development mode" :
+                   process.env.NODE_ENV === "development" ? "NODE_ENV=development" :
+                   packageJson.preview === true ? "Preview extension" : "Unknown";
+    Logger.info(`🔧 Debug mode enabled (${reason})`);
+  }
 
   // Set debug mode context for conditional UI
   vscode.commands.executeCommand(

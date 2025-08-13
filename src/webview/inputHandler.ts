@@ -49,10 +49,11 @@ export class InputHandler {
    * Set up all input handling (keyboard, mouse, etc.)
    */
   setupInputHandling() {
-    // Set up custom key event handler for navigation keys only (do not trap wheel/arrow keys)
-    this.terminal.attachCustomKeyEventHandler((event) => {
-      return this.handleKeyEvent(event);
-    });
+    // Disable custom key event handler that was interfering with normal terminal operation
+    // Let xterm.js handle all keyboard input naturally
+    // this.terminal.attachCustomKeyEventHandler((event) => {
+    //   return this.handleKeyEvent(event);
+    // });
 
     // Set up data handler for regular input
     const dataDisposable = this.terminal.onData((data) => {

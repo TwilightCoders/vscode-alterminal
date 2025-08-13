@@ -117,16 +117,13 @@ export class TerminalInstance {
         sendFocus: true,
         allowTransparency: false,
         windowsMode: false,
-        experimentalCharAtlas: "static",
+        experimentalCharAtlas: "dynamic",
         allowProposedApi: true,
         convertEol: true,
         disableStdin: false,
-        fastScrollModifier: "alt",
-        fastScrollSensitivity: 5,
-        scrollSensitivity: 3,
+        scrollSensitivity: 1,
         drawBoldTextInBrightColors: false,
         minimumContrastRatio: 1,
-        overviewRulerWidth: 0,
       });
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
@@ -135,23 +132,14 @@ export class TerminalInstance {
         this.vscode.postMessage({ command: "openUrl", url: uri });
         return false;
       });
-      // Load renderer with preference for WebGL
-      let rendererLoaded = false;
+      // Use conservative renderer setup to avoid drawing corruption
       try {
-        const webglAddon = new WebglAddon.WebglAddon();
-        this.terminal.loadAddon(webglAddon);
-        rendererLoaded = true;
-        Logger.debug(`Terminal ${this.id}: Using WebGL renderer`);
-      } catch (webglError) {
-        Logger.debug(`Terminal ${this.id}: WebGL failed, trying Canvas`);
-        try {
-          const canvasAddon = new CanvasAddon.CanvasAddon();
-          this.terminal.loadAddon(canvasAddon);
-          rendererLoaded = true;
-          Logger.debug(`Terminal ${this.id}: Using Canvas renderer`);
-        } catch (canvasError) {
-          Logger.debug(`Terminal ${this.id}: Using DOM renderer (fallback)`);
-        }
+        const canvasAddon = new CanvasAddon.CanvasAddon();
+        this.terminal.loadAddon(canvasAddon);
+        Logger.debug(`Terminal ${this.id}: Using Canvas renderer (stable)`);
+      } catch (canvasError) {
+        Logger.debug(`Terminal ${this.id}: Using DOM renderer (fallback)`);
+        // No WebGL - it can cause instability in webviews
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
@@ -274,8 +262,8 @@ export class TerminalInstance {
         // Visibility-aware fitting & refresh
         this._installVisibilityHandlers();
 
-        // Kick off multi-pass stabilization redraw (addresses blank-on-move)
-        this._scheduleRedrawSequence();
+        // Simple fit on initialization
+        setTimeout(() => this.fit(), 100);
 
         // Also listen for terminal render events to ensure links work if content changes
         if (typeof this.terminal.onRender === "function") {
@@ -452,6 +440,38 @@ export class TerminalInstance {
   }
 
   /**
+   * Reset terminal to clean state - fixes display corruption
+   */
+  resetTerminal() {
+    if (!this.terminal) return;
+    
+    try {
+      // Send comprehensive reset sequence to fix any corruption
+      const resetSequence = 
+        '\x1b[0m' +           // Reset all attributes (colors, bold, etc.)
+        '\x1b[?25h' +         // Show cursor
+        '\x1b[?1000l' +       // Disable mouse tracking
+        '\x1b[?1002l' +       // Disable button event mouse tracking
+        '\x1b[?1003l' +       // Disable any motion mouse tracking
+        '\x1b[?1006l' +       // Disable SGR mouse mode
+        '\x1b[?7h' +          // Enable line wrapping
+        '\x1b[?47l' +         // Exit alternate screen (if in it)
+        '\x1b[?1049l' +       // Exit alternate screen buffer
+        '\x1b[2J' +           // Clear entire screen
+        '\x1b[H';             // Move cursor to home position
+      
+      this.terminal.write(resetSequence);
+      
+      // Also trigger a fit to fix any layout issues
+      setTimeout(() => this.fit(), 50);
+      
+      Logger.info(`🔄 Terminal ${this.id} reset to clean state`);
+    } catch (error) {
+      Logger.error(`Failed to reset terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
    * Set active/inactive state
    */
   setActive(active) {
@@ -476,8 +496,8 @@ export class TerminalInstance {
               window.tabManager._recordTerminalTiming(this.id);
             }
           } catch (e) {}
-          // Additional staged redraws to combat late layout thrash
-          this._scheduleRedrawSequence();
+          // Simple refit after activation
+          setTimeout(() => this.fit(), 50);
         });
       });
     }
@@ -737,7 +757,7 @@ export class TerminalInstance {
             this.terminalContainer.offsetWidth > 0 &&
             this.terminalContainer.offsetHeight > 0
           ) {
-            this._scheduleRedrawSequence();
+            this.fit();
           }
         }
       });
@@ -754,7 +774,6 @@ export class TerminalInstance {
           if (this.terminal) {
             // this.terminal.refresh(0, this.terminal.rows - 1);
             this.fit();
-            this._scheduleRedrawSequence();
           }
         });
       }
@@ -773,7 +792,6 @@ export class TerminalInstance {
               const canvasAddon = new CanvasAddon.CanvasAddon();
               this.terminal.loadAddon(canvasAddon);
               this.fit();
-              this._scheduleRedrawSequence();
             } catch (err) {
               Logger.error("Failed canvas fallback:", err);
             }
@@ -803,8 +821,8 @@ export class TerminalInstance {
           this.terminalContainer.offsetHeight === 0
         )
           return;
-        // Trigger opportunistic redraw
-        this._scheduleRedrawSequence();
+        // Simple refit on body changes
+        this.fit();
       });
       observer.observe(document.body, {
         attributes: true,
@@ -817,41 +835,4 @@ export class TerminalInstance {
     }
   }
 
-  _scheduleRedrawSequence() {
-    this._runStabilizedRedraw();
-  }
-
-  _runStabilizedRedraw() {
-    if (!this.terminal || this._stabilizing) return;
-    this._stabilizing = true;
-    let stable = 0,
-      attempts = 0,
-      lastW = -1,
-      lastH = -1;
-    const step = () => {
-      if (!this.terminal || !this.isActive) {
-        this._stabilizing = false;
-        return;
-      }
-      const w = this.terminalContainer?.offsetWidth || 0;
-      const h = this.terminalContainer?.offsetHeight || 0;
-      // try { this.terminal.refresh(0, this.terminal.rows - 1); this.fit(); } catch(_) {}
-      if (w === lastW && h === lastH) stable++;
-      else {
-        stable = 0;
-        lastW = w;
-        lastH = h;
-      }
-      attempts++;
-      if (stable >= 2 || attempts >= 10) {
-        // Finalize with a fit and gentle refresh to ensure full viewport is used
-        try { this.fit(); } catch (_) {}
-        try { this.terminal.refresh(0, this.terminal.rows - 1); } catch (_) {}
-        this._stabilizing = false;
-        return;
-      }
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }
 }

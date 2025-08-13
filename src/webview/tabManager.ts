@@ -215,7 +215,8 @@ export class TabManager {
             break;
 
           case "refresh":
-            location.reload();
+            // Reset the active terminal to clean state instead of reloading
+            this.resetActiveTerminal();
             break;
           case "refreshActive":
             // Lightweight visual refresh only
@@ -507,6 +508,20 @@ export class TabManager {
           return false;
         }
 
+        // Check for reset terminal shortcut (Cmd+R on macOS, Ctrl+R on Windows/Linux)
+        const resetKeyPressed =
+          event.key === "r" &&
+          ((isMac && event.metaKey) || (!isMac && event.ctrlKey)) &&
+          !event.shiftKey &&
+          !event.altKey;
+
+        if (resetKeyPressed) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.resetActiveTerminal();
+          return false;
+        }
+
         const matchesShortcut = vsCodeShortcuts.some((shortcut) => {
           return (
             event.key === shortcut.key &&
@@ -783,7 +798,9 @@ export class TabManager {
   writeToTerminal(tabId, data) {
     const terminal = this.terminals.get(tabId);
     if (terminal) {
-      terminal.write(data);
+      // Filter out problematic control sequences that can corrupt terminal display
+      const filteredData = this.filterControlSequences(data);
+      terminal.write(filteredData);
 
       // Show notification if writing to an inactive tab and data has visible content
       if (tabId !== this.activeTabId && data && data.trim().length > 0) {
@@ -798,10 +815,78 @@ export class TabManager {
   }
 
   /**
+   * Filter out problematic control sequences that can corrupt terminal display
+   */
+  filterControlSequences(data) {
+    if (!data || typeof data !== 'string') return data;
+    
+    const originalLength = data.length;
+    
+    // Filter out potentially problematic sequences while preserving normal ANSI codes
+    const filtered = data
+      // Remove sequences that can corrupt display or cause half-height rendering
+      .replace(/\x1b\[\?.*?h/g, (match) => {
+        Logger.debug(`🚫 Filtered mode set sequence: ${JSON.stringify(match)}`);
+        return '';
+      })
+      .replace(/\x1b\[\?.*?l/g, (match) => {
+        Logger.debug(`🚫 Filtered mode clear sequence: ${JSON.stringify(match)}`);
+        return '';
+      })
+      // Fix orphaned background colors that can cause persistent colored blocks
+      .replace(/\x1b\[(4[0-9]|10[0-7])m(?!\x1b)/g, (match) => {
+        Logger.debug(`🎨 Fixed orphaned background color: ${JSON.stringify(match)}`);
+        return match + '\x1b[0m'; // Add reset after orphaned background color
+      })
+      .replace(/\x1b\[>\d*;?\d*;?\d*c/g, (match) => {
+        Logger.debug(`🚫 Filtered device attribute: ${JSON.stringify(match)}`);
+        return '';
+      })
+      .replace(/\x1b\[\d*;?\d*;?\d*t/g, (match) => {
+        Logger.debug(`🚫 Filtered window manipulation: ${JSON.stringify(match)}`);
+        return '';
+      })
+      .replace(/\x1b\[\d*;?\d*;?\d*;?\d*;?\d*T/g, (match) => {
+        Logger.debug(`🚫 Filtered mouse tracking: ${JSON.stringify(match)}`);
+        return '';
+      })
+      .replace(/\x1b\[200~[\s\S]*?\x1b\[201~/g, (match) => {
+        Logger.debug(`🔄 Converted bracketed paste: ${JSON.stringify(match.slice(0, 50))}...`);
+        return match.slice(6, -6); // Remove \x1b[200~ and \x1b[201~
+      });
+    
+    if (filtered.length !== originalLength) {
+      Logger.debug(`🔍 Control sequence filtering: ${originalLength} → ${filtered.length} chars`);
+    }
+    
+    return filtered;
+  }
+
+  /**
    * Get the active terminal
    */
   getActiveTerminal() {
     return this.terminals.get(this.activeTabId);
+  }
+
+  /**
+   * Reset active terminal to fix display corruption
+   */
+  resetActiveTerminal() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.resetTerminal === 'function') {
+      activeTerminal.resetTerminal();
+    }
+  }
+
+  /**
+   * Reset specific terminal by ID
+   */
+  resetTerminal(tabId) {
+    const terminal = this.terminals.get(tabId);
+    if (terminal && typeof terminal.resetTerminal === 'function') {
+      terminal.resetTerminal();
+    }
   }
 
   /**
