@@ -137,6 +137,36 @@
         "command": "alterminal.closeTab",
         "title": "Close Tab",
         "icon": "$(close)"
+      },
+      {
+        "command": "alterminal.resetColors",
+        "title": "Reset: Colors & Attributes",
+        "icon": "$(color-mode)"
+      },
+      {
+        "command": "alterminal.resetCursor",
+        "title": "Reset: Cursor & Modes",
+        "icon": "$(symbol-event)"
+      },
+      {
+        "command": "alterminal.resetMouse",
+        "title": "Reset: Mouse Tracking",
+        "icon": "$(record)"
+      },
+      {
+        "command": "alterminal.resetScreen",
+        "title": "Reset: Screen & Buffer",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "alterminal.resetAll",
+        "title": "Reset: All (Complete Reset)",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "alterminal.fixGhostCursor",
+        "title": "Fix: Ghost Cursor",
+        "icon": "$(eye)"
       }
     ],
     "submenus": [
@@ -197,6 +227,30 @@
         {
           "command": "alterminal.clearWorkspaceState",
           "group": "1_debug@2"
+        },
+        {
+          "command": "alterminal.resetColors",
+          "group": "2_reset@1"
+        },
+        {
+          "command": "alterminal.resetCursor",
+          "group": "2_reset@2"
+        },
+        {
+          "command": "alterminal.resetMouse",
+          "group": "2_reset@3"
+        },
+        {
+          "command": "alterminal.resetScreen",
+          "group": "2_reset@4"
+        },
+        {
+          "command": "alterminal.resetAll",
+          "group": "2_reset@5"
+        },
+        {
+          "command": "alterminal.fixGhostCursor",
+          "group": "3_fixes@1"
         }
       ],
       "commandPalette": [

@@ -472,6 +472,97 @@ export class TerminalInstance {
   }
 
   /**
+   * Reset only colors and text attributes
+   */
+  resetColors() {
+    if (!this.terminal) return;
+    try {
+      this.terminal.write('\x1b[0m'); // Reset all attributes (colors, bold, etc.)
+      Logger.info(`🎨 Terminal ${this.id} colors reset`);
+    } catch (error) {
+      Logger.error(`Failed to reset colors for terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Reset cursor and basic terminal modes
+   */
+  resetCursor() {
+    if (!this.terminal) return;
+    try {
+      const cursorSequence = 
+        '\x1b[?25l' +         // Hide cursor first to clear ghost cursors
+        '\x1b[?25h' +         // Show cursor
+        '\x1b[?12l' +         // Stop blinking cursor
+        '\x1b[?12h' +         // Start blinking cursor  
+        '\x1b[?7h' +          // Enable line wrapping
+        '\x1b8' +             // Restore cursor position (if saved)
+        '\x1b[u';             // Restore cursor position (alternative)
+      this.terminal.write(cursorSequence);
+      Logger.info(`👁️ Terminal ${this.id} enhanced cursor reset (ghost cursor fix)`);
+    } catch (error) {
+      Logger.error(`Failed to reset cursor for terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Specific fix for ghost cursor issues
+   */
+  fixGhostCursor() {
+    if (!this.terminal) return;
+    try {
+      // Aggressive cursor reset sequence specifically for ghost cursors
+      const ghostCursorFix = 
+        '\x1b[?25l' +         // Hide cursor
+        '\x1b[2J' +           // Clear screen to remove ghost cursors
+        '\x1b[H' +            // Home cursor
+        '\x1b[?25h' +         // Show cursor
+        '\x1b[0 q';           // Reset cursor style to default
+      this.terminal.write(ghostCursorFix);
+      Logger.info(`👻 Terminal ${this.id} ghost cursor fix applied`);
+    } catch (error) {
+      Logger.error(`Failed to fix ghost cursor for terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Reset mouse tracking modes
+   */
+  resetMouse() {
+    if (!this.terminal) return;
+    try {
+      const mouseSequence = 
+        '\x1b[?1000l' +       // Disable mouse tracking
+        '\x1b[?1002l' +       // Disable button event mouse tracking
+        '\x1b[?1003l' +       // Disable any motion mouse tracking
+        '\x1b[?1006l';        // Disable SGR mouse mode
+      this.terminal.write(mouseSequence);
+      Logger.info(`🖱️ Terminal ${this.id} mouse tracking reset`);
+    } catch (error) {
+      Logger.error(`Failed to reset mouse for terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
+   * Reset screen and buffer modes
+   */
+  resetScreen() {
+    if (!this.terminal) return;
+    try {
+      const screenSequence = 
+        '\x1b[?47l' +         // Exit alternate screen (if in it)
+        '\x1b[?1049l' +       // Exit alternate screen buffer
+        '\x1b[2J' +           // Clear entire screen
+        '\x1b[H';             // Move cursor to home position
+      this.terminal.write(screenSequence);
+      setTimeout(() => this.fit(), 50);
+      Logger.info(`📺 Terminal ${this.id} screen and buffer reset`);
+    } catch (error) {
+      Logger.error(`Failed to reset screen for terminal ${this.id}:`, error);
+    }
+  }
+
+  /**
    * Set active/inactive state
    */
   setActive(active) {

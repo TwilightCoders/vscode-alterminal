@@ -333,6 +333,26 @@ export class TabManager {
             this.closeTab(message.tabId);
             break;
 
+          // Debug reset commands
+          case "resetActiveColors":
+            this.resetActiveColors();
+            break;
+          case "resetActiveCursor":
+            this.resetActiveCursor();
+            break;
+          case "resetActiveMouse":
+            this.resetActiveMouse();
+            break;
+          case "resetActiveScreen":
+            this.resetActiveScreen();
+            break;
+          case "resetActiveTerminal":
+            this.resetActiveTerminal();
+            break;
+          case "fixGhostCursor":
+            this.fixGhostCursor();
+            break;
+
           default:
             Logger.warn("Unknown command received:", message.command);
             break;
@@ -886,6 +906,44 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (terminal && typeof terminal.resetTerminal === 'function') {
       terminal.resetTerminal();
+    }
+  }
+
+  /**
+   * Individual reset methods for debugging
+   */
+  resetActiveColors() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.resetColors === 'function') {
+      activeTerminal.resetColors();
+    }
+  }
+
+  resetActiveCursor() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.resetCursor === 'function') {
+      activeTerminal.resetCursor();
+    }
+  }
+
+  resetActiveMouse() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.resetMouse === 'function') {
+      activeTerminal.resetMouse();
+    }
+  }
+
+  resetActiveScreen() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.resetScreen === 'function') {
+      activeTerminal.resetScreen();
+    }
+  }
+
+  fixGhostCursor() {
+    const activeTerminal = this.getActiveTerminal();
+    if (activeTerminal && typeof activeTerminal.fixGhostCursor === 'function') {
+      activeTerminal.fixGhostCursor();
     }
   }
 

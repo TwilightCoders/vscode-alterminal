@@ -206,6 +206,25 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("alterminal.closeTab", (args) => {
       provider.handleContextMenuCommand("closeTab", args);
     }),
+    // Debug reset commands
+    vscode.commands.registerCommand("alterminal.resetColors", () => {
+      provider.resetActiveColors();
+    }),
+    vscode.commands.registerCommand("alterminal.resetCursor", () => {
+      provider.resetActiveCursor();
+    }),
+    vscode.commands.registerCommand("alterminal.resetMouse", () => {
+      provider.resetActiveMouse();
+    }),
+    vscode.commands.registerCommand("alterminal.resetScreen", () => {
+      provider.resetActiveScreen();
+    }),
+    vscode.commands.registerCommand("alterminal.resetAll", () => {
+      provider.resetActiveTerminal();
+    }),
+    vscode.commands.registerCommand("alterminal.fixGhostCursor", () => {
+      provider.fixGhostCursor();
+    }),
   );
 }
 
