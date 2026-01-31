@@ -84,6 +84,17 @@ export class TabManager {
       try {
         const currentState = this.saveAllStates();
         switch (message.command) {
+          case "formatTabTitleResponse":
+            try {
+              if (
+                typeof message.tabId === "number" &&
+                typeof message.title === "string"
+              ) {
+                this.updateTabLabel(message.tabId, message.title);
+                this.scheduleSaveState("formatTabTitleResponse");
+              }
+            } catch (_) {}
+            break;
           case "savedCommandsList":
             try {
               this._savedCommandsSet = new Set(message.commands || []);
@@ -626,6 +637,11 @@ export class TabManager {
 
     // Create tab DOM element
     this.createTabElement(tabId, label);
+
+    // Ask extension to format the initial title using user template
+    try {
+  this.requestFormattedTitle(tabId);
+    } catch (_) {}
 
     // Set as active if first tab, otherwise switch to it
     if (this.activeTabId === null) {
@@ -1232,6 +1248,11 @@ export class TabManager {
 
       // Create tab element (DOM order will match saved order)
       this.createTabElement(terminalData.id, terminalData.label);
+
+      // Request initial formatted title from extension
+      try {
+        this.requestFormattedTitle(terminalData.id, { processName: undefined });
+      } catch (_) {}
 
       // PTY process creation is now handled by the Terminal instance itself
     }
@@ -1873,37 +1894,37 @@ export class TabManager {
       terminal.baseLabel = terminal.label.split(" •")[0] || "Terminal";
     }
 
-    // Use template system to generate new label
-    const newLabel = this.generateTabTitle(tabId, processName);
-
-    // Update the tab label if it changed
-    if (newLabel !== terminal.label) {
-      this.updateTabLabel(tabId, newLabel);
-    }
+  // Ask extension to apply full template formatting (single source of truth)
+    try {
+      this.requestFormattedTitle(tabId, { processName });
+    } catch (_) {}
   }
 
+  // Title generation is delegated to the extension formatter
+
   /**
-   * Generate tab title with simple fallback logic
-   * TODO: Connect to extension host TabTitleProvider for full template support
+   * Request a formatted tab title from the extension using the configured template
    */
-  generateTabTitle(tabId, processName) {
-    const terminal = this.terminals.get(tabId);
-    if (!terminal) return "Terminal";
+  requestFormattedTitle(tabId, opts = {}) {
+    try {
+      const terminal = this.terminals.get(tabId);
+      if (!terminal) return;
 
-    const baseTabName =
-      terminal.baseLabel || terminal.label.split(" •")[0] || "Terminal";
-    const cleanProcessName =
-      processName &&
-      processName !== "bash" &&
-      processName !== "zsh" &&
-      processName !== "sh"
-        ? processName
-        : null;
-
-    // Simple template logic: "{n}{p? • {p}}"
-    return cleanProcessName
-      ? `${baseTabName} • ${cleanProcessName}`
-      : baseTabName;
+      const baseTabName =
+        terminal.baseLabel || terminal.label.split(" •")[0] || "Terminal";
+      this.vscode.postMessage({
+        command: "formatTabTitle",
+        tabId,
+        tabName: terminal.label,
+        baseTabName,
+        processName: opts.processName,
+        fullCommand: terminal.launchCommand || undefined,
+      });
+    } catch (e) {
+      try {
+        Logger.warn("Failed to request formatted title", e);
+      } catch {}
+    }
   }
 
   /**

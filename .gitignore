@@ -3,6 +3,7 @@ out/
 node_modules/
 *.vsix
 .vscode-test/
+build/
 
 # TypeScript
 *.js.map

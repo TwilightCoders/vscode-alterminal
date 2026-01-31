@@ -4,6 +4,7 @@ import { TemplateUtils } from "./utils/templateUtils";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
 import { Debouncer } from "./utils/debouncer";
+import { TabTitleProvider } from "./providers/tabTitleProvider";
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "alterminalView";
@@ -16,15 +17,19 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _isColdBoot = true; // determined once at construction/activation
   private _commandManager: CommandManager;
   private _restoreTriggered = false; // guard to avoid missing restore due to race
+  private _serializer?: any;
+  private _tabTitleProvider = new TabTitleProvider();
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
     context: vscode.ExtensionContext,
-    ptyManager: PtyManager,
+  ptyManager: PtyManager,
+  serializer?: any,
   ) {
     AlterminalProvider._instance = this;
     this._context = context;
     this._ptyManager = ptyManager;
+  this._serializer = serializer;
     // Initialize CommandManager asynchronously to avoid blocking extension startup
     this._commandManager = new CommandManager(
       {
@@ -45,10 +50,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this._view = webviewView;
 
     // Serializer will handle webview lifecycle
+    if (this._serializer && this._serializer.setWebviewView) {
+      this._serializer.setWebviewView(webviewView);
+    }
 
     webviewView.webview.options = {
       enableScripts: true,
-      enableForms: true,
       enableCommandUris: true,
       localResourceRoots: [this._extensionUri],
     };
@@ -133,8 +140,14 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         ),
       openFile: (msg: any) => this._handleOpenFile(msg.filePath),
       openUrl: (msg: any) => this._handleOpenUrl(msg.url),
-      stateUpdate: (msg: any) => this._handleBackupStateUpdate(msg.state),
-      stateResponse: (msg: any) => this._handleBackupStateUpdate(msg.state),
+      stateUpdate: (msg: any) => {
+        this._handleBackupStateUpdate(msg.state);
+        if (this._serializer?.handleMessage) this._serializer.handleMessage(msg);
+      },
+      stateResponse: (msg: any) => {
+        this._handleBackupStateUpdate(msg.state);
+        if (this._serializer?.handleMessage) this._serializer.handleMessage(msg);
+      },
       webviewReady: () => {
   this._restoreTriggered = true;
   this.restoreWebviewState();
@@ -159,11 +172,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       requestFileCache: () => this._sendWorkspaceFileCache(),
       checkFileExists: (msg: any) => this._handleCheckFileExists(msg.filePath),
       setDebugFilter: (msg: any) => {}, // Handled in webview
-      debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
+  debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
       setDeveloperMode: (msg: any) => {}, // Handled in webview
       performanceReport: (msg: any) => this._showPerformanceReport(msg.data),
       saveCommand: (msg: any) => this._handleSaveCommand(msg),
       checkCommandSaved: (msg: any) => this._handleCheckCommandSaved(msg),
+  formatTabTitle: (msg: any) => this._handleFormatTabTitle(msg),
     };
 
     webviewView.webview.onDidReceiveMessage(
@@ -190,6 +204,30 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       undefined,
       [],
     );
+  }
+
+  private _handleFormatTabTitle(msg: any) {
+    try {
+      const template = this._tabTitleProvider.getTemplate();
+      const title = this._tabTitleProvider.render(template, {
+        tabId: msg.tabId,
+        tabName: msg.tabName || "Terminal",
+        baseTabName: msg.baseTabName || "Terminal",
+        processName: msg.processName,
+        processId: msg.processId,
+        fullCommand: msg.fullCommand,
+        workingDirectory: msg.workingDirectory,
+        lastExitCode: msg.lastExitCode,
+        timestamp: new Date(),
+      });
+      this._view?.webview.postMessage({
+        command: "formatTabTitleResponse",
+        tabId: msg.tabId,
+        title,
+      });
+    } catch (e) {
+      Logger.warn("Failed to format tab title", e);
+    }
   }
 
   public async requestPerformanceReport() {

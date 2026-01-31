@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { AlterminalProvider } from "./alterminalProvider";
 import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
+import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 
 export function activate(context: vscode.ExtensionContext) {
   // Determine dev mode - enable for development, NODE_ENV, or preview versions
@@ -33,10 +34,14 @@ export function activate(context: vscode.ExtensionContext) {
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
 
+  // Create serializer to manage persisted state
+  const serializer = new WebviewViewSerializer(context);
+
   const provider = new AlterminalProvider(
     context.extensionUri,
     context,
     ptyManager,
+    serializer,
   );
 
   Logger.debug("🔌 Registering WebviewViewProvider...");

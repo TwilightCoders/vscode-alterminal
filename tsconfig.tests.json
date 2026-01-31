@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "out/test",
+    "module": "CommonJS",
+    "types": ["mocha", "node", "vscode"],
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": [
+    "test/**/*",
+    "src/providers/tabTitleProvider.ts",
+    "src/utils/logger.ts"
+  ],
+  "exclude": ["node_modules", ".vscode-test", "vendor"]
+}

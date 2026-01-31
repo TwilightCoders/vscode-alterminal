@@ -11,7 +11,7 @@
     "url": "https://github.com/twilightcoders/alterminal"
   },
   "engines": {
-    "vscode": "^1.74.0"
+  "vscode": "^1.100.0"
   },
   "categories": [
     "Other"
@@ -23,15 +23,21 @@
     "developer-tools"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:alterminalView",
-    "onCommand:alterminal.openTerminal",
-    "onCommand:alterminal.focus"
+  "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "views": {
+    "viewsContainers": {
       "panel": [
+        {
+          "id": "alterminal",
+          "title": "Alterminal",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "alterminal": [
         {
           "id": "alterminalView",
           "name": "Alterminal",
@@ -379,14 +385,15 @@
     "vscode:prepublish": "npm run compile",
   "compile": "node ./node_modules/typescript/lib/tsc.js -p ./ && node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
   "compile:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./ && NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
+  "compile:tests": "node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.tests.json",
   "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
   "watch:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -watch -p ./",
-    "test": "node ./out/test/runTest.js"
+    "test": "node -e \"require('fs').rmSync('out/test', {recursive:true, force:true});\" && npm run compile:tests && node ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "^24.1.0",
-    "@types/vscode": "^1.74.0",
+  "@types/node": "^20.14.11",
+  "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.5.2",
     "mocha": "^11.7.1",
     "typescript": "^5.9.2"

@@ -72,6 +72,50 @@ export class TabTitleProvider {
         : context.baseTabName;
     }
   }
+  /**
+   * Parse template by resolving innermost {..} first using a simple regex loop.
+   * This keeps the implementation small while supporting nested tokens like {p? • {p}}.
+   */
+  private parseTemplate(template: string, context: TabContext): string {
+    const tokenRe = /\{([^{}]+)\}/g;
+    let prev = "";
+    let out = template;
+    let guard = 0;
+    while (out !== prev && guard++ < 50) {
+      prev = out;
+      out = out.replace(tokenRe, (_m, content) => this.resolveToken(content, context));
+    }
+    return out;
+  }
+
+  // Resolve a single token content (no outer braces) supporting ?, : and simple tokens
+  private resolveToken(content: string, ctx: TabContext): string {
+    // key is up to first '?' or ':'
+    const q = content.indexOf('?');
+    const c = content.indexOf(':');
+    const cutIdx = Math.min(q === -1 ? Infinity : q, c === -1 ? Infinity : c);
+    const key = cutIdx === Infinity ? content : content.slice(0, cutIdx);
+    const rest = cutIdx === Infinity ? '' : content.slice(cutIdx);
+
+    const token = this.tokens.get(key);
+    const val = token?.getValue(ctx) || null;
+
+    if (rest.startsWith('?')) {
+      const body = rest.slice(1);
+      const delim = body.indexOf(':');
+      const thenText = delim === -1 ? body : body.slice(0, delim);
+      const elseText = delim === -1 ? '' : body.slice(delim + 1);
+      // then/else segments may still contain tokens; rely on outer loop for further resolution
+      return val ? thenText : elseText;
+    }
+
+    if (rest.startsWith(':')) {
+      const defText = rest.slice(1);
+      return val || defText;
+    }
+
+    return val || `{${content}}`;
+  }
 
   /**
    * Get the current template from configuration
@@ -126,76 +170,7 @@ export class TabTitleProvider {
     };
   }
 
-  /**
-   * Parse template and substitute tokens
-   */
-  private parseTemplate(template: string, context: TabContext): string {
-    return template.replace(/{([^}]+)}/g, (match, content) => {
-      return this.resolveToken(content, context);
-    });
-  }
-
-  /**
-   * Resolve a single token with its content
-   */
-  private resolveToken(content: string, context: TabContext): string {
-    // Handle conditional: {p?text} or {p?text:default}
-    if (content.includes("?")) {
-      return this.resolveConditional(content, context);
-    }
-
-    // Handle default: {p:default}
-    if (content.includes(":")) {
-      return this.resolveDefault(content, context);
-    }
-
-    // Simple token: {p}
-    const token = this.tokens.get(content);
-    return token?.getValue(context) || `{${content}}`;
-  }
-
-  /**
-   * Handle conditional tokens like {p?text} or {p?text:default}
-   */
-  private resolveConditional(content: string, context: TabContext): string {
-    const [tokenPart, conditionPart] = content.split("?");
-    const token = this.tokens.get(tokenPart);
-    const hasValue = !!token?.getValue(context);
-
-    if (!hasValue) {
-      // No value - check for default after colon
-      const colonIndex = conditionPart.indexOf(":");
-      if (colonIndex !== -1) {
-        return conditionPart.substring(colonIndex + 1);
-      }
-      return ""; // No default, return empty
-    }
-
-    // Has value - return the condition part (before colon if present)
-    const colonIndex = conditionPart.indexOf(":");
-    const textToShow =
-      colonIndex !== -1
-        ? conditionPart.substring(0, colonIndex)
-        : conditionPart;
-
-    // Parse nested tokens in the condition text
-    return this.parseTemplate(textToShow, context);
-  }
-
-  /**
-   * Handle default tokens like {p:shell}
-   */
-  private resolveDefault(content: string, context: TabContext): string {
-    const [tokenName, defaultValue] = content.split(":");
-    const token = this.tokens.get(tokenName);
-    const value = token?.getValue(context);
-
-    return value || defaultValue;
-  }
-
-  /**
-   * Truncate result if it exceeds max length
-   */
+  // Truncate result if it exceeds max length
   private truncateIfNeeded(text: string): string {
     const maxLength = this.config.get<number>("tabTitle.maxLength", 50);
     const truncateMode = this.config.get<string>(
