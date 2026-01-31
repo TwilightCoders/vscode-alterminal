@@ -252,6 +252,42 @@ export class TerminalInstance {
         );
       });
     }
+
+    // Add ghost cursor cleanup - remove duplicate cursor elements
+    this.setupGhostCursorCleanup();
+  }
+
+  /**
+   * Set up automatic ghost cursor cleanup
+   */
+  setupGhostCursorCleanup() {
+    if (!this.terminalContainer) return;
+
+    // Clean up ghost cursors periodically
+    const cleanupGhostCursors = () => {
+      if (!this.terminalContainer) return;
+
+      const cursorElements = this.terminalContainer.querySelectorAll('.xterm-cursor-layer .xterm-cursor');
+
+      // If we have more than one cursor, remove the extras
+      if (cursorElements.length > 1) {
+        Logger.debug(`👻 Found ${cursorElements.length} cursors, removing ghosts`);
+        // Keep the last one (most recent), remove the rest
+        for (let i = 0; i < cursorElements.length - 1; i++) {
+          cursorElements[i].remove();
+        }
+      }
+    };
+
+    // Run cleanup on render events
+    if (typeof this.terminal.onRender === 'function') {
+      this.renderDisposable = this.terminal.onRender(() => {
+        cleanupGhostCursors();
+      });
+    }
+
+    // Also run periodic cleanup as fallback
+    this.ghostCursorInterval = setInterval(cleanupGhostCursors, 100);
   }
 
   /**
@@ -772,6 +808,12 @@ export class TerminalInstance {
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
     this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
+
+    // Dispose ghost cursor cleanup interval
+    if (this.ghostCursorInterval) {
+      clearInterval(this.ghostCursorInterval);
+      this.ghostCursorInterval = null;
+    }
 
     // Dispose link providers
     if (this.linkProviders) {
