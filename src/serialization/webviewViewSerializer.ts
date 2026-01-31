@@ -147,7 +147,6 @@ export class WebviewViewSerializer {
       return;
     }
 
-    Logger.debug("💾 Received state for saving:", state ? `${state.terminals?.length} terminals` : "no state");
     await this.saveToExtensionStorage(this._context, state);
   }
 
@@ -232,7 +231,6 @@ export class WebviewViewSerializer {
         WebviewViewSerializer.STORAGE_KEY,
         state,
       );
-  Logger.debug("💾 Saved workspace state with", state.terminals.length, "terminals");
     } catch (error) {
       console.error("🚫 Failed to save state to extension storage:", error);
     }

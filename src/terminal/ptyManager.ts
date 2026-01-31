@@ -70,6 +70,8 @@ export class PtyManager {
           message.tabId,
           message.terminalType,
           message.launchCommand,
+          message.cols,
+          message.rows,
         );
         break;
       case "disposePty":
@@ -135,6 +137,8 @@ export class PtyManager {
     tabId: number,
     terminalType: string = "default",
     launchCommand?: string,
+    cols?: number,
+    rows?: number,
   ): void {
     // Only create new PTY process if one doesn't exist for this tab
     if (!this._ptyProcesses.has(tabId)) {
@@ -151,12 +155,17 @@ export class PtyManager {
 
       switch (terminalType) {
         case "command":
-          // Use provided command if given, otherwise default to shell
+          // Use shell with -c to execute command with full environment
+          // This ensures PATH and other shell variables are available
           if (launchCommand) {
-            const parts = launchCommand.split(" ");
-            command = parts[0];
-            args = parts.slice(1);
-            Logger.debug(`Using launch command: ${command} with args:`, args);
+            command = userShell;
+            if (process.platform === "win32") {
+              args = ["/c", launchCommand];
+            } else {
+              // Use login shell to load PATH, then execute command interactively
+              args = ["-l", "-i", "-c", launchCommand];
+            }
+            Logger.debug(`Using shell to launch command: ${command}`, args);
           } else {
             // Default to shell if no command specified
             command = userShell;
@@ -203,8 +212,8 @@ export class PtyManager {
 
       const ptyProcess = pty.spawn(command, args, {
         name: "xterm-256color",
-        cols: 80,
-        rows: 30,
+        cols: cols || 80,
+        rows: rows || 30,
         cwd:
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
           process.env.HOME ||

@@ -79,7 +79,6 @@ export class TabManager {
   setupMessageHandling() {
     window.addEventListener("message", (event) => {
       const message = event.data;
-      Logger.debug("📨 Webview received message:", message.command);
 
       try {
         const currentState = this.saveAllStates();
@@ -834,9 +833,7 @@ export class TabManager {
   writeToTerminal(tabId, data) {
     const terminal = this.terminals.get(tabId);
     if (terminal) {
-      // Filter out problematic control sequences that can corrupt terminal display
-      const filteredData = this.filterControlSequences(data);
-      terminal.write(filteredData);
+      terminal.write(data);
 
       // Show notification if writing to an inactive tab and data has visible content
       if (tabId !== this.activeTabId && data && data.trim().length > 0) {
@@ -852,22 +849,34 @@ export class TabManager {
 
   /**
    * Filter out problematic control sequences that can corrupt terminal display
+   * DEPRECATED: Removed in favor of letting xterm.js 6.0.0 handle sequences natively
+   * Keeping method for reference in case specific filtering is needed in future
    */
-  filterControlSequences(data) {
+  filterControlSequences_UNUSED(data) {
     if (!data || typeof data !== 'string') return data;
     
     const originalLength = data.length;
     
     // Filter out potentially problematic sequences while preserving normal ANSI codes
     const filtered = data
-      // Remove sequences that can corrupt display or cause half-height rendering
-      .replace(/\x1b\[\?.*?h/g, (match) => {
-        Logger.debug(`🚫 Filtered mode set sequence: ${JSON.stringify(match)}`);
-        return '';
+      // Remove ONLY specific problematic mode sequences, NOT cursor visibility (25)
+      // Keep: 25 (cursor visibility), 1049 (alt screen), 2004 (bracketed paste), etc.
+      // Remove: Problematic DEC modes that cause rendering issues
+      .replace(/\x1b\[\?([0-9]+)h/g, (match, mode) => {
+        // Allow essential modes through
+        const allowedModes = ['25', '1', '3', '4', '5', '6', '7', '12', '1000', '1002', '1003', '1004', '1005', '1006', '1049', '2004'];
+        if (allowedModes.includes(mode)) {
+          return match; // Keep essential modes
+        }
+        return ''; // Filter out problematic ones
       })
-      .replace(/\x1b\[\?.*?l/g, (match) => {
-        Logger.debug(`🚫 Filtered mode clear sequence: ${JSON.stringify(match)}`);
-        return '';
+      .replace(/\x1b\[\?([0-9]+)l/g, (match, mode) => {
+        // Allow essential modes through
+        const allowedModes = ['25', '1', '3', '4', '5', '6', '7', '12', '1000', '1002', '1003', '1004', '1005', '1006', '1049', '2004'];
+        if (allowedModes.includes(mode)) {
+          return match; // Keep essential modes
+        }
+        return ''; // Filter out problematic ones
       })
       // Fix orphaned background colors that can cause persistent colored blocks
       .replace(/\x1b\[(4[0-9]|10[0-7])m(?!\x1b)/g, (match) => {
@@ -1355,13 +1364,11 @@ export class TabManager {
    */
   scheduleSaveState(reason = "unspecified") {
     try {
-      Logger.debug(`🕒 scheduleSaveState called (reason=${reason})`);
       Debouncer.debounce(
         "global-state-save",
         400,
         () => {
           try {
-            Logger.debug("💾 Performing debounced global save");
             this.saveToLocalState();
           } catch (e) {
             Logger.warn("Global debounced save failed", e);

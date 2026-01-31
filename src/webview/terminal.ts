@@ -108,6 +108,9 @@ export class TerminalInstance {
         cursorBlink: true,
         cursorStyle: 'block',
         cursorInactiveStyle: 'none',
+        overviewRulerWidth: 0,
+        scrollOnUserInput: true,
+        reflowCursorLine: true,
         fontSize:
           parseInt(
             this.getThemeColor("--vscode-editor-font-size", "14").replace(
@@ -119,9 +122,9 @@ export class TerminalInstance {
           "--vscode-editor-font-family",
           "Consolas, Monaco, Menlo, monospace",
         ),
+        lineHeight: 1.0,
         theme: this.terminalTheme,
         scrollback: window.scrollbackLines || 1000,
-        scrollOnUserInput: true,
         sendFocus: true,
         allowTransparency: false,
         experimentalCharAtlas: "dynamic",
@@ -311,18 +314,25 @@ export class TerminalInstance {
         // Visibility-aware fitting & refresh
         this._installVisibilityHandlers();
 
-        // Simple fit on initialization
-        setTimeout(() => this.fit(), 100);
+        // Fit IMMEDIATELY to get correct dimensions before PTY creation
+        // This must happen before onRender listener is set up
+        if (this.fitAddon && container.offsetWidth > 0 && container.offsetHeight > 0) {
+          this.fitAddon.fit();
+        }
 
         // Also listen for terminal render events to ensure links work if content changes
+        // This is set up AFTER fit so createPtyProcess gets correct dimensions
         if (typeof this.terminal.onRender === "function") {
           this.renderDisposable = this.terminal.onRender(() => {
             this._markOpened();
           });
         }
+
+        // Additional delayed fit to catch any layout changes
+        setTimeout(() => this.fit(), 100);
       }
 
-      // Fit the terminal to container
+      // Fit the terminal to container on subsequent calls
       if (
         this.fitAddon &&
         container.offsetWidth > 0 &&
@@ -436,19 +446,17 @@ export class TerminalInstance {
    */
   fit() {
     if (!this.fitAddon || !this.terminal || !this.terminalContainer) return;
-    
+
     // Only fit if container has meaningful dimensions
     const containerWidth = this.terminalContainer.offsetWidth;
     const containerHeight = this.terminalContainer.offsetHeight;
-    
+
     if (containerWidth < 10 || containerHeight < 10) {
-      Logger.debug(`Terminal ${this.id}: Skipping fit - container too small (${containerWidth}x${containerHeight})`);
       return;
     }
-    
+
     try {
       this.fitAddon.fit();
-      Logger.debug(`Terminal ${this.id}: Fitted to ${containerWidth}x${containerHeight}`);
     } catch (error) {
       Logger.error(`Failed to fit terminal ${this.id}:`, error);
     }
@@ -854,16 +862,18 @@ export class TerminalInstance {
   createPtyProcess() {
     if (this._ptyStarted) return;
     this._ptyStarted = true;
-    Logger.debug(`🚀 Spawning PTY for terminal ${this.id}`, {
-      type: this.terminalType,
-      launchCommand: this.launchCommand,
-      keys: Object.keys(this || {}),
-    });
+
+    // Get current terminal dimensions to pass to PTY
+    const cols = this.terminal?.cols || 80;
+    const rows = this.terminal?.rows || 30;
+
     this.vscode.postMessage({
       command: "createPty",
       tabId: this.id,
       terminalType: this.terminalType,
       launchCommand: this.launchCommand,
+      cols: cols,
+      rows: rows,
     });
   }
 
