@@ -121,7 +121,7 @@ export class TabTitleProvider {
    * Get the current template from configuration
    */
   getTemplate(): string {
-    return this.config.get<string>("tabTitle.template", "{n}{p? • {p}}");
+    return this.config.get<string>("tabTitle.template", "{base}{p? • {p}}");
   }
 
   /**

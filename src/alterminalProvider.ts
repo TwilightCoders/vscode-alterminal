@@ -209,6 +209,15 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _handleFormatTabTitle(msg: any) {
     try {
       const template = this._tabTitleProvider.getTemplate();
+      
+      // Debug logging to see what we're working with
+      Logger.debug(`Tab title formatting for ${msg.tabId}:`, {
+        template,
+        tabName: msg.tabName,
+        baseTabName: msg.baseTabName,
+        processName: msg.processName,
+      });
+      
       const title = this._tabTitleProvider.render(template, {
         tabId: msg.tabId,
         tabName: msg.tabName || "Terminal",
@@ -220,6 +229,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         lastExitCode: msg.lastExitCode,
         timestamp: new Date(),
       });
+      
+      Logger.debug(`Formatted title result: "${title}"`);
       this._view?.webview.postMessage({
         command: "formatTabTitleResponse",
         tabId: msg.tabId,

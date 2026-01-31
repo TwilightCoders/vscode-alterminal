@@ -26,6 +26,7 @@ export class InputHandler {
   public tabId: any;
   public vscode: any;
   public saveState: any;
+  public terminalInstance: any;
   public disposables: any[] = [];
 
   constructor(
@@ -33,11 +34,13 @@ export class InputHandler {
     tabId: any,
     vscodePostMessage: any,
     saveStateCallback: any,
+    terminalInstance: any,
   ) {
     this.terminal = terminal;
     this.tabId = tabId;
     this.vscode = { postMessage: vscodePostMessage };
     this.saveState = saveStateCallback;
+    this.terminalInstance = terminalInstance;
 
     // Track disposables for cleanup
     this.disposables = [];
@@ -103,6 +106,13 @@ export class InputHandler {
    * Handle regular input data from terminal
    */
   handleInputData(data) {
+    // Check if this input represents meaningful user interaction
+    if (this.isMeaningfulInput(data)) {
+      if (this.terminalInstance && typeof this.terminalInstance.markUserInteraction === 'function') {
+        this.terminalInstance.markUserInteraction();
+      }
+    }
+
     // Send user input to PTY process
     this.sendDataToPty(data);
 
@@ -110,6 +120,31 @@ export class InputHandler {
     if (this.saveState) {
       this.saveState();
     }
+  }
+
+  /**
+   * Check if input represents meaningful user interaction that should trigger state saving
+   */
+  isMeaningfulInput(data) {
+    if (!data || typeof data !== 'string') return false;
+    
+    // Check for Enter key (carriage return/newline - the main trigger)
+    if (data.includes('\r') || data.includes('\n')) return true;
+    
+    // Check for common control sequences that generate output:
+    // Ctrl+C (ETX - End of Text)
+    if (data.includes('\x03')) return true;
+    
+    // Ctrl+D (EOT - End of Transmission, often used to exit/logout)
+    if (data.includes('\x04')) return true;
+    
+    // Ctrl+Z (SUB - Substitute, usually suspend)
+    if (data.includes('\x1A')) return true;
+    
+    // Tab completion (HT - Horizontal Tab) - might show completions
+    if (data.includes('\x09')) return true;
+    
+    return false;
   }
 
   /**

@@ -48,6 +48,12 @@ export class TerminalInstance {
     this.getThemeColor = getThemeColor;
     this.terminalType = terminalType;
 
+    // Track if user has meaningfully interacted with this terminal session
+    this.hasUserInteraction = false;
+
+    // Store clean base label (without process names) for proper restoration
+    this.baseLabel = label;
+
     // Terminal and addons (created in _createTerminal)
     this.terminal = null;
     this.fitAddon = null;
@@ -193,6 +199,7 @@ export class TerminalInstance {
           window.tabManager.saveToLocalState();
         }
       },
+      this, // Pass TerminalInstance reference for interaction tracking
     );
 
     // Set up resize handler - coordinate with PTY backend
@@ -413,6 +420,10 @@ export class TerminalInstance {
 
     try {
       this.terminal.clear();
+      
+      // Reset interaction tracking since user is starting fresh
+      this.resetUserInteraction();
+      
       // Don't immediately wipe snapshots; the shell usually redraws a fresh prompt shortly after clear
       // Instead schedule a short delayed snapshot capture so the prompt line is preserved
       setTimeout(() => {
@@ -563,6 +574,24 @@ export class TerminalInstance {
   }
 
   /**
+   * Mark that the user has meaningfully interacted with this terminal
+   */
+  markUserInteraction() {
+    if (!this.hasUserInteraction) {
+      this.hasUserInteraction = true;
+      Logger.debug(`🎯 Terminal ${this.id} marked as interactive - will save state`);
+    }
+  }
+
+  /**
+   * Reset interaction tracking (for new sessions)
+   */
+  resetUserInteraction() {
+    this.hasUserInteraction = false;
+    Logger.debug(`🔄 Terminal ${this.id} interaction tracking reset`);
+  }
+
+  /**
    * Set active/inactive state
    */
   setActive(active) {
@@ -657,14 +686,27 @@ export class TerminalInstance {
    * Get terminal state for persistence
    */
   getState() {
+    // Only save buffer content if user has meaningfully interacted
+    const shouldSaveBuffer = this.hasUserInteraction && !this.launchCommand;
+    
     const state = {
       id: this.id,
       label: this.label,
-      buffer: this.launchCommand ? "" : this.serialize() || "", // Only serialize content for default terminals - launch command terminals start fresh
+      baseLabel: this.baseLabel, // Save clean base label separately
+      buffer: shouldSaveBuffer ? this.serialize() || "" : "", 
       modes: this.modeProvider.getState(), // Include terminal modes bitmask
       launchCommand: this.launchCommand,
+      hasUserInteraction: this.hasUserInteraction,
     };
-    Logger.debug(`🔍 Terminal ${this.id} getState(): `, state);
+    
+    if (shouldSaveBuffer) {
+      Logger.debug(`🔍 Terminal ${this.id} getState() - saving buffer (interactive session)`);
+    } else if (!this.hasUserInteraction) {
+      Logger.debug(`🔍 Terminal ${this.id} getState() - skipping buffer (no user interaction)`);
+    } else {
+      Logger.debug(`🔍 Terminal ${this.id} getState() - skipping buffer (launch command terminal)`);
+    }
+    
     return state;
   }
 
@@ -675,6 +717,12 @@ export class TerminalInstance {
     if (!state) return;
 
     this.label = state.label || this.label;
+    
+    // Restore clean base label, fallback to extracting from current label
+    this.baseLabel = state.baseLabel || this.label.split(" •")[0] || "Terminal";
+
+    // Restore interaction flag
+    this.hasUserInteraction = state.hasUserInteraction || false;
 
     // Restore terminal modes through modeProvider
     this.modeProvider.restoreState(state.modes || 0);
@@ -689,7 +737,14 @@ export class TerminalInstance {
       );
     } else {
       const contentToRestore = state.buffer;
-      if (contentToRestore) this.deserialize(contentToRestore);
+      if (contentToRestore) {
+        this.deserialize(contentToRestore);
+        Logger.debug(`Terminal ${this.id}: Restored interactive session buffer`);
+      } else if (this.hasUserInteraction) {
+        Logger.debug(`Terminal ${this.id}: Was interactive but no buffer to restore`);
+      } else {
+        Logger.debug(`Terminal ${this.id}: Fresh session - no interaction history`);
+      }
     }
   }
 

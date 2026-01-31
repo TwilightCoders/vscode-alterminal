@@ -1889,9 +1889,17 @@ export class TabManager {
     // Debug: log what we're getting
     Logger.debug(`Process change for tab ${tabId}: "${processName}"`);
 
-    // Store base label if not already stored
-    if (!terminal.baseLabel) {
-      terminal.baseLabel = terminal.label.split(" •")[0] || "Terminal";
+    // Ensure baseLabel is clean and doesn't contain process names
+    if (!terminal.baseLabel || terminal.baseLabel.includes(" •")) {
+      terminal.baseLabel = (terminal.baseLabel || terminal.label).split(" •")[0] || "Terminal";
+      Logger.debug(`Terminal ${tabId}: Clean baseLabel set to "${terminal.baseLabel}"`);
+    }
+
+    // If no process name (back to shell), reset the label to just the base
+    if (!processName || processName.trim() === "") {
+      terminal.label = terminal.baseLabel;
+      this.updateTabLabel(tabId, terminal.baseLabel);
+      return; // Skip template formatting for empty process
     }
 
   // Ask extension to apply full template formatting (single source of truth)
@@ -1910,8 +1918,8 @@ export class TabManager {
       const terminal = this.terminals.get(tabId);
       if (!terminal) return;
 
-      const baseTabName =
-        terminal.baseLabel || terminal.label.split(" •")[0] || "Terminal";
+      // Ensure we always use clean baseLabel for title formatting
+      const baseTabName = terminal.baseLabel || "Terminal";
       this.vscode.postMessage({
         command: "formatTabTitle",
         tabId,
