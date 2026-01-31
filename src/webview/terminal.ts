@@ -106,6 +106,8 @@ export class TerminalInstance {
       }
       this.terminal = new XTerminal({
         cursorBlink: true,
+        cursorStyle: 'block',
+        cursorInactiveStyle: 'none',
         fontSize:
           parseInt(
             this.getThemeColor("--vscode-editor-font-size", "14").replace(
@@ -122,7 +124,6 @@ export class TerminalInstance {
         scrollOnUserInput: true,
         sendFocus: true,
         allowTransparency: false,
-        windowsMode: false,
         experimentalCharAtlas: "dynamic",
         allowProposedApi: true,
         convertEol: true,
@@ -140,15 +141,17 @@ export class TerminalInstance {
       });
       // Use WebGL renderer for best performance, fallback to DOM if unsupported
       try {
-        const webglAddon = new WebglAddon.WebglAddon();
-        webglAddon.onContextLoss(() => {
-          webglAddon.dispose();
+        this.webglAddon = new WebglAddon.WebglAddon();
+        this.webglAddon.onContextLoss(() => {
+          this.webglAddon.dispose();
+          this.webglAddon = null;
           Logger.debug(`Terminal ${this.id}: WebGL context lost, using DOM renderer`);
         });
-        this.terminal.loadAddon(webglAddon);
+        this.terminal.loadAddon(this.webglAddon);
         Logger.debug(`Terminal ${this.id}: Using WebGL renderer (GPU accelerated)`);
       } catch (webglError) {
         Logger.debug(`Terminal ${this.id}: Using DOM renderer (WebGL unavailable)`);
+        this.webglAddon = null;
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
