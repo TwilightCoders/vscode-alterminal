@@ -138,14 +138,17 @@ export class TerminalInstance {
         this.vscode.postMessage({ command: "openUrl", url: uri });
         return false;
       });
-      // Use conservative renderer setup to avoid drawing corruption
+      // Use WebGL renderer for best performance, fallback to DOM if unsupported
       try {
-        const canvasAddon = new CanvasAddon.CanvasAddon();
-        this.terminal.loadAddon(canvasAddon);
-        Logger.debug(`Terminal ${this.id}: Using Canvas renderer (stable)`);
-      } catch (canvasError) {
-        Logger.debug(`Terminal ${this.id}: Using DOM renderer (fallback)`);
-        // No WebGL - it can cause instability in webviews
+        const webglAddon = new WebglAddon.WebglAddon();
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose();
+          Logger.debug(`Terminal ${this.id}: WebGL context lost, using DOM renderer`);
+        });
+        this.terminal.loadAddon(webglAddon);
+        Logger.debug(`Terminal ${this.id}: Using WebGL renderer (GPU accelerated)`);
+      } catch (webglError) {
+        Logger.debug(`Terminal ${this.id}: Using DOM renderer (WebGL unavailable)`);
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
@@ -933,14 +936,10 @@ export class TerminalInstance {
           "webglcontextlost",
           (e) => {
             e.preventDefault();
-            Logger.warn("WebGL context lost – falling back to canvas");
-            try {
-              const canvasAddon = new CanvasAddon.CanvasAddon();
-              this.terminal.loadAddon(canvasAddon);
-              this.fit();
-            } catch (err) {
-              Logger.error("Failed canvas fallback:", err);
-            }
+            Logger.warn("WebGL context lost – falling back to DOM renderer");
+            // DOM renderer is automatically used when WebGL fails
+            // No need to manually load a fallback addon
+            this.fit();
           },
           { passive: false },
         );

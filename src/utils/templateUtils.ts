@@ -41,9 +41,6 @@ export class TemplateUtils {
     const webglAddonUri = getNodeModuleUri(
       "@xterm/addon-webgl/lib/addon-webgl.js",
     );
-    const canvasAddonUri = getNodeModuleUri(
-      "@xterm/addon-canvas/lib/addon-canvas.js",
-    );
     const webLinksAddonUri = getNodeModuleUri(
       "@xterm/addon-web-links/lib/addon-web-links.js",
     );
@@ -117,7 +114,6 @@ export class TemplateUtils {
       xtermUri,
       fitAddonUri,
       webglAddonUri,
-      canvasAddonUri,
       webLinksAddonUri,
       serializeAddonUri,
       unicodeAddonUri,
