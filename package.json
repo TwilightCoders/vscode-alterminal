@@ -11,7 +11,7 @@
     "url": "https://github.com/twilightcoders/alterminal"
   },
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.108.0"
   },
   "categories": [
     "Other"
