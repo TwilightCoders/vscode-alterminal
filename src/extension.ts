@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { AlterminalProvider } from "./alterminalProvider";
 import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
@@ -113,13 +116,36 @@ export function activate(context: vscode.ExtensionContext) {
       );
     }),
     vscode.commands.registerCommand("alterminal.debugState", async () => {
-      const savedState = context.workspaceState.get("alterminal.webviewState");
-      const message = savedState
-        ? `Saved workspace state: ${JSON.stringify(savedState, null, 2)}`
-        : "No saved workspace state found";
-      vscode.window.showInformationMessage("Debug State", {
-        modal: true,
-        detail: message,
+      const savedState = context.workspaceState.get("alterminal.webviewState") as any;
+
+      let content: string;
+      let extension: string;
+      if (!savedState) {
+        content = "No saved workspace state found";
+        extension = ".txt";
+      } else {
+        // Clone and strip buffers
+        const stateWithoutBuffers = {
+          ...savedState,
+          terminals: savedState.terminals?.map((t: any) => ({
+            ...t,
+            buffer: t.buffer ? "<omitted - use 'Show Buffer' on tab>" : undefined,
+          })),
+        };
+        content = JSON.stringify(stateWithoutBuffers, null, 2);
+        extension = ".json";
+      }
+
+      // Write to temporary file
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const tempFile = path.join(os.tmpdir(), `alterminal-state-${timestamp}${extension}`);
+      fs.writeFileSync(tempFile, content, "utf8");
+
+      // Open the file
+      const doc = await vscode.workspace.openTextDocument(tempFile);
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Active,
       });
     }),
     vscode.commands.registerCommand("alterminal.testLinks", () => {
@@ -210,6 +236,12 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("alterminal.closeTab", (args) => {
       provider.handleContextMenuCommand("closeTab", args);
+    }),
+    vscode.commands.registerCommand("alterminal.showTabBuffer", (args) => {
+      provider.handleContextMenuCommand("showTabBuffer", args);
+    }),
+    vscode.commands.registerCommand("alterminal.setTabIcon", (args) => {
+      provider.handleContextMenuCommand("setTabIcon", args);
     }),
   );
 }

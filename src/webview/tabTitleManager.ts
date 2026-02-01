@@ -646,6 +646,28 @@ export class TabTitleManager {
   }
 
   /**
+   * Set the icon for this tab
+   */
+  setIcon(iconClass) {
+    // Convert from $(iconname) format to codicon-iconname
+    let newIcon = iconClass;
+    if (iconClass.startsWith("$(") && iconClass.endsWith(")")) {
+      const iconName = iconClass.slice(2, -1);
+      newIcon = `codicon-${iconName}`;
+    }
+
+    this.icon = newIcon;
+
+    // Update the regular icon element if it exists
+    if (this.regularIcon) {
+      this.regularIcon.className = `codicon ${this.icon}`;
+    }
+
+    // Mark as customized
+    this.setState(this.STATES.CUSTOMIZED);
+  }
+
+  /**
    * Cleanup resources
    */
   dispose() {

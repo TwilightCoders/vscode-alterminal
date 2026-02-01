@@ -53,6 +53,9 @@ export class TerminalInstance {
     // Store clean base label (without process names) for proper restoration
     this.baseLabel = label;
 
+    // Icon for this terminal (can be customized)
+    this.icon = null;
+
     // Terminal and addons (created in _createTerminal)
     this.terminal = null;
     this.fitAddon = null;
@@ -677,6 +680,7 @@ export class TerminalInstance {
       id: this.id,
       label: this.label,
       baseLabel: this.baseLabel,
+      icon: this.icon,
       buffer: shouldSaveBuffer ? this.serialize() || "" : "",
       launchCommand: this.launchCommand,
       hasUserInteraction: this.hasUserInteraction,
@@ -690,9 +694,12 @@ export class TerminalInstance {
     if (!state) return;
 
     this.label = state.label || this.label;
-    
+
     // Restore clean base label, fallback to extracting from current label
     this.baseLabel = state.baseLabel || this.label.split(" •")[0] || "Terminal";
+
+    // Restore icon if available
+    this.icon = state.icon || this.icon;
 
     // Restore interaction flag
     this.hasUserInteraction = state.hasUserInteraction || false;

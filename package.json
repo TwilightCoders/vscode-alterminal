@@ -81,7 +81,7 @@
       },
       {
         "command": "alterminal.debugState",
-        "title": "Debug: Show Saved State",
+        "title": "Show Saved State",
         "icon": "$(bug)"
       },
       {
@@ -143,6 +143,16 @@
         "command": "alterminal.closeTab",
         "title": "Close Tab",
         "icon": "$(close)"
+      },
+      {
+        "command": "alterminal.showTabBuffer",
+        "title": "Show Buffer",
+        "icon": "$(output)"
+      },
+      {
+        "command": "alterminal.setTabIcon",
+        "title": "Set Icon",
+        "icon": "$(symbol-color)"
       }
     ],
     "submenus": [
@@ -240,9 +250,19 @@
           "group": "1_tab@2"
         },
         {
+          "command": "alterminal.setTabIcon",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "1_tab@3"
+        },
+        {
           "command": "alterminal.closeTab",
           "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
           "group": "2_tab@1"
+        },
+        {
+          "command": "alterminal.showTabBuffer",
+          "when": "webviewId == alterminalView && webviewSection == alterminal && contextType == tab",
+          "group": "3_debug@1"
         }
       ]
     },

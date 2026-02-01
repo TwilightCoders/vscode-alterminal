@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { PtyManager } from "./terminal/ptyManager";
 import { TemplateUtils } from "./utils/templateUtils";
 import { Logger } from "./utils/logger";
@@ -19,6 +22,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _restoreTriggered = false; // guard to avoid missing restore due to race
   private _serializer?: any;
   private _tabTitleProvider = new TabTitleProvider();
+  private _pendingBufferRequests = new Map<number, (buffer: string) => void>();
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -200,7 +204,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       performanceReport: (msg: any) => this._showPerformanceReport(msg.data),
       saveCommand: (msg: any) => this._handleSaveCommand(msg),
       checkCommandSaved: (msg: any) => this._handleCheckCommandSaved(msg),
-  formatTabTitle: (msg: any) => this._handleFormatTabTitle(msg),
+      formatTabTitle: (msg: any) => this._handleFormatTabTitle(msg),
+      bufferContent: (msg: any) => this._handleBufferContentResponse(msg),
     };
 
     webviewView.webview.onDidReceiveMessage(
@@ -952,6 +957,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       case "closeTab":
         this._handleContextMenuCloseTab(args);
         break;
+      case "showTabBuffer":
+        this._handleContextMenuShowTabBuffer(args);
+        break;
+      case "setTabIcon":
+        this._handleContextMenuSetTabIcon(args);
+        break;
       default:
         Logger.warn(`Unknown context menu command: ${command}`);
     }
@@ -1034,6 +1045,137 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       Logger.error("Failed to close tab from context menu:", error);
       vscode.window.showErrorMessage("Failed to close tab. Please try again.");
+    }
+  }
+
+  private _handleBufferContentResponse(msg: any) {
+    const tabId = msg.tabId;
+    const resolver = this._pendingBufferRequests.get(tabId);
+    if (resolver) {
+      this._pendingBufferRequests.delete(tabId);
+      resolver(msg.buffer || "");
+    }
+  }
+
+  private async _handleContextMenuShowTabBuffer(args: any) {
+    try {
+      const tabId = args?.tabId;
+
+      if (!tabId) {
+        Logger.warn("Cannot show buffer: no tab ID provided");
+        vscode.window.showErrorMessage("No tab selected");
+        return;
+      }
+
+      if (!this._view) {
+        vscode.window.showErrorMessage("Alterminal view not available");
+        return;
+      }
+
+      const tabIdNum = parseInt(tabId);
+
+      // Set up Promise to wait for response
+      const bufferPromise = new Promise<string>((resolve, reject) => {
+        this._pendingBufferRequests.set(tabIdNum, resolve);
+
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          if (this._pendingBufferRequests.has(tabIdNum)) {
+            this._pendingBufferRequests.delete(tabIdNum);
+            reject(new Error("Timeout"));
+          }
+        }, 5000);
+      });
+
+      // Send request to webview
+      this._view.webview.postMessage({
+        command: "getTabBuffer",
+        tabId: tabIdNum,
+      });
+
+      // Wait for response
+      let content: string;
+      try {
+        content = await bufferPromise;
+        if (!content) {
+          content = "(Empty buffer)";
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage("Failed to get buffer content - timeout");
+        return;
+      }
+
+      // Write to temporary file
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const tempFile = path.join(os.tmpdir(), `alterminal-tab-${tabId}-buffer-${timestamp}.txt`);
+      fs.writeFileSync(tempFile, content, "utf8");
+
+      // Open the file
+      const doc = await vscode.workspace.openTextDocument(tempFile);
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Active,
+      });
+
+      Logger.info(`Opened buffer for tab ${tabId}`);
+    } catch (error) {
+      Logger.error("Failed to show tab buffer:", error);
+      vscode.window.showErrorMessage(
+        "Failed to show tab buffer. Please try again.",
+      );
+    }
+  }
+
+  private async _handleContextMenuSetTabIcon(args: any) {
+    try {
+      const tabId = args?.tabId;
+
+      if (!tabId) {
+        Logger.warn("Cannot set icon: no tab ID provided");
+        vscode.window.showErrorMessage("No tab selected");
+        return;
+      }
+
+      // Common codicons for terminals
+      const iconOptions = [
+        { label: "$(terminal)", description: "Terminal" },
+        { label: "$(console)", description: "Console" },
+        { label: "$(server)", description: "Server" },
+        { label: "$(database)", description: "Database" },
+        { label: "$(tools)", description: "Tools" },
+        { label: "$(play)", description: "Run/Build" },
+        { label: "$(bug)", description: "Debug" },
+        { label: "$(gear)", description: "Settings" },
+        { label: "$(rocket)", description: "Deploy" },
+        { label: "$(beaker)", description: "Test" },
+        { label: "$(package)", description: "Package" },
+        { label: "$(pulse)", description: "Watch" },
+      ];
+
+      const selected = await vscode.window.showQuickPick(iconOptions, {
+        placeHolder: "Select an icon for this tab",
+        matchOnDescription: true,
+      });
+
+      if (!selected) {
+        return;
+      }
+
+      if (this._view) {
+        // Send icon update to webview
+        this._view.webview.postMessage({
+          command: "setTabIcon",
+          tabId: parseInt(tabId),
+          icon: selected.label,
+        });
+
+        Logger.info(`Set icon for tab ${tabId} to ${selected.label}`);
+      }
+    } catch (error) {
+      Logger.error("Failed to set tab icon:", error);
+      vscode.window.showErrorMessage(
+        "Failed to set tab icon. Please try again.",
+      );
     }
   }
 

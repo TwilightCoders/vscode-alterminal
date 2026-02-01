@@ -359,6 +359,16 @@ export class TabManager {
             this.closeTab(message.tabId);
             break;
 
+          case "setTabIcon":
+            Logger.debug("🎨 Received set tab icon request:", message.tabId, message.icon);
+            this.setTabIcon(message.tabId, message.icon);
+            break;
+
+          case "getTabBuffer":
+            Logger.debug("📋 Received get tab buffer request:", message.tabId);
+            this.handleGetTabBuffer(message.tabId);
+            break;
+
           default:
             Logger.warn("Unknown command received:", message.command);
             break;
@@ -921,6 +931,60 @@ export class TabManager {
     titleManager.startTitleEdit();
   }
 
+  setTabIcon(tabId, icon) {
+    const titleManager = this.titleManagers.get(tabId);
+    if (!titleManager) {
+      Logger.warn(
+        `Cannot set icon: TabTitleManager not found for tab ${tabId}`,
+      );
+      return;
+    }
+
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) {
+      Logger.warn(`Cannot set icon: terminal ${tabId} not found`);
+      return;
+    }
+
+    // Convert from $(iconname) format to codicon-iconname for storage
+    let iconClass = icon;
+    if (icon.startsWith("$(") && icon.endsWith(")")) {
+      const iconName = icon.slice(2, -1);
+      iconClass = `codicon-${iconName}`;
+    }
+
+    // Update terminal's icon property for persistence
+    terminal.icon = iconClass;
+
+    // Update UI via TabTitleManager
+    titleManager.setIcon(icon);
+
+    // Save state after icon change
+    this.saveToLocalState();
+  }
+
+  handleGetTabBuffer(tabId) {
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) {
+      Logger.warn(`Cannot get buffer: terminal ${tabId} not found`);
+      this.vscode.postMessage({
+        command: "bufferContent",
+        tabId: tabId,
+        buffer: "",
+      });
+      return;
+    }
+
+    const buffer = terminal.serialize() || "";
+
+    // Send buffer back to extension
+    this.vscode.postMessage({
+      command: "bufferContent",
+      tabId: tabId,
+      buffer: buffer,
+    });
+  }
+
   /**
    * Save state of all terminals (using WebviewViewSerializer format)
    */
@@ -995,6 +1059,12 @@ export class TabManager {
         }
         // Use new property name but support old names for backward compatibility
         terminalData.buffer = serialized || "";
+      }
+
+      // Get icon from title manager
+      const titleManager = this.titleManagers.get(id);
+      if (titleManager && titleManager.icon) {
+        terminalData.icon = titleManager.icon;
       }
 
       // Logger.warn(`Saving terminal ${id}:`, {
