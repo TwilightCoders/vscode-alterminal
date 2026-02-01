@@ -1006,7 +1006,17 @@ export class TabManager {
       Logger.warn("Could not read prior state for preservation:", e);
     }
 
-    for (const [id, terminal] of this.terminals) {
+    // Get tabs in DOM order to preserve user's reordering
+    const tabElements = document.querySelectorAll(".tab");
+    const tabIdsInOrder = Array.from(tabElements).map((tab) =>
+      parseInt(tab.dataset.tabId),
+    );
+
+    // Iterate in DOM order instead of Map order
+    for (const id of tabIdsInOrder) {
+      const terminal = this.terminals.get(id);
+      if (!terminal) continue;
+
       // Get the complete terminal state (handles content serialization logic internally)
       const terminalData = terminal.getState();
 
