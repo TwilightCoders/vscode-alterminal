@@ -1397,7 +1397,8 @@ export class TabManager {
       }),
     );
 
-    // TODO: Add draggable="true" when implementing drag and drop reordering
+    // Enable drag and drop for tab reordering
+    tab.setAttribute("draggable", "true");
 
     // Create TabTitleManager instance for this tab - pass icon directly
     const icon =
@@ -1618,6 +1619,9 @@ export class TabManager {
           }
         }
       });
+
+      // Drag and drop handlers for tab reordering
+      this.setupTabDragHandlers(tabBar);
     }
 
     // Close dropdowns when clicking outside
@@ -1628,6 +1632,89 @@ export class TabManager {
       ) {
         this.hideAllDropdowns();
       }
+    });
+  }
+
+  /**
+   * Setup drag and drop handlers for tab reordering
+   */
+  setupTabDragHandlers(tabBar) {
+    let draggedTab = null;
+
+    tabBar.addEventListener("dragstart", (e) => {
+      if (e.target.classList.contains("tab")) {
+        draggedTab = e.target;
+        e.target.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", e.target.dataset.tabId);
+      }
+    });
+
+    tabBar.addEventListener("dragend", (e) => {
+      if (e.target.classList.contains("tab")) {
+        e.target.classList.remove("dragging");
+        // Clear all drag-over indicators
+        document.querySelectorAll(".tab").forEach((tab) => {
+          tab.classList.remove("drag-over-left", "drag-over-right");
+        });
+        draggedTab = null;
+      }
+    });
+
+    tabBar.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (!draggedTab) return;
+
+      const targetTab = e.target.closest(".tab");
+      if (!targetTab || targetTab === draggedTab) {
+        return;
+      }
+
+      // Clear previous indicators
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.classList.remove("drag-over-left", "drag-over-right");
+      });
+
+      // Determine which side to show the indicator
+      const rect = targetTab.getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+
+      if (e.clientX < midpoint) {
+        targetTab.classList.add("drag-over-left");
+      } else {
+        targetTab.classList.add("drag-over-right");
+      }
+
+      e.dataTransfer.dropEffect = "move";
+    });
+
+    tabBar.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (!draggedTab) return;
+
+      const targetTab = e.target.closest(".tab");
+      if (!targetTab || targetTab === draggedTab) {
+        return;
+      }
+
+      // Determine drop position
+      const rect = targetTab.getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+      const insertBefore = e.clientX < midpoint;
+
+      // Reorder in DOM
+      const tabList = targetTab.parentElement;
+      if (insertBefore) {
+        tabList.insertBefore(draggedTab, targetTab);
+      } else {
+        tabList.insertBefore(draggedTab, targetTab.nextSibling);
+      }
+
+      // Clear drag indicators
+      targetTab.classList.remove("drag-over-left", "drag-over-right");
+
+      // Save the new tab order
+      this.scheduleSaveState("tabReorder");
     });
   }
 
