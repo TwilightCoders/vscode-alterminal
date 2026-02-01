@@ -7,9 +7,13 @@ Advanced multi-session terminal interface for VS Code with command automation, t
 
 - **Tab state persistence**: Alterminal remembers your exact tab setup - which tabs existed, their names, what was active, and the visual buffer content.
 
+- **Drag & drop tab reordering**: Easily reorganize your terminal tabs by dragging them to new positions - your preferred order persists across sessions.
+
 - **Saved commands**: Save `npm run dev`, `docker-compose up`, or any command you run constantly. Launch with one click instead of searching history or retyping.
 
 - **Template-based tab titles**: Automatically show what's running (e.g., "Terminal • node" or "Build • npm"). Customize the format or set custom names that stick.
+
+- **Flexible tab display**: Choose to always show tabs (even with one terminal) or auto-hide when you have a single tab.
 
 A focused alternative for developers who run the same commands repeatedly and want their terminal setup to persist exactly as they left it.
 
@@ -33,9 +37,4 @@ Install from the VS Code Marketplace (search for "Alterminal"). For manual insta
 ## Contributing
 
 Issues and pull requests welcome on GitHub.
-
-### Planned Features
-
-- **Tab Icons & Menus**: Customizable icons for different terminal types with dropdown menus for save/settings/close actions
-- **Drag & Drop Tab Reordering**: Allow users to reorder terminal tabs by dragging them to new positions
 

@@ -2,6 +2,20 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.3]
+
+### New Features
+
+- **Tab Reordering**: Drag and drop tabs to reorder them - your preferred arrangement persists across sessions
+- **Always Show Tabs Setting**: New `alterminal.alwaysShowTabs` option to keep the tab bar visible even with a single terminal
+- **Enhanced Drag Indicators**: Prominent visual feedback shows exactly where tabs will drop during reordering
+
+### Improvements
+
+- **Simplified Configuration**: Streamlined saved commands schema for better performance
+- **Cleaner Debug Menu**: Removed unused debug commands for a more focused interface
+- **Visual Polish**: Subtle grey borders around tabs for better definition
+
 ## [0.2.0]
 
 ### New Features
