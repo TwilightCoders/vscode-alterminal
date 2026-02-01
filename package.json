@@ -352,6 +352,11 @@
           "maximum": 50000,
           "description": "Number of lines to keep in terminal scrollback buffer. Higher values use more memory but preserve more history."
         },
+        "alterminal.alwaysShowTabs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always show the tab bar, even when there is only one terminal tab"
+        },
         "alterminal.savedCommands": {
           "type": "array",
           "default": [],

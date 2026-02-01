@@ -48,6 +48,9 @@ export class TabManager {
     this._historyBannerInjected = false; // guards single injection of History Restored banner for this restore cycle
     this._historyBannerShownEver = false; // persisted (via vscode.setState) across webview instances to avoid re-showing banner
 
+    // Configuration settings
+    this._alwaysShowTabs = false;
+
     // Initialize everything
     this.initializeEventListeners();
     this.setupResponsiveLayout();
@@ -294,6 +297,19 @@ export class TabManager {
             window.DEVELOPER_MODE = message.enabled;
             try { Logger.configureDevMode(message.enabled); } catch { /* ignore */ }
             break;
+
+          case "updateConfig":
+            if (message.config) {
+              if (typeof message.config.alwaysShowTabs === "boolean") {
+                this._alwaysShowTabs = message.config.alwaysShowTabs;
+                this.updateTabBarVisibility();
+              }
+              if (typeof message.config.scrollback === "number") {
+                window.scrollbackLines = message.config.scrollback;
+              }
+            }
+            break;
+
           case "collectPerformance":
             this._reportPerformance();
             break;
@@ -819,8 +835,10 @@ export class TabManager {
     const tabBar = document.getElementById("tab-bar");
     if (!tabBar) return;
 
-    // Hide tab bar if there's only one tab, show it if there are multiple tabs
-    if (this.terminals.size <= 1) {
+    // Always show tabs if the setting is enabled, otherwise hide when there's only one tab
+    if (this._alwaysShowTabs) {
+      tabBar.style.display = "";
+    } else if (this.terminals.size <= 1) {
       tabBar.style.display = "none";
     } else {
       tabBar.style.display = "";

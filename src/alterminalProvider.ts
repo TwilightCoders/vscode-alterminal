@@ -40,6 +40,20 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       },
       (command: string) => this.createNewTabWithCommand(command),
     );
+
+    // Listen for configuration changes
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("alterminal")) {
+        const config = vscode.workspace.getConfiguration("alterminal");
+        this._view?.webview.postMessage({
+          command: "updateConfig",
+          config: {
+            alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
+            scrollback: config.get<number>("terminal.scrollback", 1000),
+          },
+        });
+      }
+    });
   }
 
   public resolveWebviewView(
@@ -165,6 +179,15 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         } catch (e) {
           Logger.warn("Failed sending savedCommandsList", e);
         }
+        // Send configuration to webview
+        const config = vscode.workspace.getConfiguration("alterminal");
+        this._view?.webview.postMessage({
+          command: "updateConfig",
+          config: {
+            alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
+            scrollback: config.get<number>("terminal.scrollback", 1000),
+          },
+        });
       },
       switchTab: () => {}, // No-op - handled in webview
       playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
