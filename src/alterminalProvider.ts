@@ -1040,43 +1040,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // Debug reset methods
-  public resetActiveColors() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "resetActiveColors" });
-    }
-  }
-
-  public resetActiveCursor() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "resetActiveCursor" });
-    }
-  }
-
-  public resetActiveMouse() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "resetActiveMouse" });
-    }
-  }
-
-  public resetActiveScreen() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "resetActiveScreen" });
-    }
-  }
-
-  public resetActiveTerminal() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "resetActiveTerminal" });
-    }
-  }
-
-  public fixGhostCursor() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "fixGhostCursor" });
-    }
-  }
-
   public dispose() {
     Logger.debug("⚠️ Disposing AlterminalProvider");
 
