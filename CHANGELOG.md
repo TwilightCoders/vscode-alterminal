@@ -2,6 +2,19 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.4]
+
+### New Features
+
+- **Tab Icon Customization**: Right-click any tab and choose "Set Icon" to customize with icons like server, database, rocket, etc. - your choice persists across sessions
+- **Buffer Inspection**: Right-click any tab and choose "Show Buffer" to view the raw terminal content in a text editor - perfect for debugging or copying output
+- **Improved Debug State Viewer**: Debug state now opens in an editor (not a modal) with buffer content stripped for clarity - use "Show Buffer" on individual tabs to inspect content
+
+### Improvements
+
+- **No Save Prompts**: Debug files (state and buffers) now write to OS temp directory - close them without save prompts, OS handles cleanup
+- **Better Async Handling**: Fixed message handling for buffer retrieval with proper timeout and error handling
+
 ## [0.2.3]
 
 ### New Features

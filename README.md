@@ -15,6 +15,10 @@ Advanced multi-session terminal interface for VS Code with command automation, t
 
 - **Flexible tab display**: Choose to always show tabs (even with one terminal) or auto-hide when you have a single tab.
 
+- **Tab icon customization**: Right-click any tab to set a custom icon (server, database, rocket, etc.) that persists across sessions.
+
+- **Buffer inspection**: Right-click any tab to view its raw terminal content in an editor - useful for debugging or copying output.
+
 A focused alternative for developers who run the same commands repeatedly and want their terminal setup to persist exactly as they left it.
 
 ## Usage
@@ -23,7 +27,8 @@ A focused alternative for developers who run the same commands repeatedly and wa
 2. **Position Anywhere**: Drag the panel to your preferred location - sidebar, secondary sidebar, or bottom panel
 3. **Create Terminals**: Use the toolbar buttons to create new terminals or launch saved commands
 4. **Save Commands**: Click the save button on any tab to save frequently used commands for quick access
-5. **Drag & Drop**: Drop files directly into terminals - they'll be automatically handled based on file type
+5. **Customize Tabs**: Right-click any tab to rename, set a custom icon, view its buffer, or close it
+6. **Drag & Drop**: Drop files directly into terminals or reorder tabs by dragging them
 
 ## Requirements
 
