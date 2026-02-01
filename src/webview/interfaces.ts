@@ -41,24 +41,6 @@ export interface ILinkProvider extends IProvider {
   refreshLinks(): void;
 }
 
-// Terminal mode tracking interface
-export interface IModeProvider extends IProvider {
-  setMode(bit: number, enabled: boolean): void;
-  hasMode(bit: number): boolean;
-  parseAndTrackModes(data: string): void;
-  stripModeSequences(data: string): string;
-
-  // Mode constants
-  readonly MODES: {
-    readonly INSERT: number;
-    readonly APPLICATION_CURSOR: number;
-    readonly APPLICATION_KEYPAD: number;
-    readonly AUTOWRAP: number;
-    readonly ORIGIN: number;
-    readonly REVERSE_VIDEO: number;
-  };
-}
-
 // Terminal title and icon management
 export interface ITitleManager extends IProvider {
   title: string;
@@ -102,11 +84,8 @@ export interface ITerminalState {
   hasNotification: boolean;
   terminalType: string;
   buffer?: string; // canonical serialized content
-  modes?: number; // bitmask of tracked modes
   command?: string; // launch command if command tab
   terminalState?: any; // reserved for future xterm.js structural state
-  // Deprecated migration fields (will be removed in a future version)
-  // (Removed legacy rawContent/serializedContent/terminalModes fields)
 }
 
 // Event payload types for type safety
@@ -131,7 +110,6 @@ export interface ILifecycleEvent {
 export type ProviderMap = {
   lifecycle?: ILifecycleManager;
   link?: ILinkProvider;
-  mode?: IModeProvider;
   title?: ITitleManager;
   notification?: INotificationProvider;
 };

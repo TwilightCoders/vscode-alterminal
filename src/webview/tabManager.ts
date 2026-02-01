@@ -848,66 +848,6 @@ export class TabManager {
   }
 
   /**
-   * Filter out problematic control sequences that can corrupt terminal display
-   * DEPRECATED: Removed in favor of letting xterm.js 6.0.0 handle sequences natively
-   * Keeping method for reference in case specific filtering is needed in future
-   */
-  filterControlSequences_UNUSED(data) {
-    if (!data || typeof data !== 'string') return data;
-    
-    const originalLength = data.length;
-    
-    // Filter out potentially problematic sequences while preserving normal ANSI codes
-    const filtered = data
-      // Remove ONLY specific problematic mode sequences, NOT cursor visibility (25)
-      // Keep: 25 (cursor visibility), 1049 (alt screen), 2004 (bracketed paste), etc.
-      // Remove: Problematic DEC modes that cause rendering issues
-      .replace(/\x1b\[\?([0-9]+)h/g, (match, mode) => {
-        // Allow essential modes through
-        const allowedModes = ['25', '1', '3', '4', '5', '6', '7', '12', '1000', '1002', '1003', '1004', '1005', '1006', '1049', '2004'];
-        if (allowedModes.includes(mode)) {
-          return match; // Keep essential modes
-        }
-        return ''; // Filter out problematic ones
-      })
-      .replace(/\x1b\[\?([0-9]+)l/g, (match, mode) => {
-        // Allow essential modes through
-        const allowedModes = ['25', '1', '3', '4', '5', '6', '7', '12', '1000', '1002', '1003', '1004', '1005', '1006', '1049', '2004'];
-        if (allowedModes.includes(mode)) {
-          return match; // Keep essential modes
-        }
-        return ''; // Filter out problematic ones
-      })
-      // Fix orphaned background colors that can cause persistent colored blocks
-      .replace(/\x1b\[(4[0-9]|10[0-7])m(?!\x1b)/g, (match) => {
-        Logger.debug(`🎨 Fixed orphaned background color: ${JSON.stringify(match)}`);
-        return match + '\x1b[0m'; // Add reset after orphaned background color
-      })
-      .replace(/\x1b\[>\d*;?\d*;?\d*c/g, (match) => {
-        Logger.debug(`🚫 Filtered device attribute: ${JSON.stringify(match)}`);
-        return '';
-      })
-      .replace(/\x1b\[\d*;?\d*;?\d*t/g, (match) => {
-        Logger.debug(`🚫 Filtered window manipulation: ${JSON.stringify(match)}`);
-        return '';
-      })
-      .replace(/\x1b\[\d*;?\d*;?\d*;?\d*;?\d*T/g, (match) => {
-        Logger.debug(`🚫 Filtered mouse tracking: ${JSON.stringify(match)}`);
-        return '';
-      })
-      .replace(/\x1b\[200~[\s\S]*?\x1b\[201~/g, (match) => {
-        Logger.debug(`🔄 Converted bracketed paste: ${JSON.stringify(match.slice(0, 50))}...`);
-        return match.slice(6, -6); // Remove \x1b[200~ and \x1b[201~
-      });
-    
-    if (filtered.length !== originalLength) {
-      Logger.debug(`🔍 Control sequence filtering: ${originalLength} → ${filtered.length} chars`);
-    }
-    
-    return filtered;
-  }
-
-  /**
    * Get the active terminal
    */
   getActiveTerminal() {

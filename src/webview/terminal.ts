@@ -2,7 +2,6 @@
 import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { FilePathLinkProvider } from "./linkProvider.js";
-import { AnsiModeProvider } from "./modeProvider.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 
@@ -64,7 +63,6 @@ export class TerminalInstance {
     // Providers
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
     this.linkProvider = new FilePathLinkProvider(this, vscode, id);
-    this.modeProvider = new AnsiModeProvider(this, vscode, id);
 
     // Simplified history flags
     this._simpleHistory = true;
@@ -170,7 +168,6 @@ export class TerminalInstance {
       });
       this.lifecycleManager.initialize();
       this.linkProvider.initialize();
-      this.modeProvider.initialize();
       if (this.terminal.unicode) this.terminal.unicode.activeVersion = "11";
     } catch (e) {
       Logger.error("Terminal init failed", e);
@@ -363,51 +360,12 @@ export class TerminalInstance {
   }
 
   /**
-   * Set a terminal mode bit (delegated to modeProvider)
-   */
-  setMode(bit, enabled) {
-    this.modeProvider.setMode(bit, enabled);
-  }
-
-  /**
-   * Check if a terminal mode is enabled (delegated to modeProvider)
-   */
-  hasMode(bit) {
-    return this.modeProvider.hasMode(bit);
-  }
-
-  /**
-   * Parse and track terminal modes from escape sequences (delegated to modeProvider)
-   */
-  parseAndTrackModes(data) {
-    this.modeProvider.parseAndTrackModes(data);
-  }
-
-  /**
-   * Strip terminal mode sequences from data (delegated to modeProvider)
-   */
-  stripModeSequences(data) {
-    return this.modeProvider.stripModeSequences(data);
-  }
-
-  /**
-   * Restore terminal modes after deserializing content (delegated to modeProvider)
-   */
-  restoreTerminalModes() {
-    this.modeProvider.restoreModes();
-  }
-
-  /**
    * Write data to the terminal
    */
   write(data) {
     if (!this.terminal) return;
     try {
-      // In simple history mode we bypass mode tracking/stripping entirely for raw fidelity
-      if (!this._simpleHistory) {
-        this.parseAndTrackModes(data);
-        data = this.stripModeSequences(data);
-      }
+      // Write data directly to terminal - xterm.js 6.0.0 handles all sequences natively
       this.terminal.write(data);
       this._lastWriteTs = Date.now();
       Debouncer.debounce(
@@ -679,12 +637,11 @@ export class TerminalInstance {
   serialize() {
     if (!this.serializeAddon) return null;
     try {
-      const raw = this.serializeAddon.serialize({
+      return this.serializeAddon.serialize({
         scrollback: window.scrollbackLines || 1000,
         excludeAltBuffer: true,
         excludeModes: false,
       });
-      return this._simpleHistory ? raw : this.stripModeSequences(raw);
     } catch (e) {
       Logger.error("Serialize failed:", e);
       return null;
@@ -700,31 +657,8 @@ export class TerminalInstance {
     }
 
     try {
-      // Debug: Log deserialization info
-      const lines = serializedContent.split("\n").length;
-      const lastLine = serializedContent.split("\n").slice(-2)[0]; // -2 because last is usually empty
-      Logger.debug(
-        `Deserializing terminal ${this.id}: ${lines} lines, last line: "${lastLine}"`,
-      );
-      if (lines === 0 || !serializedContent.trim()) {
-        Logger.debug(
-          `⚠️ Deserialization content appears empty for terminal ${this.id}`,
-        );
-      }
-
-      // Strip any lingering mode sequences from stored content before restoring
-      const cleanContent = this.stripModeSequences(serializedContent);
-
-      // Write clean content (don't trigger state save during restoration)
-      this.terminal.write(cleanContent);
-      Logger.debug(
-        `✅ Wrote restored content to terminal ${this.id} (chars=${cleanContent.length})`,
-      );
-
-      // Restore terminal modes after content with slight delay to ensure terminal is ready
-      setTimeout(() => {
-        this.restoreTerminalModes();
-      }, 100);
+      // Write content directly - xterm.js 6.0.0 handles all sequences properly
+      this.terminal.write(serializedContent);
 
       window.dispatchEvent(new Event("resize"));
     } catch (error) {
@@ -738,26 +672,15 @@ export class TerminalInstance {
   getState() {
     // Only save buffer content if user has meaningfully interacted
     const shouldSaveBuffer = this.hasUserInteraction && !this.launchCommand;
-    
-    const state = {
+
+    return {
       id: this.id,
       label: this.label,
-      baseLabel: this.baseLabel, // Save clean base label separately
-      buffer: shouldSaveBuffer ? this.serialize() || "" : "", 
-      modes: this.modeProvider.getState(), // Include terminal modes bitmask
+      baseLabel: this.baseLabel,
+      buffer: shouldSaveBuffer ? this.serialize() || "" : "",
       launchCommand: this.launchCommand,
       hasUserInteraction: this.hasUserInteraction,
     };
-    
-    if (shouldSaveBuffer) {
-      Logger.debug(`🔍 Terminal ${this.id} getState() - saving buffer (interactive session)`);
-    } else if (!this.hasUserInteraction) {
-      Logger.debug(`🔍 Terminal ${this.id} getState() - skipping buffer (no user interaction)`);
-    } else {
-      Logger.debug(`🔍 Terminal ${this.id} getState() - skipping buffer (launch command terminal)`);
-    }
-    
-    return state;
   }
 
   /**
@@ -775,26 +698,13 @@ export class TerminalInstance {
     this.hasUserInteraction = state.hasUserInteraction || false;
 
     // Restore terminal modes through modeProvider
-    this.modeProvider.restoreState(state.modes || 0);
-
     // Restore launch command and derive terminal type
     this.launchCommand = state.launchCommand || this.launchCommand;
     this.terminalType = this.launchCommand ? "command" : "default";
 
-    if (this.launchCommand) {
-      Logger.debug(
-        `Terminal ${this.id}: Relaunching with command "${this.launchCommand}" instead of restoring content`,
-      );
-    } else {
-      const contentToRestore = state.buffer;
-      if (contentToRestore) {
-        this.deserialize(contentToRestore);
-        Logger.debug(`Terminal ${this.id}: Restored interactive session buffer`);
-      } else if (this.hasUserInteraction) {
-        Logger.debug(`Terminal ${this.id}: Was interactive but no buffer to restore`);
-      } else {
-        Logger.debug(`Terminal ${this.id}: Fresh session - no interaction history`);
-      }
+    // Restore buffer content if available (not for command terminals)
+    if (!this.launchCommand && state.buffer) {
+      this.deserialize(state.buffer);
     }
   }
 
@@ -829,7 +739,6 @@ export class TerminalInstance {
         try {
           if (disposable && disposable.dispose) {
             disposable.dispose();
-            Logger.debug("Disposed link provider");
           }
         } catch (error) {
           Logger.error("Error disposing link provider:", error);
@@ -847,7 +756,6 @@ export class TerminalInstance {
       this.linkMatcherIds.forEach((matcherId) => {
         try {
           this.terminal.deregisterLinkMatcher(matcherId);
-          Logger.debug(`Deregistered link matcher ${matcherId}`);
         } catch (error) {
           Logger.error(`Error deregistering link matcher ${matcherId}:`, error);
         }
@@ -917,7 +825,6 @@ export class TerminalInstance {
       // Dispose providers
       this.lifecycleManager.dispose();
       this.linkProvider.dispose();
-      this.modeProvider.dispose();
 
       // Dispose event handlers
       this.disposeEventHandlers();
