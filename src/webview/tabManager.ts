@@ -1650,6 +1650,8 @@ export class TabManager {
    */
   setupTabDragHandlers(tabBar) {
     let draggedTab = null;
+    let lastTargetTab = null;
+    let lastInsertBefore = false;
 
     tabBar.addEventListener("dragstart", (e) => {
       if (e.target.classList.contains("tab")) {
@@ -1663,22 +1665,48 @@ export class TabManager {
     tabBar.addEventListener("dragend", (e) => {
       if (e.target.classList.contains("tab")) {
         e.target.classList.remove("dragging");
+
+        // Use the last target from dragover
+        if (lastTargetTab && draggedTab && lastTargetTab !== draggedTab) {
+          const tabList = lastTargetTab.parentElement;
+          if (lastInsertBefore) {
+            tabList.insertBefore(draggedTab, lastTargetTab);
+          } else {
+            tabList.insertBefore(draggedTab, lastTargetTab.nextSibling);
+          }
+
+          // Save the new tab order
+          this.scheduleSaveState("tabReorder");
+        }
+
         // Clear all drag-over indicators
         document.querySelectorAll(".tab").forEach((tab) => {
           tab.classList.remove("drag-over-left", "drag-over-right");
         });
+
+        // Reset state
         draggedTab = null;
+        lastTargetTab = null;
+        lastInsertBefore = false;
       }
+    });
+
+    tabBar.addEventListener("dragenter", (e) => {
+      e.preventDefault();
     });
 
     tabBar.addEventListener("dragover", (e) => {
       e.preventDefault();
+      e.stopPropagation();
       if (!draggedTab) return;
 
       const targetTab = e.target.closest(".tab");
       if (!targetTab || targetTab === draggedTab) {
         return;
       }
+
+      // Track the target for use in dragend
+      lastTargetTab = targetTab;
 
       // Clear previous indicators
       document.querySelectorAll(".tab").forEach((tab) => {
@@ -1689,42 +1717,15 @@ export class TabManager {
       const rect = targetTab.getBoundingClientRect();
       const midpoint = rect.left + rect.width / 2;
 
-      if (e.clientX < midpoint) {
+      lastInsertBefore = e.clientX < midpoint;
+
+      if (lastInsertBefore) {
         targetTab.classList.add("drag-over-left");
       } else {
         targetTab.classList.add("drag-over-right");
       }
 
       e.dataTransfer.dropEffect = "move";
-    });
-
-    tabBar.addEventListener("drop", (e) => {
-      e.preventDefault();
-      if (!draggedTab) return;
-
-      const targetTab = e.target.closest(".tab");
-      if (!targetTab || targetTab === draggedTab) {
-        return;
-      }
-
-      // Determine drop position
-      const rect = targetTab.getBoundingClientRect();
-      const midpoint = rect.left + rect.width / 2;
-      const insertBefore = e.clientX < midpoint;
-
-      // Reorder in DOM
-      const tabList = targetTab.parentElement;
-      if (insertBefore) {
-        tabList.insertBefore(draggedTab, targetTab);
-      } else {
-        tabList.insertBefore(draggedTab, targetTab.nextSibling);
-      }
-
-      // Clear drag indicators
-      targetTab.classList.remove("drag-over-left", "drag-over-right");
-
-      // Save the new tab order
-      this.scheduleSaveState("tabReorder");
     });
   }
 
