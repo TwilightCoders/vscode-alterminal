@@ -52,11 +52,10 @@ export class InputHandler {
    * Set up all input handling (keyboard, mouse, etc.)
    */
   setupInputHandling() {
-    // Disable custom key event handler that was interfering with normal terminal operation
-    // Let xterm.js handle all keyboard input naturally
-    // this.terminal.attachCustomKeyEventHandler((event) => {
-    //   return this.handleKeyEvent(event);
-    // });
+    // Custom key event handler to pass through VS Code shortcuts
+    this.terminal.attachCustomKeyEventHandler((event) => {
+      return this.handleKeyEvent(event);
+    });
 
     // Set up data handler for regular input
     const dataDisposable = this.terminal.onData((data) => {
@@ -67,38 +66,54 @@ export class InputHandler {
   }
 
   /**
-   * Handle key events - intercept navigation keys, allow others
+   * Handle key events - intercept navigation keys and pass through VS Code shortcuts
    */
   handleKeyEvent(event) {
     if (event.type === "keydown") {
-      // Allow default terminal behavior for arrow keys so shell history works only when intended
-      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-        return true; // don't intercept; xterm will handle + send to PTY
+      const key = event.key;
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+      // Pass through function keys (F1-F12) to VS Code
+      if (key.startsWith('F') && key.length <= 3) {
+        const fNum = parseInt(key.substring(1));
+        if (fNum >= 1 && fNum <= 12) {
+          return false; // Let VS Code handle it
+        }
       }
-      switch (event.key) {
+
+      // Pass through common VS Code shortcuts
+      if (cmdOrCtrl && event.shiftKey) {
+        // Cmd/Ctrl+Shift combinations (command palette, etc.)
+        return false; // Let VS Code handle it
+      }
+
+      // Allow default terminal behavior for arrow keys
+      if (key === "ArrowUp" || key === "ArrowDown") {
+        return true; // Terminal handles for shell history
+      }
+
+      // Terminal navigation keys
+      switch (key) {
         case "Home":
-          // Home: scroll to very top
           this.terminal.scrollToTop();
-          return false; // Prevent default handling
+          return false;
 
         case "End":
-          // End: scroll to very bottom
           this.terminal.scrollToBottom();
-          return false; // Prevent default handling
+          return false;
 
         case "PageUp":
-          // Page Up: scroll up one page
           this.terminal.scrollPages(-1);
-          return false; // Prevent default handling
+          return false;
 
         case "PageDown":
-          // Page Down: scroll down one page
           this.terminal.scrollPages(1);
-          return false; // Prevent default handling
+          return false;
       }
     }
 
-    // Return true to allow normal processing for all other keys
+    // Allow normal terminal processing for all other keys
     return true;
   }
 
