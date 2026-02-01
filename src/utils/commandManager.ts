@@ -22,11 +22,10 @@
 import * as vscode from "vscode";
 
 interface SavedCommand {
-  launchCommand: string; // canonical launch command text
-  label: string; // user label or generated
-  usageCount: number; // times actually launched (not times saved)
-  lastUsed: string; // ISO timestamp of last launch
-  firstSaved: string; // ISO timestamp when initially saved
+  command: string;
+  label: string;
+  count: number;
+  lastUsed: string;
 }
 
 interface VSCodeAPI {
@@ -53,35 +52,12 @@ export class CommandManager {
    */
   async loadSavedCommands() {
     try {
-      // Get from VS Code workspace configuration
-      const raw = this.vscode
+      this.savedCommands = this.vscode
         .getConfiguration("alterminal")
-        .get<any[]>("savedCommands", []);
-
-      // Migration: legacy entries may use { command, count } instead of { launchCommand, usageCount }
-      this.savedCommands = raw
-        .map((entry) => {
-          if (!entry) return null;
-          const migrated: SavedCommand = {
-            launchCommand: entry.launchCommand || entry.command || "",
-            label:
-              entry.label || entry.command || entry.launchCommand || "Unnamed",
-            usageCount:
-              typeof entry.usageCount === "number"
-                ? entry.usageCount
-                : typeof entry.count === "number"
-                  ? entry.count
-                  : 0,
-            lastUsed: entry.lastUsed || new Date().toISOString(),
-            firstSaved:
-              entry.firstSaved || entry.lastUsed || new Date().toISOString(),
-          };
-          return migrated.launchCommand ? migrated : null;
-        })
-        .filter(Boolean) as SavedCommand[];
+        .get<SavedCommand[]>("savedCommands", []);
 
       console.debug(
-        "[CommandManager] Loaded & migrated saved commands:",
+        "[CommandManager] Loaded saved commands:",
         this.savedCommands,
       );
       this.updateDynamicMenus();
@@ -96,16 +72,9 @@ export class CommandManager {
    */
   async saveSavedCommands() {
     try {
-      // Persist only new schema fields
       await this.vscode.getConfiguration("alterminal").update(
         "savedCommands",
-        this.savedCommands.map((c) => ({
-          launchCommand: c.launchCommand,
-          label: c.label,
-          usageCount: c.usageCount,
-          lastUsed: c.lastUsed,
-          firstSaved: c.firstSaved,
-        })),
+        this.savedCommands,
         vscode.ConfigurationTarget.Global,
       );
 
@@ -122,29 +91,28 @@ export class CommandManager {
   /**
    * Add a command to saved commands (or increment usage)
    */
-  async saveCommand(launchCommand: string, userLabel?: string | null) {
+  async saveCommand(command: string, userLabel?: string | null) {
     const existing = this.savedCommands.find(
-      (c) => c.launchCommand === launchCommand,
+      (c) => c.command === command,
     );
     if (existing) {
       if (userLabel) existing.label = userLabel; // label update only
       // Do NOT increment usage here; usage increments only when launched
     } else {
       this.savedCommands.push({
-        launchCommand,
-        label: userLabel || this.generateLabel(launchCommand),
-        usageCount: 0,
+        command,
+        label: userLabel || this.generateLabel(command),
+        count: 0,
         lastUsed: new Date().toISOString(),
-        firstSaved: new Date().toISOString(),
       });
     }
     // Limit: keep newest additions if overflow (>25 for flexibility)
     if (this.savedCommands.length > 25) {
-      // Remove lowest usageCount / oldest firstSaved
+      // Remove lowest count / oldest lastUsed
       this.savedCommands.sort(
         (a, b) =>
-          a.usageCount - b.usageCount ||
-          new Date(a.firstSaved).getTime() - new Date(b.firstSaved).getTime(),
+          a.count - b.count ||
+          new Date(a.lastUsed).getTime() - new Date(b.lastUsed).getTime(),
       );
       this.savedCommands = this.savedCommands.slice(-25);
     }
@@ -152,12 +120,12 @@ export class CommandManager {
     return true;
   }
 
-  private _recordUsage(launchCommand: string) {
+  private _recordUsage(command: string) {
     const existing = this.savedCommands.find(
-      (c) => c.launchCommand === launchCommand,
+      (c) => c.command === command,
     );
     if (existing) {
-      existing.usageCount += 1;
+      existing.count += 1;
       existing.lastUsed = new Date().toISOString();
     }
   }
@@ -205,11 +173,11 @@ export class CommandManager {
    */
   getSavedCommands(): SavedCommand[] {
     return this.savedCommands.slice().sort((a, b) => {
-      // Weighted score: usageCount primary, recency secondary
+      // Weighted score: count primary, recency secondary
       const aScore =
-        a.usageCount * 1000000000000 + new Date(a.lastUsed).getTime();
+        a.count * 1000000000000 + new Date(a.lastUsed).getTime();
       const bScore =
-        b.usageCount * 1000000000000 + new Date(b.lastUsed).getTime();
+        b.count * 1000000000000 + new Date(b.lastUsed).getTime();
       return bScore - aScore;
     });
   }
@@ -217,20 +185,20 @@ export class CommandManager {
   /**
    * Launch a saved command
    */
-  async launchSavedCommand(launchCommand: string) {
-    this._recordUsage(launchCommand);
+  async launchSavedCommand(command: string) {
+    this._recordUsage(command);
     await this.saveSavedCommands();
     if (this.createTab) {
-      this.createTab(launchCommand);
+      this.createTab(command);
     }
   }
 
   /**
    * Remove a saved command
    */
-  async removeSavedCommand(launchCommand: string) {
+  async removeSavedCommand(command: string) {
     this.savedCommands = this.savedCommands.filter(
-      (cmd) => cmd.launchCommand !== launchCommand,
+      (cmd) => cmd.command !== command,
     );
     await this.saveSavedCommands();
   }
@@ -275,9 +243,9 @@ export class CommandManager {
 
     const quickPickItems = commands.map((cmd) => ({
       label: cmd.label,
-      description: cmd.launchCommand,
-      detail: `Used ${cmd.usageCount} times • Last ${new Date(cmd.lastUsed).toLocaleDateString()}`,
-      launchCommand: cmd.launchCommand,
+      description: cmd.command,
+      detail: `Used ${cmd.count} times • Last ${new Date(cmd.lastUsed).toLocaleDateString()}`,
+      command: cmd.command,
     }));
 
     const selected = await this.vscode.window.showQuickPick(quickPickItems, {
@@ -286,7 +254,7 @@ export class CommandManager {
     });
 
     if (selected) {
-      await this.launchSavedCommand(selected.launchCommand);
+      await this.launchSavedCommand(selected.command);
     }
   }
 

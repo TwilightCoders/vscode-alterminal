@@ -157,7 +157,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         try {
           const saved = this._commandManager
             .getSavedCommands()
-            .map((c) => c.launchCommand);
+            .map((c) => c.command);
           this._view?.webview.postMessage({
             command: "savedCommandsList",
             commands: saved,
@@ -803,13 +803,13 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       const buildItems = (value: string) => {
         const items = saved.map((c) => ({
           label: c.label,
-          description: c.launchCommand,
-          detail: `Used ${c.usageCount} • Last ${new Date(c.lastUsed).toLocaleDateString()}`,
-          launchCommand: c.launchCommand,
+          description: c.command,
+          detail: `Used ${c.count} • Last ${new Date(c.lastUsed).toLocaleDateString()}`,
+          launchCommand: c.command,
           saved: true,
         }));
         const trimmed = value.trim();
-        if (trimmed && !saved.some((c) => c.launchCommand === trimmed)) {
+        if (trimmed && !saved.some((c) => c.command === trimmed)) {
           items.unshift({
             label: `Run: ${trimmed}`,
             description: "(new command)",
@@ -826,10 +826,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         qp.onDidChangeValue((val) => {
           qp.items = buildItems(val);
           // Auto-select exact match if exists
-          const exact = saved.find((c) => c.launchCommand === val.trim());
+          const exact = saved.find((c) => c.command === val.trim());
           if (exact) {
             const pick = qp.items.find(
-              (i) => i.launchCommand === exact.launchCommand,
+              (i) => i.launchCommand === exact.command,
             );
             if (pick) qp.selectedItems = [pick];
           }
@@ -842,7 +842,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           }
           qp.busy = true;
           try {
-            if (saved.some((c) => c.launchCommand === value)) {
+            if (saved.some((c) => c.command === value)) {
               await this._commandManager.launchSavedCommand(value);
             } else {
               this.createNewTabWithCommand(value);
@@ -896,7 +896,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       // Check if command exists in saved commands
       const savedCommands = this._commandManager.getSavedCommands();
       const isSaved = savedCommands.some(
-        (cmd) => cmd.launchCommand === msg.launchCommand,
+        (cmd) => cmd.command === msg.launchCommand,
       );
 
       // Send response back to webview
