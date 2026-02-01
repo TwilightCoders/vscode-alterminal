@@ -248,14 +248,38 @@ export class CommandManager {
       command: cmd.command,
     }));
 
-    const selected = await this.vscode.window.showQuickPick(quickPickItems, {
-      placeHolder: "Select a saved command to launch",
-      matchOnDescription: true,
-    });
+    const quickPick = this.vscode.window.createQuickPick();
+    quickPick.items = quickPickItems;
+    quickPick.placeholder = "Select a saved command or type a custom command to launch";
+    quickPick.matchOnDescription = true;
 
-    if (selected) {
-      await this.launchSavedCommand(selected.command);
-    }
+    return new Promise<void>((resolve) => {
+      quickPick.onDidAccept(() => {
+        const selected = quickPick.selectedItems[0];
+        const value = quickPick.value.trim();
+
+        quickPick.hide();
+
+        // If they typed something, always use what they typed
+        if (value) {
+          if (this.createTab) {
+            this.createTab(value);
+          }
+        } else if (selected && "command" in selected) {
+          // They didn't type, just selected an item (arrow keys + Enter or click)
+          this.launchSavedCommand((selected as any).command);
+        }
+
+        resolve();
+      });
+
+      quickPick.onDidHide(() => {
+        quickPick.dispose();
+        resolve();
+      });
+
+      quickPick.show();
+    });
   }
 
   /**

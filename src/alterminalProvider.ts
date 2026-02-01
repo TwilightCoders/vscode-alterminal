@@ -848,27 +848,24 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       disposables.push(
         qp.onDidChangeValue((val) => {
           qp.items = buildItems(val);
-          // Auto-select exact match if exists
-          const exact = saved.find((c) => c.command === val.trim());
-          if (exact) {
-            const pick = qp.items.find(
-              (i) => i.launchCommand === exact.command,
-            );
-            if (pick) qp.selectedItems = [pick];
-          }
+          // Don't auto-select - let user explicitly select or press Enter
         }),
         qp.onDidAccept(async () => {
+          const value = qp.value.trim();
           const sel = qp.selectedItems[0];
-          const value = sel ? sel.launchCommand : qp.value.trim();
-          if (!value) {
+
+          // Use what they typed if they typed anything, otherwise use selection
+          const commandToRun = value || (sel ? sel.launchCommand : "");
+
+          if (!commandToRun) {
             return;
           }
           qp.busy = true;
           try {
-            if (saved.some((c) => c.command === value)) {
-              await this._commandManager.launchSavedCommand(value);
+            if (saved.some((c) => c.command === commandToRun)) {
+              await this._commandManager.launchSavedCommand(commandToRun);
             } else {
-              this.createNewTabWithCommand(value);
+              this.createNewTabWithCommand(commandToRun);
             }
           } finally {
             qp.dispose();
