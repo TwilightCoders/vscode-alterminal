@@ -85,6 +85,12 @@ export class DragDropHandler {
     e.stopPropagation();
     e.dataTransfer.dropEffect = "copy";
 
+    // Ensure overlay is visible during dragover (fixes re-entry issue)
+    if (this.overlay && !this.overlay.classList.contains("show")) {
+      this.overlay.classList.add("show");
+      this.dragDepth = 1;
+    }
+
     // Apply subtle visual feedback using VS Code's terminal drop background
     const dropBackground =
       getComputedStyle(document.body).getPropertyValue(
