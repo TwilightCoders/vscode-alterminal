@@ -1,29 +1,17 @@
-<img src="media/icon.png" alt="Alterminal Icon" width="200" height="200" style="float: right; padding-left: 20px;">
+<img src="https://github.com/TwilightCoders/vscode-alterminal/raw/main/media/icon.png" alt="Alterminal Icon" width="200" height="200" style="float: right; margin-left: 20px;">
 
 # Alterminal
-
-Advanced multi-session terminal interface for VS Code with drag-and-drop panels, command automation, intelligent session management, and persistent tab state. Designed as a focused alternative UX to the built-in terminal while remaining lightweight.
+Advanced multi-session terminal interface for VS Code with command automation, template-based tab titles, and persistent tab state. Designed as a focused alternative UX to the built-in terminal while remaining lightweight.
 
 ## Features
 
-- **Flexible Panel System**: Drag and drop terminals between primary sidebar, secondary sidebar, and bottom panel
-- **Command Automation**: Save frequently used commands for quick launching with one click
-- **Smart Session Management**: Terminal sessions persist between VS Code restarts with automatic state restoration
-- **Multi-Tab Interface**: Organize multiple terminal sessions in customizable tabs with intelligent titles
-- **Drag & Drop Support**: Drop files and text directly into terminals with automatic handling
-- **Clickable Links**: URLs and file paths are clickable - file paths open directly in VS Code editor
-- **Hardware Acceleration**: WebGL-powered terminal rendering for smooth performance
-- **Theme Integration**: Seamlessly matches your VS Code theme colors and appearance
+- **Tab state persistence**: Alterminal remembers your exact tab setup - which tabs existed, their names, what was active, and the visual buffer content.
 
-### Why Alterminal?
+- **Saved commands**: Save `npm run dev`, `docker-compose up`, or any command you run constantly. Launch with one click instead of searching history or retyping.
 
-Alterminal evolved from an internal prototype into a general-purpose enhanced terminal workspace. It focuses on:
-- Fast, resilient session restore (backups plus live webview state)
-- Clear, customizable tab titles with token templates
-- Minimal noise in production (debug logging gated behind dev mode)
-- Extensible architecture prepared for future profile types
+- **Template-based tab titles**: Automatically show what's running (e.g., "Terminal • node" or "Build • npm"). Customize the format or set custom names that stick.
 
-No proprietary service dependencies; it uses your local shells and tools.
+A focused alternative for developers who run the same commands repeatedly and want their terminal setup to persist exactly as they left it.
 
 ## Usage
 
@@ -46,55 +34,8 @@ Install from the VS Code Marketplace (search for "Alterminal"). For manual insta
 
 Issues and pull requests welcome on GitHub.
 
-### Known Issues & Future Work
-
-#### Known Issues
-
-- **Terminal state persistence**: When the Alterminal view is closed and reopened, the terminal appears blank until user interaction (though the underlying PTY session persists). A visual redraw mechanism is needed to restore the display state.
-- **Cursor positioning**: Cursor may appear offset from correct position after resizing terminal. Force resize to redraw fixes it temporarily.
-
-#### Planned Features
+### Planned Features
 
 - **Tab Icons & Menus**: Customizable icons for different terminal types with dropdown menus for save/settings/close actions
 - **Drag & Drop Tab Reordering**: Allow users to reorder terminal tabs by dragging them to new positions
-- **Vertical Tab Layout**: Option for vertical tab arrangement in wide panels
-- **Enhanced Process Detection**: Better integration with shell processes for dynamic tab labeling
 
-## Release Notes
-
-### v0.1.0
-
-#### New Features
-
-- **Command Automation**: Save and launch frequently used commands with one click
-- **Smart Tab Management**: Enhanced tab titles with process detection and customizable templates
-- **Improved Background Handling**: Perfect transparency integration with VS Code themes
-
-#### Bug Fixes
-
-- Fixed canvas background transparency issues
-- Resolved text rendering problems with dark themes
-- Improved terminal state restoration after VS Code restart
-
-### v0.2.0
-
-#### New Features
-
-- **Drag & Drop Support**: Drop files directly into terminals with automatic handling
-- **Clickable Links**: URLs and file paths are now clickable - file paths open directly in VS Code editor
-- **Multi-Tab Interface**: Organize multiple terminal sessions with intelligent tab management
-- **Hardware Acceleration**: WebGL-powered rendering for smooth performance
-
-#### Performance & Reliability Improvements
-
-- **Better Theme Integration**: Seamless background color matching with VS Code themes
-- **Modular Architecture**: Clean separation of concerns with dedicated managers for different features
-- **Comprehensive Testing**: Automated test suite ensuring reliability
-
-### v0.1.0
-
-Initial release with core functionality:
-
-- Flexible panel positioning (drag terminals between sidebar, secondary sidebar, and bottom panel)
-- Session persistence across VS Code restarts
-- Activity Bar integration with terminal icon
