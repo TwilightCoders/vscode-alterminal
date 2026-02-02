@@ -2,6 +2,20 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.5]
+
+### Bug Fixes
+
+- **Fixed Workspace File Cache Crash**: Disabled workspace file scanning that caused crashes when opening large workspaces (e.g., home directory). The file cache was only used for legacy link validation and is no longer needed with the modern link provider implementation.
+- **Fixed Clickable File Path Links**: File paths in terminal output are now fully functional - Command+click (Mac) or Ctrl+click (Windows/Linux) opens files in VS Code editor.
+- **Added Link Hover Feedback**: Cursor changes to pointer when hovering over file paths while holding Command/Ctrl, providing clear visual feedback that links are clickable.
+
+### Technical Improvements
+
+- Implemented modern xterm.js link provider API matching WebLinksAddon's coordinate system for accurate link positioning
+- Removed expensive workspace file scanning that could hang the extension on large projects
+- Added CMD/Ctrl key state tracking with visual cursor feedback for better UX
+
 ## [0.2.4]
 
 ### New Features
