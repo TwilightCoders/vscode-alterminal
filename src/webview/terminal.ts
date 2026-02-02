@@ -60,7 +60,6 @@ export class TerminalInstance {
     this.fitAddon = null;
     this.serializeAddon = null;
     this.unicodeAddon = null;
-    this.webLinksAddon = null;
 
     // Providers
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
@@ -139,10 +138,6 @@ export class TerminalInstance {
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
       this.unicodeAddon = new Unicode11Addon.Unicode11Addon();
-      this.webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => {
-        this.vscode.postMessage({ command: "openUrl", url: uri });
-        return false;
-      });
       // Use WebGL renderer for best performance, fallback to DOM if unsupported
       try {
         this.webglAddon = new WebglAddon.WebglAddon();
@@ -160,7 +155,6 @@ export class TerminalInstance {
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
       this.terminal.loadAddon(this.unicodeAddon);
-      this.terminal.loadAddon(this.webLinksAddon);
       this.setupEventHandlers();
       this.lifecycleManager.on("bootReady", () => {
         if (window.tabManager?.saveToLocalState) {
@@ -206,15 +200,18 @@ export class TerminalInstance {
           const lineText = line.translateToString(true);
           const links = [];
 
-          // Regex for file paths and directories
-          // Match: files with extensions OR paths starting with ~/, ./, ../, or /
-          const regex = /[^\s"'`]*\/[^\s"'`]*\.\w+|(?:~\/|\.\.?\/|\/)[^\s"'`]+/g;
+          // Regex for file paths, directories, and URLs
+          // Match: HTTP(S) URLs OR files with extensions OR paths starting with ~/, ./, ../, or /
+          const regex = /https?:\/\/[^\s"'`]+|[^\s"'`]*\/[^\s"'`]*\.\w+|(?:~\/|\.\.?\/|\/)[^\s"'`]+/g;
           let match;
 
           while ((match = regex.exec(lineText)) !== null) {
             const matchText = match[0];
             const startX = match.index;
             const endX = match.index + matchText.length;
+
+            // Detect if this is a URL
+            const isUrl = matchText.startsWith('http://') || matchText.startsWith('https://');
 
             // Use WebLinksAddon's exact coordinate format:
             // start: x+1, y+1 (1-based)
@@ -234,11 +231,23 @@ export class TerminalInstance {
               range,
               text: matchText,
               activate: (event, text) => {
-                this.vscode.postMessage({
-                  command: "openFile",
-                  filePath: text,
-                  terminalId: this.id,
-                });
+                // Only activate if modifier key is pressed
+                if (!event.metaKey && !event.ctrlKey) {
+                  return;
+                }
+
+                if (isUrl) {
+                  this.vscode.postMessage({
+                    command: "openUrl",
+                    url: text,
+                  });
+                } else {
+                  this.vscode.postMessage({
+                    command: "openFile",
+                    filePath: text,
+                    terminalId: this.id,
+                  });
+                }
               }
             });
           }
@@ -922,7 +931,6 @@ export class TerminalInstance {
       // Clear references
       this.fitAddon = null;
       this.serializeAddon = null;
-      this.webLinksAddon = null;
     } catch (error) {
       Logger.error(`Failed to dispose terminal ${this.id}:`, error);
     }

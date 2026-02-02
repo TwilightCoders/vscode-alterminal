@@ -405,8 +405,17 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     try {
       let resolvedPath = filePath;
 
-      // Handle relative paths
-      if (filePath.startsWith("./") || filePath.startsWith("../")) {
+      // Handle tilde paths first
+      if (filePath.startsWith("~/")) {
+        const homeDir = require("os").homedir();
+        resolvedPath = filePath.replace("~", homeDir);
+      }
+      // Handle absolute paths (keep as-is)
+      else if (filePath.startsWith("/")) {
+        resolvedPath = filePath;
+      }
+      // Handle all other paths as relative to workspace (includes ./, ../, and bare paths like src/file.ts)
+      else {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (workspaceFolder) {
           resolvedPath = vscode.Uri.joinPath(
@@ -414,12 +423,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             filePath,
           ).fsPath;
         }
-      }
-
-      // Handle tilde paths
-      if (filePath.startsWith("~/")) {
-        const homeDir = require("os").homedir();
-        resolvedPath = filePath.replace("~", homeDir);
       }
 
       // Workspace containment guard (only allow outside workspace with confirmation)

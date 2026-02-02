@@ -1468,6 +1468,23 @@ export class TabManager {
    * Set up event listeners for tab interactions
    */
   initializeEventListeners() {
+    // Track CMD/Ctrl key for link cursor styling
+    const container = document.getElementById("container");
+    document.addEventListener("keydown", (e) => {
+      if (e.metaKey || e.ctrlKey) {
+        container?.classList.add("cmd-mode");
+      }
+    });
+    document.addEventListener("keyup", (e) => {
+      if (!e.metaKey && !e.ctrlKey) {
+        container?.classList.remove("cmd-mode");
+      }
+    });
+    // Also handle focus loss (e.g., CMD+Tab away)
+    window.addEventListener("blur", () => {
+      container?.classList.remove("cmd-mode");
+    });
+
     // New tab functionality is now handled by title bar button
     // No DOM-based new tab button needed
 
