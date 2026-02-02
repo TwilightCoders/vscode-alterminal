@@ -2,6 +2,20 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.6]
+
+### Bug Fixes
+
+- **Fixed File Path Link Detection**: Correctly matches complete file paths like "source/file.js" instead of partial paths like "/file.js"
+- **Added Directory Link Support**: Directories can now be clicked to reveal in VS Code explorer (e.g., `/Users/name/project`, `~/workspace`)
+- **Improved Link Opening**: Directories now open in explorer instead of attempting to open as text documents
+
+### Technical Improvements
+
+- Simplified regex pattern for more reliable path matching
+- Removed duplicate link handling code (unused linkProvider.ts)
+- Added file/directory detection with appropriate VS Code commands
+
 ## [0.2.5]
 
 ### Bug Fixes
