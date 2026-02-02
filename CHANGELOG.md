@@ -2,6 +2,13 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.8]
+
+### Technical Improvements
+
+- **Code Cleanup**: Removed ~230 lines of dead code including unused workspace file cache system, test commands, and debug statements
+- **Reduced Bundle Size**: Cleaner codebase with better maintainability
+
 ## [0.2.7]
 
 ### Improvements
