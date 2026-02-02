@@ -2,6 +2,18 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.9]
+
+### Bug Fixes
+
+- **Fixed Link Detection Regression**: Path matching now correctly handles directories like `~/.rbenv/shims/ruby` as complete paths instead of splitting them
+- **Improved Regex Accuracy**: Link detection no longer treats hidden directories (e.g., `.rbenv`) as file extensions
+
+### Testing
+
+- **Added Comprehensive Test Suite**: 22 tests covering file paths, directories, URLs, and edge cases to prevent future regressions
+- All link detection scenarios now have automated test coverage
+
 ## [0.2.8]
 
 ### Technical Improvements
