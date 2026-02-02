@@ -191,8 +191,6 @@ export class TerminalInstance {
    * Set up file path link detection using native xterm.js API
    */
   setupFilePathLinks() {
-    console.log("🔗 setupFilePathLinks() called");
-
     // Use native xterm.js link provider API for better compatibility
     const provider = {
       provideLinks: (y, callback) => {
@@ -208,8 +206,9 @@ export class TerminalInstance {
           const lineText = line.translateToString(true);
           const links = [];
 
-          // Regex for file paths
-          const regex = /(?:~\/|\.\.?\/|\/)[^\s"'`]+|[a-zA-Z]:[\\\/][^\s"'`]+|\b\w+\.\w{2,}\b/g;
+          // Regex for file paths and directories
+          // Match: files with extensions OR paths starting with ~/, ./, ../, or /
+          const regex = /[^\s"'`]*\/[^\s"'`]*\.\w+|(?:~\/|\.\.?\/|\/)[^\s"'`]+/g;
           let match;
 
           while ((match = regex.exec(lineText)) !== null) {
@@ -231,13 +230,10 @@ export class TerminalInstance {
               }
             };
 
-            console.log(`🔗 Link: "${matchText}" at range`, range);
-
             links.push({
               range,
               text: matchText,
               activate: (event, text) => {
-                console.log("🔗 Link activated:", text);
                 this.vscode.postMessage({
                   command: "openFile",
                   filePath: text,
@@ -257,7 +253,6 @@ export class TerminalInstance {
 
     try {
       this.linkProviderDisposable = this.terminal.registerLinkProvider(provider);
-      console.log("🔗 Native link provider registered successfully");
     } catch (error) {
       console.error("🔗 Failed to register link provider:", error);
     }

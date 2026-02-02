@@ -454,7 +454,18 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
       const uri = vscode.Uri.file(resolvedPath);
       Logger.debug(`Opening file: ${filePath} -> ${resolvedPath}`);
-      await vscode.window.showTextDocument(uri);
+
+      // Check if it's a directory or file
+      const fs = require('fs');
+      const stats = await fs.promises.stat(resolvedPath);
+
+      if (stats.isDirectory()) {
+        // For directories, reveal in explorer
+        await vscode.commands.executeCommand('revealInExplorer', uri);
+      } else {
+        // For files, open as text document
+        await vscode.window.showTextDocument(uri);
+      }
     } catch (error) {
       Logger.error("Failed to open file:", error);
       vscode.window.showErrorMessage(`Failed to open file: ${filePath}`);
