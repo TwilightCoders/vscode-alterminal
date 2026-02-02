@@ -2,6 +2,20 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.7]
+
+### Improvements
+
+- **Enhanced Link System**: Removed duplicate WebLinksAddon, now using unified custom link provider for all file paths and URLs
+- **Better Cursor Feedback**: Cursor remains text cursor for selection until Command/Ctrl is pressed, then changes to pointer for clicking links
+- **Workspace-Relative Paths**: Paths without prefix (e.g., `src/webview/file.ts`) now correctly resolve relative to workspace root
+- **Updated Description**: Clarified extension description to better communicate its purpose as a feature-rich terminal alternative
+
+### Bug Fixes
+
+- Links now require Command/Ctrl modifier key to activate, preventing accidental clicks during text selection
+- HTTP/HTTPS URLs now properly detected and open in browser (works in production mode)
+
 ## [0.2.6]
 
 ### Bug Fixes
