@@ -233,6 +233,11 @@ export class TerminalInstance {
               range,
               text: matchText,
               activate: (event, text) => {
+                // Prevent default behavior to avoid sandbox errors
+                if (event && event.preventDefault) {
+                  event.preventDefault();
+                }
+
                 // Only activate if modifier key is pressed
                 if (!event.metaKey && !event.ctrlKey) {
                   return;

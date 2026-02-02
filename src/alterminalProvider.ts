@@ -7,6 +7,7 @@ import { TemplateUtils } from "./utils/templateUtils";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
 import { TabTitleProvider } from "./providers/tabTitleProvider";
+import { Debouncer } from "./utils/debouncer";
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "alterminalView";
@@ -120,14 +121,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Set up webview lifecycle event handlers
    */
   private setupWebviewLifecycle(webviewView: vscode.WebviewView) {
-    Logger.debug("⚠️ Setting up webview lifecycle handlers");
-
     // Monitor visibility changes (no restoration here - purely event-driven via webviewReady)
     webviewView.onDidChangeVisibility(() => {
-      Logger.debug(
-        "👁️ Webview visibility changed:",
-        webviewView.visible ? "VISIBLE" : "HIDDEN",
-      );
       if (webviewView.visible) {
         // Just refresh active state, restoration happens via webviewReady event
         this._view?.webview.postMessage({ command: "refreshActive" });
@@ -136,7 +131,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
     // Monitor disposal
     webviewView.onDidDispose(() => {
-      Logger.debug("🗑️ Webview disposed");
       // Note: State is already saved synchronously by webview, no need for async save here
     });
   }
@@ -195,7 +189,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       switchTab: () => {}, // No-op - handled in webview
       playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
       setDebugFilter: (msg: any) => {}, // Handled in webview
-  debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
+      debugLog: () => {}, // Disabled
       setDeveloperMode: (msg: any) => {}, // Handled in webview
       performanceReport: (msg: any) => this._showPerformanceReport(msg.data),
       saveCommand: (msg: any) => this._handleSaveCommand(msg),
@@ -234,14 +228,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     try {
       const template = this._tabTitleProvider.getTemplate();
       
-      // Debug logging to see what we're working with
-      Logger.debug(`Tab title formatting for ${msg.tabId}:`, {
-        template,
-        tabName: msg.tabName,
-        baseTabName: msg.baseTabName,
-        processName: msg.processName,
-      });
-      
       const title = this._tabTitleProvider.render(template, {
         tabId: msg.tabId,
         tabName: msg.tabName || "Terminal",
@@ -254,7 +240,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         timestamp: new Date(),
       });
       
-      Logger.debug(`Formatted title result: "${title}"`);
       this._view?.webview.postMessage({
         command: "formatTabTitleResponse",
         tabId: msg.tabId,
@@ -277,7 +262,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       modal: true,
       detail: summary,
     });
-    Logger.debug("📊 Performance detail:", data.samples);
   }
 
   public async refresh() {
@@ -422,17 +406,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             "Cancel",
           );
           if (choice !== "Open") {
-            Logger.debug(
-              "Open file cancelled (outside workspace):",
-              resolvedPath,
-            );
             return;
           }
         }
       }
 
       const uri = vscode.Uri.file(resolvedPath);
-      Logger.debug(`Opening file: ${filePath} -> ${resolvedPath}`);
 
       // Check if it's a directory or file
       const fs = require('fs');
@@ -490,7 +469,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           () => {},
           () => {
             // Fallback if focus command fails
-            Logger.debug("Could not focus editor group");
           },
         );
     } catch (error) {
@@ -499,19 +477,26 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   }
 
   private async _handleBackupStateUpdate(state: any) {
-    try {
-      // Save backup state to extension workspace (non-critical)
-      if (state) {
-        await this._context.workspaceState.update("alterminal.webviewState", {
-          terminals: state.terminals || [],
-          activeTabId: state.activeTabId || 1,
-          timestamp: Date.now(),
-        });
-        Logger.debug("💾 Saved backup state to extension workspace");
-      }
-    } catch (error) {
-      Logger.warn("⚠️ Failed to save backup state (non-critical):", error);
-    }
+    // Debounce backup state saves to avoid excessive writes
+    Debouncer.debounce(
+      "backup-state-save",
+      500,
+      async () => {
+        try {
+          // Save backup state to extension workspace (non-critical)
+          if (state) {
+            await this._context.workspaceState.update("alterminal.webviewState", {
+              terminals: state.terminals || [],
+              activeTabId: state.activeTabId || 1,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (error) {
+          Logger.warn("⚠️ Failed to save backup state (non-critical):", error);
+        }
+      },
+      { maxWait: 1000 },
+    );
   }
 
   private async restoreWebviewState() {
@@ -524,35 +509,17 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         "alterminal.webviewState",
       ) as any;
 
-  Logger.debug("📤 Restoring webview state:", {
-        isColdBoot: this._isColdBoot,
-        hasBackupState: !!(
-          backupState &&
-          backupState.terminals &&
-          backupState.terminals.length > 0
-        ),
-      });
       if (
         backupState &&
         backupState.terminals &&
         backupState.terminals.length > 0
       ) {
-        Logger.debug(
-          "📤 Sending restoreState (cold=" + this._isColdBoot + ") with",
-          backupState.terminals.length,
-          "terminals",
-        );
         this._view.webview.postMessage({
           command: "restoreState",
           state: backupState,
           cold: this._isColdBoot,
         });
       } else {
-        Logger.debug(
-          "📤 No backup state - sending initialize (cold=" +
-            this._isColdBoot +
-            ")",
-        );
         this._view.webview.postMessage({
           command: "initializeEmpty",
           cold: this._isColdBoot,
@@ -590,7 +557,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         command: "setDeveloperMode",
         enabled: isDeveloper,
       });
-      Logger.debug("Developer mode", isDeveloper ? "enabled" : "disabled");
     }
   }
 
@@ -726,9 +692,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         });
       }
 
-      Logger.debug(
-        `Command saved status check: ${msg.launchCommand} = ${isSaved}`,
-      );
     } catch (error) {
       Logger.error("Failed to check command saved status:", error);
     }
@@ -738,8 +701,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Handle context menu commands from VS Code
    */
   public handleContextMenuCommand(command: string, args: any) {
-    Logger.debug(`Context menu command: ${command}`, args);
-
     switch (command) {
       case "saveTabCommand":
         this._handleContextMenuSaveCommand(args);
@@ -973,7 +934,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   }
 
   public dispose() {
-    Logger.debug("⚠️ Disposing AlterminalProvider");
 
     // Dispose file watcher
     // Note: State is already saved synchronously by webview, no need for async save here

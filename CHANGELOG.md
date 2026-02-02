@@ -2,6 +2,17 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.11]
+
+### Performance Improvements
+
+- **Debounced Backup State Saves**: Backup state now saved with 500ms debounce (1000ms max wait) instead of on every update, dramatically reducing disk I/O and improving performance for users with multiple projects/terminals
+- **Removed Debug Logging**: Cleaned up all debug logs from extension host code to reduce overhead and console noise
+
+### Bug Fixes
+
+- **Fixed HTTPS Link Sandbox Error**: Added `preventDefault()` to link activation to avoid "allow-modals" sandbox errors when clicking HTTPS links
+
 ## [0.2.10]
 
 ### Improvements

@@ -50,13 +50,10 @@ export class WebviewViewSerializer {
    */
   private setupWebviewLifecycle() {
     if (!this._webviewView) {
-      Logger.debug("⚠️ No webview available for state restoration");
       return;
     }
     // Monitor visibility changes
-  Logger.debug("⚠️ Setting up WebviewLifecycle");
     this._webviewView.onDidChangeVisibility(() => {
-  Logger.debug("👁️ Webview visibility changed", this._webviewView?.visible ? "VISIBLE" : "HIDDEN");
       if (this._webviewView?.visible) {
         // Send initialization commands when webview becomes visible
         this.sendInitializationCommands();
@@ -67,7 +64,6 @@ export class WebviewViewSerializer {
 
     // Monitor disposal
     this._webviewView.onDidDispose(() => {
-  Logger.debug("🗑️ Webview disposed - saving final state");
       this.saveState();
     });
   }
@@ -85,19 +81,16 @@ export class WebviewViewSerializer {
         savedState.terminals &&
         savedState.terminals.length > 0
       ) {
-  Logger.debug("📤 (cold) restoring", savedState.terminals.length, "terminals");
         this._webviewView.webview.postMessage({
           command: "restoreState",
           state: savedState,
           cold: true,
         });
       } else {
-  Logger.debug("📤 (cold) no saved state - initializeEmpty");
         this._webviewView.webview.postMessage({ command: "initializeEmpty" });
       }
       this._didInitialViewRestore = true;
     } else {
-  Logger.debug("📤 (warm) focus refresh");
       this._webviewView.webview.postMessage({ command: "focus" });
     }
   }
@@ -107,11 +100,9 @@ export class WebviewViewSerializer {
    */
   public async saveState(): Promise<void> {
     if (!this._webviewView) {
-      Logger.debug("⚠️ No webview available for state request");
       return;
     }
 
-    Logger.debug("💾 Requesting state from webview for saving...");
     this._webviewView.webview.postMessage({ command: "requestState" });
   }
 
@@ -143,7 +134,6 @@ export class WebviewViewSerializer {
    */
   public async handleStateResponse(state: any): Promise<void> {
     if (!state) {
-      Logger.debug("⚠️ No state received from webview");
       return;
     }
 
@@ -155,20 +145,17 @@ export class WebviewViewSerializer {
    */
   public sendSavedStateToWebview(): void {
     if (!this._webviewView) {
-      Logger.debug("⚠️ No webview available for state restoration");
       return;
     }
 
     const savedState = this.loadFromExtensionStorage(this._context);
 
     if (savedState && savedState.terminals && savedState.terminals.length > 0) {
-  Logger.debug("📤 Sending saved state to webview:", savedState.terminals.length, "terminals");
       this._webviewView.webview.postMessage({
         command: "restoreState",
         state: savedState,
       });
     } else {
-  Logger.debug("📤 No saved state found, webview will use empty state");
       this._webviewView.webview.postMessage({
         command: "initializeEmpty",
       });
@@ -179,16 +166,10 @@ export class WebviewViewSerializer {
    * Serialize the current state from TabManager
    */
   public serialize(tabManager: any): PersistedState {
-  Logger.debug("💾 WebviewViewSerializer.serialize() - serializing", tabManager.terminals.size, "terminals");
     const terminals: SerializedTerminal[] = [];
 
     for (const [id, terminal] of tabManager.terminals) {
       const serializedTerminal = this.serializeTerminalContent(terminal);
-      Logger.debug(`💾 Serialized terminal ${id}:`, {
-        id: serializedTerminal.id,
-        label: serializedTerminal.label,
-        hasContent: !!serializedTerminal.buffer,
-      });
       terminals.push(serializedTerminal);
     }
 
@@ -198,7 +179,6 @@ export class WebviewViewSerializer {
       timestamp: Date.now(),
     };
 
-  Logger.debug("💾 Final serialized state:", { terminalCount: terminals.length, activeTabId: state.activeTabId });
     return state;
   }
 
@@ -214,9 +194,6 @@ export class WebviewViewSerializer {
    * - TabManager (webview context) handles UI restoration and terminal creation
    */
   public deserialize(state: PersistedState, tabManager: any): void {
-  Logger.debug("🔄 WebviewViewSerializer.deserialize() - This method is reserved for future extension-side deserialization");
-  Logger.debug("🔄 Current deserialization happens in webview context via TabManager.restoreFromState()");
-  Logger.debug("🔄 State received:", { hasState: !!state, terminalCount: state?.terminals?.length });
   }
 
   /**
@@ -247,7 +224,6 @@ export class WebviewViewSerializer {
         context.workspaceState.get<PersistedState>(
           WebviewViewSerializer.STORAGE_KEY,
         ) || null;
-  Logger.debug("🔄 Loaded workspace state:", state ? `${state.terminals.length} terminals` : "no saved state");
       return state;
     } catch (error) {
       console.error("🚫 Failed to load state from extension storage:", error);
@@ -259,7 +235,6 @@ export class WebviewViewSerializer {
    * Serialize individual terminal content and metadata
    */
   private serializeTerminalContent(terminal: any): SerializedTerminal {
-  Logger.debug("🔄 Serializing terminal content:", terminal.id);
     const terminalState = terminal.getState ? terminal.getState() : null;
     return {
       id: terminal.id,

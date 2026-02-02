@@ -47,12 +47,10 @@ export function activate(context: vscode.ExtensionContext) {
     serializer,
   );
 
-  Logger.debug("🔌 Registering WebviewViewProvider...");
   const disposable = vscode.window.registerWebviewViewProvider(
     AlterminalProvider.viewType,
     provider,
   );
-  Logger.debug("✅ WebviewViewProvider registered");
 
   context.subscriptions.push(disposable);
 
@@ -245,5 +243,4 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   Logger.info("🛑 Alterminal extension is being deactivated");
-  Logger.debug("🧹 Cleanup complete");
 }

@@ -165,15 +165,10 @@ export class PtyManager {
               // Use login shell to load PATH, then execute command interactively
               args = ["-l", "-i", "-c", launchCommand];
             }
-            Logger.debug(`Using shell to launch command: ${command}`, args);
           } else {
             // Default to shell if no command specified
             command = userShell;
             args = process.platform === "win32" ? [] : ["-l", "-i"];
-            Logger.debug(
-              `No command specified, using shell: ${command} with args:`,
-              args,
-            );
           }
           break;
 
@@ -185,10 +180,6 @@ export class PtyManager {
           } else {
             args = ["-l", "-i"];
           }
-          Logger.debug(
-            `Using shell (login+interactive): ${command} with args:`,
-            args,
-          );
           break;
 
         case "default":
@@ -200,15 +191,8 @@ export class PtyManager {
           } else {
             args = ["-l", "-i"];
           }
-          Logger.debug(`Using default shell: ${command} with args:`, args);
           break;
       }
-
-      Logger.debug(
-        `About to spawn PTY with command: "${command}", args:`,
-        args,
-        `for terminal type: ${terminalType}`,
-      );
 
       const ptyProcess = pty.spawn(command, args, {
         name: "xterm-256color",
@@ -240,7 +224,6 @@ export class PtyManager {
       });
 
       ptyProcess.onExit(() => {
-        Logger.debug(`PTY process for tab ${tabId} exited`);
         this._cleanupProcess(tabId);
       });
 
@@ -338,12 +321,6 @@ export class PtyManager {
    */
   public hasRunningProcesses(): boolean {
     const hasProcesses = this._ptyProcesses.size > 0;
-    // Debug only: process inventory
-    Logger.debug("🔧 PtyManager.hasRunningProcesses()", {
-      processCount: this._ptyProcesses.size,
-      hasProcesses,
-      processKeys: Array.from(this._ptyProcesses.keys()),
-    });
     return hasProcesses;
   }
 
@@ -363,7 +340,6 @@ export class PtyManager {
         processName: this._currentProcessNames.get(tabId) || "shell",
       });
     }
-  Logger.debug("🔧 PtyManager.getRunningProcessInfo()", info);
     return info;
   }
 
