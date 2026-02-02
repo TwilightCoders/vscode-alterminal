@@ -1,9 +1,11 @@
 <img src="https://github.com/TwilightCoders/vscode-alterminal/raw/main/media/icon.png" alt="Alterminal Icon" width="200" height="200" style="float: right; margin-left: 20px;">
 
 # Alterminal
-Advanced multi-session terminal interface for VS Code with command automation, template-based tab titles, and persistent tab state. Designed as a focused alternative UX to the built-in terminal while remaining lightweight.
+Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal. Persistent tabs, clickable file paths, command automation, and more.
 
 ## Features
+
+- **Clickable file paths and URLs**: Command/Ctrl+click any file path or URL in terminal output to open files in the editor, reveal directories in the explorer, or open links in your browser.
 
 - **Tab state persistence**: Alterminal remembers your exact tab setup - which tabs existed, their names, what was active, and the visual buffer content.
 
@@ -12,8 +14,6 @@ Advanced multi-session terminal interface for VS Code with command automation, t
 - **Saved commands**: Save `npm run dev`, `docker-compose up`, or any command you run constantly. Launch with one click instead of searching history or retyping.
 
 - **Template-based tab titles**: Automatically show what's running (e.g., "Terminal • node" or "Build • npm"). Customize the format or set custom names that stick.
-
-- **Flexible tab display**: Choose to always show tabs (even with one terminal) or auto-hide when you have a single tab.
 
 - **Tab icon customization**: Right-click any tab to set a custom icon (server, database, rocket, etc.) that persists across sessions.
 
