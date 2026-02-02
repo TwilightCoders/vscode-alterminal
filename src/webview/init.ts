@@ -97,12 +97,18 @@ function initializeAll() {
         window.linkModeState.isCtrlPressed = true;
       }
 
-      // If modifier key state changed, refresh link providers
+      // If modifier key state changed, update UI and refresh link providers
       const cmdStateChanged =
         wasCmdPressed !== window.linkModeState.isCmdPressed ||
         wasCtrlPressed !== window.linkModeState.isCtrlPressed;
-      if (cmdStateChanged && window.tabManager) {
-        window.tabManager.refreshLinkProviders();
+      if (cmdStateChanged) {
+        // Add cmd-mode class to enable pointer cursor on links
+        if (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed) {
+          document.body.classList.add('cmd-mode');
+        }
+        if (window.tabManager) {
+          window.tabManager.refreshLinkProviders();
+        }
       }
     });
 
@@ -117,12 +123,18 @@ function initializeAll() {
         window.linkModeState.isCtrlPressed = false;
       }
 
-      // If modifier key state changed, refresh link providers
+      // If modifier key state changed, update UI and refresh link providers
       const cmdStateChanged =
         wasCmdPressed !== window.linkModeState.isCmdPressed ||
         wasCtrlPressed !== window.linkModeState.isCtrlPressed;
-      if (cmdStateChanged && window.tabManager) {
-        window.tabManager.refreshLinkProviders();
+      if (cmdStateChanged) {
+        // Remove cmd-mode class to restore text cursor
+        if (!window.linkModeState.isCmdPressed && !window.linkModeState.isCtrlPressed) {
+          document.body.classList.remove('cmd-mode');
+        }
+        if (window.tabManager) {
+          window.tabManager.refreshLinkProviders();
+        }
       }
     });
 

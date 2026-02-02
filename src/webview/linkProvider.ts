@@ -210,7 +210,13 @@ export class FilePathLinkProvider implements ILinkProvider {
         },
         text: matchText,
         activate: (event: MouseEvent, text: string) => {
-          this._handleLinkClick(event, text);
+          Logger.debug("🔗 Link activate called:", { text, metaKey: event.metaKey, ctrlKey: event.ctrlKey });
+          // xterm.js should already handle modifier key checking, but double-check
+          if (event.metaKey || event.ctrlKey) {
+            this._handleLinkClick(event, text);
+          } else {
+            Logger.debug("🔗 Link click ignored - no modifier key");
+          }
         },
         hover: (event: MouseEvent, text: string) => {
           // Optional hover handling

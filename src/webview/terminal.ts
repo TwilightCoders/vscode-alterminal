@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
-import { FilePathLinkProvider } from "./linkProvider.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 
@@ -65,7 +64,7 @@ export class TerminalInstance {
 
     // Providers
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
-    this.linkProvider = new FilePathLinkProvider(this, vscode, id);
+    this.linkProviderDisposable = null;
 
     // Simplified history flags
     this._simpleHistory = true;
@@ -92,6 +91,7 @@ export class TerminalInstance {
   }
 
   _createTerminal() {
+    console.log(`🔧 Creating terminal ${this.id}`);
     try {
       let XTerminal = null;
       if (window.Terminal && typeof window.Terminal === "function")
@@ -170,7 +170,7 @@ export class TerminalInstance {
         }
       });
       this.lifecycleManager.initialize();
-      this.linkProvider.initialize();
+      this.setupFilePathLinks();
       if (this.terminal.unicode) this.terminal.unicode.activeVersion = "11";
     } catch (e) {
       Logger.error("Terminal init failed", e);
@@ -178,17 +178,89 @@ export class TerminalInstance {
   }
 
   /**
-   * Dispose of existing file path link providers (delegated to linkProvider)
+   * Dispose of existing file path link providers
    */
   disposeFilePathLinks() {
-    this.linkProvider.dispose();
+    if (this.linkProviderDisposable) {
+      this.linkProviderDisposable.dispose();
+      this.linkProviderDisposable = null;
+    }
   }
 
   /**
-   * Set up file path link detection (delegated to linkProvider)
+   * Set up file path link detection using native xterm.js API
    */
   setupFilePathLinks() {
-    this.linkProvider.setupFilePathLinks();
+    console.log("🔗 setupFilePathLinks() called");
+
+    // Use native xterm.js link provider API for better compatibility
+    const provider = {
+      provideLinks: (y, callback) => {
+        try {
+          // y parameter is 1-based, convert to 0-based buffer line like WebLinksAddon does
+          const bufferLine = y - 1;
+          const line = this.terminal.buffer.active.getLine(bufferLine);
+          if (!line) {
+            callback(undefined);
+            return;
+          }
+
+          const lineText = line.translateToString(true);
+          const links = [];
+
+          // Regex for file paths
+          const regex = /(?:~\/|\.\.?\/|\/)[^\s"'`]+|[a-zA-Z]:[\\\/][^\s"'`]+|\b\w+\.\w{2,}\b/g;
+          let match;
+
+          while ((match = regex.exec(lineText)) !== null) {
+            const matchText = match[0];
+            const startX = match.index;
+            const endX = match.index + matchText.length;
+
+            // Use WebLinksAddon's exact coordinate format:
+            // start: x+1, y+1 (1-based)
+            // end: x (0-based, exclusive), y+1 (1-based)
+            const range = {
+              start: {
+                x: startX + 1,
+                y: y  // use original y parameter (already 1-based)
+              },
+              end: {
+                x: endX,
+                y: y
+              }
+            };
+
+            console.log(`🔗 Link: "${matchText}" at range`, range);
+
+            links.push({
+              range,
+              text: matchText,
+              activate: (event, text) => {
+                console.log("🔗 Link activated:", text);
+                this.vscode.postMessage({
+                  command: "openFile",
+                  filePath: text,
+                  terminalId: this.id,
+                });
+              }
+            });
+          }
+
+          callback(links.length ? links : undefined);
+        } catch (error) {
+          console.error("🔗 Error in provideLinks:", error);
+          callback(undefined);
+        }
+      }
+    };
+
+    try {
+      this.linkProviderDisposable = this.terminal.registerLinkProvider(provider);
+      console.log("🔗 Native link provider registered successfully");
+    } catch (error) {
+      console.error("🔗 Failed to register link provider:", error);
+    }
   }
 
   /**
@@ -831,7 +903,7 @@ export class TerminalInstance {
 
       // Dispose providers
       this.lifecycleManager.dispose();
-      this.linkProvider.dispose();
+      this.disposeFilePathLinks();
 
       // Dispose event handlers
       this.disposeEventHandlers();
