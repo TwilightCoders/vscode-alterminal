@@ -2,7 +2,7 @@ import * as assert from 'assert';
 
 describe('Link Detection Regex', () => {
   // This is the regex pattern used in terminal.ts for link detection
-  const LINK_REGEX = /https?:\/\/[^\s"'`()[\]{}]+|[^\s"'`()[\]{}]*\/[^\s"'`()[\]{}]+\.\w{1,5}|(?:~\/|\.\.?\/|\/)[^\s"'`()[\]{}]+/g;
+  const LINK_REGEX = /https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]+/g;
 
   function findLinks(text: string): string[] {
     const regex = new RegExp(LINK_REGEX);
@@ -135,6 +135,16 @@ describe('Link Detection Regex', () => {
     it('should handle pytest output', () => {
       const links = findLinks('tests/test_app.py::test_feature PASSED');
       assert.deepStrictEqual(links, ['tests/test_app.py']);
+    });
+
+    it('should handle git branch references', () => {
+      const links = findLinks("ahead of 'origin/master' by 7 commits");
+      assert.deepStrictEqual(links, ['origin/master']);
+    });
+
+    it('should handle git remote references', () => {
+      const links = findLinks('upstream/main');
+      assert.deepStrictEqual(links, ['upstream/main']);
     });
   });
 });

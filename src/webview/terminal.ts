@@ -199,10 +199,12 @@ export class TerminalInstance {
           const lineText = line.translateToString(true);
           const links = [];
 
-          // Regex for file paths, directories, and URLs
-          // Match: HTTP(S) URLs OR files with extensions OR paths starting with ~/, ./, ../, or /
-          // Exclude common delimiters: parentheses, brackets, quotes, etc.
-          const regex = /https?:\/\/[^\s"'`()[\]{}]+|[^\s"'`()[\]{}]*\/[^\s"'`()[\]{}]+\.\w{1,5}|(?:~\/|\.\.?\/|\/)[^\s"'`()[\]{}]+/g;
+          // Regex for file paths, directories, URLs, and git references
+          // Matches:
+          // 1. HTTP(S) URLs
+          // 2. Absolute/relative paths with special prefixes (~/, ./, ../, /)
+          // 3. Path-like patterns (e.g., origin/master, src/file.ts, word/word)
+          const regex = /https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]+/g;
           let match;
 
           while ((match = regex.exec(lineText)) !== null) {
