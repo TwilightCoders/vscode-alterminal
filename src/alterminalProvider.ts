@@ -113,8 +113,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     // Monitor webview visibility changes and lifecycle
     this.setupWebviewLifecycle(webviewView);
 
-    // Initialize workspace file cache
-    this.initializeWorkspaceFileCache();
+    // DISABLED: Workspace file cache causes crashes on large workspaces (e.g., home directory)
+    // The file cache was used for link validation in old registerLinkMatcher fallback.
+    // Modern registerLinkProvider doesn't need pre-validation, so this is no longer necessary.
+    // this.initializeWorkspaceFileCache();
   }
 
   /**
@@ -326,11 +328,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             );
           }
 
-          // Reinitialize file system watcher
-          this._setupFileSystemWatcher();
-
-          // Send fresh workspace file cache
-          this._sendWorkspaceFileCache();
+          // DISABLED: File system watcher and workspace file cache
+          // Causes crashes on large workspaces - not needed with modern link provider
+          // this._setupFileSystemWatcher();
+          // this._sendWorkspaceFileCache();
 
           progress.report({ increment: 100, message: "Complete!" });
 
