@@ -58,10 +58,9 @@ export class TabManager {
     this.setupWindowEventHandlers();
     this.autoInitialize();
 
-    // Signal immediately that webview is ready and request file cache
+    // Signal immediately that webview is ready
     queueMicrotask(() => {
       this.vscode.postMessage({ command: "webviewReady" });
-      this.vscode.postMessage({ command: "requestFileCache" });
     });
 
     // Performance samples storage
@@ -1029,21 +1028,6 @@ export class TabManager {
       // For default terminals (no launch command), handle content preservation and trimming
       if (!terminal.launchCommand) {
         let serialized = terminal.serialize();
-        // Logger.warn(`Saving terminal: `, terminal);
-        // if (serialized == null) {
-        //     const preserved = priorContentById.get(id);
-        //     if (preserved) {
-        //         Logger.debug(`Serialization suppressed for terminal ${id}; preserving prior snapshot (${preserved.length} chars)`);
-        //         serialized = preserved;
-        //     } else {
-        //         serialized = '';
-        //     }
-        // }
-        // // Trim large non-shell buffers to last 40 lines to reduce stale full-screen TUI state
-        // if (terminal.terminalType && terminal.terminalType !== 'shell' && serialized) {
-        //     const lines = serialized.split('\n');
-        //     if (lines.length > 40) serialized = lines.slice(-40).join('\n');
-        // }
         // Fallback preservation: if serialization suppressed / empty but we had prior content, keep it
         if (
           (serialized == null || serialized.length === 0) &&
@@ -1067,13 +1051,6 @@ export class TabManager {
         terminalData.icon = titleManager.icon;
       }
 
-      // Logger.warn(`Saving terminal ${id}:`, {
-      //     id: terminalData.id,
-      //     label: terminalData.label,
-      //     command: terminalData.command,
-      //     buffer: terminalData.buffer?.substring(0, 100) + '...',
-      //     bufferLength: terminalData.buffer?.length || 0
-      // });
       terminals.push(terminalData);
     }
 

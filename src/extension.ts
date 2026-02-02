@@ -148,9 +148,6 @@ export function activate(context: vscode.ExtensionContext) {
         viewColumn: vscode.ViewColumn.Active,
       });
     }),
-    vscode.commands.registerCommand("alterminal.testLinks", () => {
-      provider.testLinks();
-    }),
     vscode.commands.registerCommand("alterminal.setDebugFilter", async () => {
       const filterOptions = [
         {

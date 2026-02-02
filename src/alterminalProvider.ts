@@ -6,7 +6,6 @@ import { PtyManager } from "./terminal/ptyManager";
 import { TemplateUtils } from "./utils/templateUtils";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
-import { Debouncer } from "./utils/debouncer";
 import { TabTitleProvider } from "./providers/tabTitleProvider";
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
@@ -15,8 +14,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _ptyManager: PtyManager;
   private _context: vscode.ExtensionContext;
-  private _fileWatcher?: vscode.FileSystemWatcher;
-  private _workspaceFiles = new Set<string>();
   private _isColdBoot = true; // determined once at construction/activation
   private _commandManager: CommandManager;
   private _restoreTriggered = false; // guard to avoid missing restore due to race
@@ -197,9 +194,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       },
       switchTab: () => {}, // No-op - handled in webview
       playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
-      testLinks: () => this._handleTestLinks(),
-      requestFileCache: () => this._sendWorkspaceFileCache(),
-      checkFileExists: (msg: any) => this._handleCheckFileExists(msg.filePath),
       setDebugFilter: (msg: any) => {}, // Handled in webview
   debugLog: (msg: any) => console.log(msg.message), // Log to VS Code debug console
       setDeveloperMode: (msg: any) => {}, // Handled in webview
@@ -300,21 +294,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           // Kill all PTY processes
           this._ptyManager.dispose();
 
-          progress.report({ increment: 25, message: "Clearing caches..." });
-
-          // Clear workspace file cache
-          this._workspaceFiles.clear();
-
-          // Clear extension state (optional - might want to preserve some settings)
-          // await this._context.workspaceState.clear();
-
           progress.report({ increment: 50, message: "Disposing webview..." });
-
-          // Dispose file watcher
-          if (this._fileWatcher) {
-            this._fileWatcher.dispose();
-            this._fileWatcher = undefined;
-          }
 
           progress.report({ increment: 75, message: "Reinitializing..." });
 
@@ -371,10 +351,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         launchCommand: cmd,
       });
     }
-  }
-
-  public testLinks() {
-    this._handleTestLinks();
   }
 
   public async openTerminal() {
@@ -522,41 +498,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _handleTestLinks() {
-    if (!this._view) return;
-
-    // Send test links to the active terminal for easy testing
-    const testLinks = [
-      "\r\n\x1b[36m=== Testing WebLinksAddon ===\x1b[0m\r\n",
-      "\r\nFile paths to test:\r\n",
-  // Example absolute path (adjusted to current project naming)
-  "/Users/volte/Workspace/TwilightCoders/alterminal/package.json\r\n",
-      "./src/extension.ts\r\n",
-      "../README.md\r\n",
-      "~/Desktop\r\n",
-      "\r\nURLs to test:\r\n",
-      "https://github.com/microsoft/vscode\r\n",
-      "http://example.com\r\n",
-      "https://code.visualstudio.com\r\n",
-      "\r\nYou can also test by typing these commands:\r\n",
-      'echo "Check out https://github.com"\r\n',
-      "ls -la ./src/extension.ts\r\n",
-      "cat ~/Desktop\r\n",
-      "\r\nClick on any of the above links to test the WebLinksAddon!\r\n",
-      "\x1b[36m=========================\x1b[0m\r\n\r\n",
-    ];
-
-    // Send each test link with a small delay
-    testLinks.forEach((link, index) => {
-      setTimeout(() => {
-        this._view?.webview.postMessage({
-          command: "data",
-          data: link,
-        });
-      }, index * 100);
-    });
-  }
-
   private async _handleBackupStateUpdate(state: any) {
     try {
       // Save backup state to extension workspace (non-critical)
@@ -624,84 +565,15 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Initialize workspace file cache with file system watcher
-   */
-  private async initializeWorkspaceFileCache() {
-    try {
-      // Load cached files from workspace state
-      const cachedFiles = this._context.workspaceState.get<string[]>(
-        "alterminal.workspaceFiles",
-        [],
-      );
-      this._workspaceFiles = new Set(cachedFiles);
 
-      // Send initial cache to webview
-      this._sendWorkspaceFileCache();
+  // Removed legacy _debounce helper in favor of shared Debouncer
 
-      // Update cache with current workspace files
-      await this._updateWorkspaceFileCache();
-
-      // Set up file system watcher
-      this._setupFileSystemWatcher();
-    } catch (error) {
-      Logger.error("Failed to initialize workspace file cache:", error);
-    }
-  }
-
-  /**
-   * Update workspace file cache by scanning filesystem
-   */
-  private async _updateWorkspaceFileCache() {
-    Logger.debug("🔄 Updating workspace file cache");
-
-    try {
-      const files = await vscode.workspace.findFiles(
-        "**/*",
-        "{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**}",
-      );
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        Logger.warn("No workspace folder found");
-        return;
-      }
-
-      // Convert to relative paths for better matching with terminal output
-      const relativePaths = files.map((f) => {
-        const relativePath = vscode.workspace.asRelativePath(f);
-        return relativePath;
+  public setDebugFilter(filter: string[] | null) {
+    if (this._view) {
+      this._view.webview.postMessage({
+        command: "setDebugFilter",
+        filter,
       });
-
-      // Also add common relative path variations
-      const allPaths = new Set(relativePaths);
-      relativePaths.forEach((path) => {
-        // Add ./ prefix version for relative paths that don't start with ../
-        if (!path.startsWith("../")) {
-          allPaths.add("./" + path);
-        }
-      });
-
-        // Fallback: if webviewReady is missed for any reason, trigger restore after a short delay
-        setTimeout(() => {
-          if (!this._restoreTriggered) {
-            Logger.debug("⏱️ Fallback restoreWebviewState triggered (missed webviewReady)");
-            this.restoreWebviewState();
-          }
-        }, 500);
-      const filePathsArray = Array.from(allPaths);
-      this._workspaceFiles = new Set(filePathsArray);
-
-      // Store in workspace state
-      await this._context.workspaceState.update(
-        "alterminal.workspaceFiles",
-        filePathsArray,
-      );
-
-      // Send to webview
-      this._sendWorkspaceFileCache();
-    } catch (error) {
-      Logger.error("Failed to update workspace file cache:", error);
     }
   }
 
@@ -719,100 +591,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         enabled: isDeveloper,
       });
       Logger.debug("Developer mode", isDeveloper ? "enabled" : "disabled");
-    }
-  }
-
-  /**
-   * Set up file system watcher for cache updates
-   */
-  private _setupFileSystemWatcher() {
-    // Dispose existing watcher
-    if (this._fileWatcher) {
-      this._fileWatcher.dispose();
-    }
-
-    // Create new watcher
-    this._fileWatcher = vscode.workspace.createFileSystemWatcher(
-      "**/*",
-      false, // Don't ignore creates
-      true, // Ignore changes (we only care about file existence)
-      false, // Don't ignore deletes
-    );
-
-    // Handle file creation
-    this._fileWatcher.onDidCreate((uri) => {
-      const relativePath = vscode.workspace.asRelativePath(uri);
-      this._workspaceFiles.add(relativePath);
-      // Also add ./ prefix version if it doesn't start with ../
-      if (!relativePath.startsWith("../")) {
-        this._workspaceFiles.add("./" + relativePath);
-      }
-      this._updateWorkspaceStateCache();
-    });
-
-    // Handle file deletion
-    this._fileWatcher.onDidDelete((uri) => {
-      const relativePath = vscode.workspace.asRelativePath(uri);
-      this._workspaceFiles.delete(relativePath);
-      this._workspaceFiles.delete("./" + relativePath);
-      this._updateWorkspaceStateCache();
-    });
-
-    Logger.debug("👁️ File system watcher set up");
-  }
-
-  /**
-   * Update workspace state with current file cache (debounced via shared Debouncer)
-   */
-  private _updateWorkspaceStateCache = () => {
-    Debouncer.debounce("workspace-files", 500, () => {
-      const filePaths = Array.from(this._workspaceFiles);
-      this._context.workspaceState.update(
-        "alterminal.workspaceFiles",
-        filePaths,
-      );
-      this._sendWorkspaceFileCache();
-    });
-  };
-
-  /**
-   * Send workspace file cache to webview
-   */
-  private _sendWorkspaceFileCache() {
-    if (!this._view) return;
-    const filePaths = Array.from(this._workspaceFiles);
-    this._view.webview.postMessage({
-      command: "updateFileCache",
-      files: filePaths,
-    });
-    Logger.debug(`📤 Sent ${filePaths.length} files to webview cache`);
-  }
-
-  /**
-   * Handle individual file existence check
-   */
-  private _handleCheckFileExists(filePath: string) {
-    const exists = this._workspaceFiles.has(filePath);
-
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "fileExistsResponse",
-        filePath: filePath,
-        exists: exists,
-      });
-    }
-
-    Logger.debug(`🔍 File existence check: ${filePath} -> ${exists}`);
-  }
-
-  // Removed legacy _debounce helper in favor of shared Debouncer
-
-  public setDebugFilter(filter: string[] | null) {
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "setDebugFilter",
-        filter,
-      });
     }
   }
 
@@ -1198,10 +976,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     Logger.debug("⚠️ Disposing AlterminalProvider");
 
     // Dispose file watcher
-    if (this._fileWatcher) {
-      this._fileWatcher.dispose();
-    }
-
     // Note: State is already saved synchronously by webview, no need for async save here
     this._ptyManager.dispose();
   }

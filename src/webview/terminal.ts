@@ -90,7 +90,6 @@ export class TerminalInstance {
   }
 
   _createTerminal() {
-    console.log(`🔧 Creating terminal ${this.id}`);
     try {
       let XTerminal = null;
       if (window.Terminal && typeof window.Terminal === "function")
