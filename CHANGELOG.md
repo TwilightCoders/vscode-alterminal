@@ -2,6 +2,14 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.10]
+
+### Improvements
+
+- **Enhanced Link Detection**: Now matches git references (e.g., `origin/master`, `upstream/main`) similar to VS Code built-in terminal
+- **More Comprehensive Pattern Matching**: Improved regex to catch more path-like patterns while maintaining accuracy
+- **Updated Tests**: Added tests for git branch/remote references (24 tests total, all passing)
+
 ## [0.2.9]
 
 ### Bug Fixes
