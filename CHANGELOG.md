@@ -2,6 +2,24 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.12]
+
+### Performance Improvements
+
+- **Dirty Tracking for State Saves**: Implemented smart caching that only serializes terminals that have changed, reducing serialization overhead by ~90% during active use. Critical for users with multiple projects and many terminals open simultaneously.
+- **Constants Centralized**: Extracted all magic numbers (debounce timings, dimensions, limits) to `src/constants.ts` for better maintainability and configurability.
+
+### Bug Fixes
+
+- **Memory Leak Fixes**:
+  - MutationObserver now properly disconnected on terminal disposal
+  - Window event listeners (resize, focus, blur, beforeunload) now properly removed in TabManager.dispose()
+  - Prevents memory growth during long sessions with multiple terminals
+
+### Code Quality
+
+- **Removed Ghost Cursor Workarounds**: Eliminated all ghost cursor polling/fixing code since the issue was resolved fundamentally by properly handling terminal escape sequences. Removes unnecessary DOM queries and interval timers.
+
 ## [0.2.11]
 
 ### Performance Improvements

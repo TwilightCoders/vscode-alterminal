@@ -36,6 +36,7 @@
 import * as vscode from "vscode";
 import * as pty from "@lydell/node-pty";
 import { Logger } from "../utils/logger";
+import { TERMINAL_DEFAULTS } from "../constants";
 
 export class PtyManager {
   private _ptyProcesses = new Map<number, pty.IPty>();
@@ -195,9 +196,9 @@ export class PtyManager {
       }
 
       const ptyProcess = pty.spawn(command, args, {
-        name: "xterm-256color",
-        cols: cols || 80,
-        rows: rows || 30,
+        name: TERMINAL_DEFAULTS.TERM_TYPE,
+        cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
+        rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
         cwd:
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
           process.env.HOME ||
@@ -205,8 +206,8 @@ export class PtyManager {
           process.cwd(),
         env: {
           ...process.env,
-          TERM: "xterm-256color",
-          COLORTERM: "truecolor",
+          TERM: TERMINAL_DEFAULTS.TERM_TYPE,
+          COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
           TERM_PROGRAM: "vscode",
           TERM_PROGRAM_VERSION: vscode.version,
           VSCODE_PID: process.pid.toString(),

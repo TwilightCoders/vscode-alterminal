@@ -3,6 +3,7 @@ import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
+import { TERMINAL_DEFAULTS, DEBOUNCE_TIMINGS } from "../constants.js";
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
@@ -49,6 +50,10 @@ export class TerminalInstance {
     // Track if user has meaningfully interacted with this terminal session
     this.hasUserInteraction = false;
 
+    // Dirty tracking for optimized state saves
+    this._isDirty = true; // Start dirty so first save captures initial state
+    this._cachedSerializedState = null;
+
     // Store clean base label (without process names) for proper restoration
     this.baseLabel = label;
 
@@ -64,6 +69,7 @@ export class TerminalInstance {
     // Providers
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
     this.linkProviderDisposable = null;
+    this._mutationObserver = null;
 
     // Simplified history flags
     this._simpleHistory = true;
@@ -112,18 +118,18 @@ export class TerminalInstance {
         reflowCursorLine: true,
         fontSize:
           parseInt(
-            this.getThemeColor("--vscode-editor-font-size", "14").replace(
+            this.getThemeColor("--vscode-editor-font-size", String(TERMINAL_DEFAULTS.FONT_SIZE)).replace(
               "px",
               "",
             ),
-          ) || 14,
+          ) || TERMINAL_DEFAULTS.FONT_SIZE,
         fontFamily: this.getThemeColor(
           "--vscode-editor-font-family",
           "Consolas, Monaco, Menlo, monospace",
         ),
         lineHeight: 1.0,
         theme: this.terminalTheme,
-        scrollback: window.scrollbackLines || 1000,
+        scrollback: window.scrollbackLines || TERMINAL_DEFAULTS.SCROLLBACK,
         sendFocus: true,
         allowTransparency: false,
         experimentalCharAtlas: "dynamic",
@@ -319,10 +325,11 @@ export class TerminalInstance {
     // Set up buffer change detection using onData event
     if (typeof this.terminal.onData === "function") {
       this.dataDisposable = this.terminal.onData(() => {
+        this._isDirty = true; // Mark dirty on user input
         // Debounce buffer saves to avoid excessive saving during rapid terminal output
         Debouncer.debounce(
           `term-save-${this.id}`,
-          750,
+          DEBOUNCE_TIMINGS.TERMINAL_DATA,
           () => {
             if (window.tabManager?.scheduleSaveState) {
               try {
@@ -334,46 +341,11 @@ export class TerminalInstance {
               } catch (_) {}
             }
           },
-          { maxWait: 5000 },
+          { maxWait: DEBOUNCE_TIMINGS.TERMINAL_DATA_MAX_WAIT },
         );
       });
     }
 
-    // Add ghost cursor cleanup - remove duplicate cursor elements
-    this.setupGhostCursorCleanup();
-  }
-
-  /**
-   * Set up automatic ghost cursor cleanup
-   */
-  setupGhostCursorCleanup() {
-    if (!this.terminalContainer) return;
-
-    // Clean up ghost cursors periodically
-    const cleanupGhostCursors = () => {
-      if (!this.terminalContainer) return;
-
-      const cursorElements = this.terminalContainer.querySelectorAll('.xterm-cursor-layer .xterm-cursor');
-
-      // If we have more than one cursor, remove the extras
-      if (cursorElements.length > 1) {
-        Logger.debug(`👻 Found ${cursorElements.length} cursors, removing ghosts`);
-        // Keep the last one (most recent), remove the rest
-        for (let i = 0; i < cursorElements.length - 1; i++) {
-          cursorElements[i].remove();
-        }
-      }
-    };
-
-    // Run cleanup on render events
-    if (typeof this.terminal.onRender === 'function') {
-      this.renderDisposable = this.terminal.onRender(() => {
-        cleanupGhostCursors();
-      });
-    }
-
-    // Also run periodic cleanup as fallback
-    this.ghostCursorInterval = setInterval(cleanupGhostCursors, 100);
   }
 
   /**
@@ -454,9 +426,10 @@ export class TerminalInstance {
       // Write data directly to terminal - xterm.js 6.0.0 handles all sequences natively
       this.terminal.write(data);
       this._lastWriteTs = Date.now();
+      this._isDirty = true; // Mark dirty on write
       Debouncer.debounce(
         `term-save-${this.id}`,
-        600,
+        DEBOUNCE_TIMINGS.TERMINAL_WRITE,
         () => {
           try {
             if (window.tabManager?.scheduleSaveState)
@@ -465,7 +438,7 @@ export class TerminalInstance {
               window.tabManager.saveToLocalState();
           } catch (_) {}
         },
-        { maxWait: 4000 },
+        { maxWait: DEBOUNCE_TIMINGS.TERMINAL_WRITE_MAX_WAIT },
       );
     } catch (error) {
       Logger.error(`Failed to write to terminal ${this.id}:`, error);
@@ -590,47 +563,6 @@ export class TerminalInstance {
   }
 
   /**
-   * Reset cursor and basic terminal modes
-   */
-  resetCursor() {
-    if (!this.terminal) return;
-    try {
-      const cursorSequence = 
-        '\x1b[?25l' +         // Hide cursor first to clear ghost cursors
-        '\x1b[?25h' +         // Show cursor
-        '\x1b[?12l' +         // Stop blinking cursor
-        '\x1b[?12h' +         // Start blinking cursor  
-        '\x1b[?7h' +          // Enable line wrapping
-        '\x1b8' +             // Restore cursor position (if saved)
-        '\x1b[u';             // Restore cursor position (alternative)
-      this.terminal.write(cursorSequence);
-      Logger.info(`👁️ Terminal ${this.id} enhanced cursor reset (ghost cursor fix)`);
-    } catch (error) {
-      Logger.error(`Failed to reset cursor for terminal ${this.id}:`, error);
-    }
-  }
-
-  /**
-   * Specific fix for ghost cursor issues
-   */
-  fixGhostCursor() {
-    if (!this.terminal) return;
-    try {
-      // Aggressive cursor reset sequence specifically for ghost cursors
-      const ghostCursorFix = 
-        '\x1b[?25l' +         // Hide cursor
-        '\x1b[2J' +           // Clear screen to remove ghost cursors
-        '\x1b[H' +            // Home cursor
-        '\x1b[?25h' +         // Show cursor
-        '\x1b[0 q';           // Reset cursor style to default
-      this.terminal.write(ghostCursorFix);
-      Logger.info(`👻 Terminal ${this.id} ghost cursor fix applied`);
-    } catch (error) {
-      Logger.error(`Failed to fix ghost cursor for terminal ${this.id}:`, error);
-    }
-  }
-
-  /**
    * Reset mouse tracking modes
    */
   resetMouse() {
@@ -719,15 +651,28 @@ export class TerminalInstance {
 
   /**
    * Serialize terminal state for persistence
+   * Uses cached state if terminal hasn't changed (dirty tracking optimization)
    */
   serialize() {
     if (!this.serializeAddon) return null;
+
+    // Return cached state if not dirty (performance optimization)
+    if (!this._isDirty && this._cachedSerializedState !== null) {
+      return this._cachedSerializedState;
+    }
+
     try {
-      return this.serializeAddon.serialize({
-        scrollback: window.scrollbackLines || 1000,
+      const serialized = this.serializeAddon.serialize({
+        scrollback: window.scrollbackLines || TERMINAL_DEFAULTS.SCROLLBACK,
         excludeAltBuffer: true,
         excludeModes: false,
       });
+
+      // Cache the serialized state and mark as clean
+      this._cachedSerializedState = serialized;
+      this._isDirty = false;
+
+      return serialized;
     } catch (e) {
       Logger.error("Serialize failed:", e);
       return null;
@@ -816,12 +761,6 @@ export class TerminalInstance {
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
     this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
-
-    // Dispose ghost cursor cleanup interval
-    if (this.ghostCursorInterval) {
-      clearInterval(this.ghostCursorInterval);
-      this.ghostCursorInterval = null;
-    }
 
     // Dispose link providers
     if (this.linkProviders) {
@@ -918,6 +857,12 @@ export class TerminalInstance {
 
       // Dispose event handlers
       this.disposeEventHandlers();
+
+      // Disconnect mutation observer
+      if (this._mutationObserver) {
+        this._mutationObserver.disconnect();
+        this._mutationObserver = null;
+      }
 
       // No per-instance debounce timers to clear (shared Debouncer manages its own entries)
 

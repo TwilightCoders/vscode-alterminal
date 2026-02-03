@@ -8,6 +8,7 @@ import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
 import { TabTitleProvider } from "./providers/tabTitleProvider";
 import { Debouncer } from "./utils/debouncer";
+import { DEBOUNCE_TIMINGS } from "./constants";
 
 export class AlterminalProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "alterminalView";
@@ -480,7 +481,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     // Debounce backup state saves to avoid excessive writes
     Debouncer.debounce(
       "backup-state-save",
-      500,
+      DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE,
       async () => {
         try {
           // Save backup state to extension workspace (non-critical)
@@ -495,7 +496,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           Logger.warn("⚠️ Failed to save backup state (non-critical):", error);
         }
       },
-      { maxWait: 1000 },
+      { maxWait: DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE_MAX_WAIT },
     );
   }
 

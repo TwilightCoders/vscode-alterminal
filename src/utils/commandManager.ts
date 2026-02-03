@@ -20,6 +20,7 @@
  */
 
 import * as vscode from "vscode";
+import { LIMITS } from "../constants";
 
 interface SavedCommand {
   command: string;
@@ -106,15 +107,15 @@ export class CommandManager {
         lastUsed: new Date().toISOString(),
       });
     }
-    // Limit: keep newest additions if overflow (>25 for flexibility)
-    if (this.savedCommands.length > 25) {
+    // Limit: keep newest additions if overflow
+    if (this.savedCommands.length > LIMITS.MAX_SAVED_COMMANDS) {
       // Remove lowest count / oldest lastUsed
       this.savedCommands.sort(
         (a, b) =>
           a.count - b.count ||
           new Date(a.lastUsed).getTime() - new Date(b.lastUsed).getTime(),
       );
-      this.savedCommands = this.savedCommands.slice(-25);
+      this.savedCommands = this.savedCommands.slice(-LIMITS.MAX_SAVED_COMMANDS);
     }
     await this.saveSavedCommands();
     return true;

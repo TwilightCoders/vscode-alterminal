@@ -51,6 +51,12 @@ export class TabManager {
     // Configuration settings
     this._alwaysShowTabs = false;
 
+    // Event handler references for cleanup
+    this._windowResizeHandler = null;
+    this._windowFocusHandler = null;
+    this._windowBeforeUnloadHandler = null;
+    this._windowBlurHandler = null;
+
     // Initialize everything
     this.initializeEventListeners();
     this.setupResponsiveLayout();
@@ -426,26 +432,28 @@ export class TabManager {
    */
   setupWindowEventHandlers() {
     // Window resize handling
-    window.addEventListener("resize", () => {
+    this._windowResizeHandler = () => {
       const activeTerminal = this.getActiveTerminal();
       if (activeTerminal) {
         activeTerminal.fit();
       }
-    });
+    };
+    window.addEventListener("resize", this._windowResizeHandler);
 
     // Focus handling
-    window.addEventListener("focus", () => {
+    this._windowFocusHandler = () => {
       requestAnimationFrame(() => {
         const activeTerminal = this.getActiveTerminal();
         if (activeTerminal) activeTerminal.fit();
       });
-    });
+    };
+    window.addEventListener("focus", this._windowFocusHandler);
 
     // Setup keyboard shortcut passthrough
     this.setupKeyboardPassthrough();
 
     // Flush any pending debounced saves just before the webview unloads (window/tab close, reload)
-    window.addEventListener("beforeunload", () => {
+    this._windowBeforeUnloadHandler = () => {
       try {
         // Force each terminal to produce a fresh snapshot (ignores debounce timers)
         for (const [, term] of this.terminals) {
@@ -458,7 +466,8 @@ export class TabManager {
       } catch (e) {
         console.warn("beforeunload save failed", e);
       }
-    });
+    };
+    window.addEventListener("beforeunload", this._windowBeforeUnloadHandler);
   }
 
   /**
@@ -888,6 +897,7 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (terminal) {
       terminal.label = label;
+      terminal._isDirty = true; // Mark dirty when label changes
 
       const tabElement = document.querySelector(
         `[data-tab-id="${tabId}"] .tab-label`,
@@ -954,6 +964,7 @@ export class TabManager {
 
     // Update terminal's icon property for persistence
     terminal.icon = iconClass;
+    terminal._isDirty = true; // Mark dirty when icon changes
 
     // Update UI via TabTitleManager
     titleManager.setIcon(icon);
@@ -1458,9 +1469,10 @@ export class TabManager {
       }
     });
     // Also handle focus loss (e.g., CMD+Tab away)
-    window.addEventListener("blur", () => {
+    this._windowBlurHandler = () => {
       container?.classList.remove("cmd-mode");
-    });
+    };
+    window.addEventListener("blur", this._windowBlurHandler);
 
     // New tab functionality is now handled by title bar button
     // No DOM-based new tab button needed
@@ -1967,6 +1979,7 @@ export class TabManager {
     // If no process name (back to shell), reset the label to just the base
     if (!processName || processName.trim() === "") {
       terminal.label = terminal.baseLabel;
+      terminal._isDirty = true; // Mark dirty when label resets
       this.updateTabLabel(tabId, terminal.baseLabel);
       return; // Skip template formatting for empty process
     }
@@ -2036,6 +2049,25 @@ export class TabManager {
    * Dispose of all terminals and cleanup
    */
   dispose() {
+    // Remove window event listeners to prevent memory leaks
+    if (this._windowResizeHandler) {
+      window.removeEventListener("resize", this._windowResizeHandler);
+      this._windowResizeHandler = null;
+    }
+    if (this._windowFocusHandler) {
+      window.removeEventListener("focus", this._windowFocusHandler);
+      this._windowFocusHandler = null;
+    }
+    if (this._windowBeforeUnloadHandler) {
+      window.removeEventListener("beforeunload", this._windowBeforeUnloadHandler);
+      this._windowBeforeUnloadHandler = null;
+    }
+    if (this._windowBlurHandler) {
+      window.removeEventListener("blur", this._windowBlurHandler);
+      this._windowBlurHandler = null;
+    }
+
+    // Dispose all terminals
     for (const [id, terminal] of this.terminals) {
       terminal.dispose();
     }
