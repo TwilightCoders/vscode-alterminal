@@ -2,6 +2,13 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.14]
+
+### Bug Fixes
+
+- **Fixed Link Click Sandbox Error**: Override `window.confirm()` in webview to prevent sandbox errors when xterm.js attempts to show confirmation dialogs. Links now activate cleanly with Cmd/Ctrl+Click without errors.
+- **Fixed State Restoration on Panel Reopen**: Terminal state now properly restores when closing and reopening the Alterminal panel. Added `resetRestoreTrigger()` to clear restoration guard on panel visibility changes.
+
 ## [0.2.13]
 
 ### Architecture
