@@ -136,7 +136,9 @@ export class WebViewLifecycleManager {
   private setupVisibilityHandler(webviewView: vscode.WebviewView): void {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
-        // Just refresh active state, restoration happens via webviewReady event
+        // Reset restore trigger so state can be restored when webview becomes visible again
+        this.stateManager.resetRestoreTrigger();
+        // Refresh active state
         webviewView.webview.postMessage({ command: "refreshActive" });
       }
     });

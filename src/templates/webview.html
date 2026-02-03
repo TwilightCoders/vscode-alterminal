@@ -545,7 +545,11 @@
     <script>
         // Acquire VS Code API and make it global for ES6 modules
         window.vscode = acquireVsCodeApi();
-        
+
+        // Override window.confirm to prevent sandbox errors
+        // xterm.js tries to call confirm() for link activation, but webviews are sandboxed
+        window.confirm = function() { return true; };
+
         {{combinedScript}}
     </script>
     

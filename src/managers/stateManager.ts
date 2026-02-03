@@ -43,6 +43,14 @@ export class StateManager {
   }
 
   /**
+   * Reset restore trigger (used when webview becomes visible again)
+   */
+  public resetRestoreTrigger(): void {
+    this._restoreTriggered = false;
+    Logger.debug("🔄 Reset restore trigger for webview re-visibility");
+  }
+
+  /**
    * Restore webview state from extension context
    */
   public async restoreWebviewState(
