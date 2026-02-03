@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Alterminal Initialization Script
  *
@@ -12,10 +11,21 @@
 import { TabManager } from "./tabManager.js";
 import { DragDropHandler } from "./dragDropHandler.js";
 
+// Extend Window interface for webview globals
+declare const vscode: any;
+declare const window: Window & {
+  tabManager?: TabManager;
+  dragDropHandler?: DragDropHandler;
+  linkModeState?: {
+    isCmdPressed: boolean;
+    isCtrlPressed: boolean;
+  };
+};
+
 // No configuration needed - webview will receive commands from extension
 
 // Terminal theme configuration with debugging
-function getVSCodeColor(cssVar, fallback) {
+function getVSCodeColor(cssVar: string, fallback: string): string {
   const value = getComputedStyle(document.body).getPropertyValue(cssVar);
   const isFromVSCode = !!value;
   const finalColor = value || fallback;
@@ -59,7 +69,7 @@ const terminalTheme = {
 };
 
 // Color utility
-function getThemeColor(cssVariable, fallback) {
+function getThemeColor(cssVariable: string, fallback: string): string {
   const value = getComputedStyle(document.body).getPropertyValue(cssVariable);
   return value || fallback;
 }
@@ -71,7 +81,7 @@ if (document.readyState === "loading") {
   initializeAll();
 }
 
-function initializeAll() {
+function initializeAll(): void {
   // Small delay to ensure DOM is fully ready
   setTimeout(() => {
     // Initialize the TabManager (it handles everything now)

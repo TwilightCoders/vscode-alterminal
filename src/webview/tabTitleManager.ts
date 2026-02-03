@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ContextMenu } from "./contextMenu.js";
 /**
  * Tab Title Manager
@@ -30,7 +29,29 @@ import { ContextMenu } from "./contextMenu.js";
  */
 
 export class TabTitleManager {
-  constructor(tabId, terminal, vscode, icon = "codicon-terminal") {
+  public tabId: number;
+  public terminal: any;
+  public vscode: any;
+  public icon: string;
+  public contextMenu: ContextMenu;
+  private _state: number;
+  public STATES: {
+    NOTIFICATION: number;
+    CUSTOMIZED: number;
+    EDITING: number;
+    DROPDOWN_OPEN: number;
+  };
+  public iconContainer: HTMLElement | null;
+  public regularIcon: HTMLElement | null;
+  public bellIcon: HTMLElement | null;
+  public labelElement: HTMLElement | null;
+  public baseLabel: string | null;
+  public dropdown: HTMLElement | null;
+  private _titleChangeCallback?: (tabId: number) => void;
+  public onTitleChanged?: (tabId: number) => void;
+  public onNotificationClick?: () => void;
+
+  constructor(tabId: number, terminal: any, vscode: any, icon: string = "codicon-terminal") {
     this.tabId = tabId;
     this.terminal = terminal;
     this.vscode = vscode;
@@ -47,6 +68,7 @@ export class TabTitleManager {
       NOTIFICATION: 1 << 0, // Bell notification active
       CUSTOMIZED: 1 << 1, // User has customized the icon
       EDITING: 1 << 2, // Title is being edited
+      DROPDOWN_OPEN: 1 << 3, // Dropdown menu is open
     };
 
     // DOM references
@@ -54,6 +76,7 @@ export class TabTitleManager {
     this.regularIcon = null;
     this.bellIcon = null;
     this.labelElement = null;
+    this.dropdown = null;
 
     // Title management
     this.baseLabel = null; // Store original label before process updates
@@ -138,10 +161,10 @@ export class TabTitleManager {
   /**
    * Show native context menu for tab
    */
-  showNativeContextMenu(x, y) {
+  showNativeContextMenu(x: number, y: number): void {
     // Send context menu request to extension host
     this.contextMenu.showTabContextMenu({
-      tabId: this.tabId,
+      tabId: String(this.tabId),
       terminalType: this.getTerminalType(),
       launchCommand: this.terminal?.launchCommand || null,
       x,
@@ -371,11 +394,11 @@ export class TabTitleManager {
   /**
    * Handle click on icon (notification logic only)
    */
-  handleIconClick() {
+  handleIconClick(): void {
     if (this.hasState(this.STATES.NOTIFICATION)) {
       // Clicking notification bell switches to tab
       if (this.onNotificationClick) {
-        this.onNotificationClick(this.tabId);
+        this.onNotificationClick();
       }
     }
     // Context menu is now handled natively by VS Code
@@ -411,7 +434,7 @@ export class TabTitleManager {
     this.setState(this.STATES.DROPDOWN_OPEN);
 
     // Focus first item
-    const firstItem = this.dropdown.querySelector(".tab-dropdown-item");
+    const firstItem = this.dropdown.querySelector<HTMLElement>(".tab-dropdown-item");
     if (firstItem) {
       firstItem.focus();
     }
@@ -446,7 +469,7 @@ export class TabTitleManager {
     this.setState(this.STATES.DROPDOWN_OPEN);
 
     // Focus first item
-    const firstItem = this.dropdown.querySelector(".tab-dropdown-item");
+    const firstItem = this.dropdown.querySelector<HTMLElement>(".tab-dropdown-item");
     if (firstItem) {
       firstItem.focus();
     }
@@ -542,10 +565,10 @@ export class TabTitleManager {
   /**
    * Update save button visibility
    */
-  updateSaveButtonVisibility(command, isSaved) {
+  updateSaveButtonVisibility(command: any, isSaved: any): void {
     if (!this.dropdown) return;
 
-    const saveItems = this.dropdown.querySelectorAll(
+    const saveItems = this.dropdown.querySelectorAll<HTMLElement>(
       `.tab-dropdown-item[data-action="save"][data-command="${command}"]`,
     );
     saveItems.forEach((item) => {
@@ -581,10 +604,10 @@ export class TabTitleManager {
   /**
    * Keyboard navigation for dropdown
    */
-  focusNextDropdownItem(currentItem) {
+  focusNextDropdownItem(currentItem: any): void {
     if (!this.dropdown) return;
 
-    const items = this.dropdown.querySelectorAll(
+    const items = this.dropdown.querySelectorAll<HTMLElement>(
       ".tab-dropdown-item:not(.disabled)",
     );
     const currentIndex = Array.from(items).indexOf(currentItem);
@@ -596,10 +619,10 @@ export class TabTitleManager {
   /**
    * Keyboard navigation for dropdown
    */
-  focusPrevDropdownItem(currentItem) {
+  focusPrevDropdownItem(currentItem: any): void {
     if (!this.dropdown) return;
 
-    const items = this.dropdown.querySelectorAll(
+    const items = this.dropdown.querySelectorAll<HTMLElement>(
       ".tab-dropdown-item:not(.disabled)",
     );
     const currentIndex = Array.from(items).indexOf(currentItem);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Drag and Drop Handler
  *
@@ -37,11 +36,11 @@ export class DragDropHandler {
   /**
    * Initialize drag and drop functionality
    */
-  initialize() {
+  initialize(): void {
     if (this.initialized) return;
 
   const container = document.getElementById("container");
-    const terminalContainer = document.querySelector(".terminal-container canvas");
+    const terminalContainer = document.querySelector<HTMLElement>(".terminal-container canvas");
   this.overlay = document.getElementById("file-drop-overlay");
 
     if (!container) {
@@ -50,7 +49,7 @@ export class DragDropHandler {
     }
 
     // Set up drag and drop on the main terminal container
-    this.target = terminalContainer || container;
+    this.target = (terminalContainer as HTMLElement) || container;
     this.setupEventListeners();
     this.initialized = true;
   }
@@ -58,7 +57,7 @@ export class DragDropHandler {
   /**
    * Set up all drag and drop event listeners
    */
-  setupEventListeners() {
+  setupEventListeners(): void {
     this.target.addEventListener("dragenter", (e) => this.handleDragEnter(e));
     this.target.addEventListener("dragover", (e) => this.handleDragOver(e));
     this.target.addEventListener("dragleave", (e) => this.handleDragLeave(e));
@@ -68,7 +67,7 @@ export class DragDropHandler {
   /**
    * Handle drag enter events
    */
-  handleDragEnter(e) {
+  handleDragEnter(e: DragEvent): void {
     e.preventDefault();
     e.stopPropagation();
     this.dragDepth++;
@@ -80,7 +79,7 @@ export class DragDropHandler {
   /**
    * Handle drag over events - show visual feedback
    */
-  handleDragOver(e) {
+  handleDragOver(e: DragEvent): void {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "copy";
@@ -103,7 +102,7 @@ export class DragDropHandler {
   /**
    * Handle drag leave events - remove visual feedback
    */
-  handleDragLeave(e) {
+  handleDragLeave(e: DragEvent): void {
     e.preventDefault();
     this.dragDepth = Math.max(0, this.dragDepth - 1);
     if (this.dragDepth === 0) {
@@ -114,7 +113,7 @@ export class DragDropHandler {
   /**
    * Handle drop events - process dropped files
    */
-  async handleDrop(e) {
+  async handleDrop(e: DragEvent): Promise<void> {
     e.preventDefault();
     e.stopPropagation();
     this.clearVisualFeedback();
@@ -134,7 +133,7 @@ export class DragDropHandler {
   /**
    * Clear all visual feedback
    */
-  clearVisualFeedback() {
+  clearVisualFeedback(): void {
     this.target.style.backgroundColor = "";
     if (this.overlay) {
       this.overlay.classList.remove("show");
@@ -144,7 +143,7 @@ export class DragDropHandler {
   /**
    * Process a dropped file and send to extension host
    */
-  async processDroppedFile(file, tabId) {
+  async processDroppedFile(file: File, tabId: number): Promise<void> {
     try {
       let fileData = null;
 
@@ -175,7 +174,7 @@ export class DragDropHandler {
   /**
    * Read file as data URL (base64)
    */
-  readFileAsDataURL(file) {
+  readFileAsDataURL(file: File): Promise<string | ArrayBuffer | null> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => resolve(e.target.result);
@@ -187,7 +186,7 @@ export class DragDropHandler {
   /**
    * Read file as text
    */
-  readFileAsText(file) {
+  readFileAsText(file: File): Promise<string | ArrayBuffer | null> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => resolve(e.target.result);
@@ -199,7 +198,7 @@ export class DragDropHandler {
   /**
    * Dispose of the drag drop handler
    */
-  dispose() {
+  dispose(): void {
     if (this.target && this.initialized) {
       // Remove event listeners would go here if we tracked them
       // For now, just reset state

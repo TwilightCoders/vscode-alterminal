@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * ContextMenu Helper
  *
@@ -18,21 +17,25 @@
  * - Tab-specific context menu items
  */
 
+interface TabContextMenuOptions {
+  tabId: string;
+  terminalType: string;
+  launchCommand?: string;
+  x: number;
+  y: number;
+}
+
 export class ContextMenu {
-  constructor(vscode) {
+  private vscode: any;
+
+  constructor(vscode: any) {
     this.vscode = vscode;
   }
 
   /**
    * Show context menu for a tab at mouse position
-   * @param {object} options - Context menu options
-   * @param {string} options.tabId - Tab ID for context-specific actions
-   * @param {string} options.terminalType - Terminal type (command, shell, etc)
-   * @param {string} options.command - Launch command for command tabs
-   * @param {number} options.x - Mouse X position
-   * @param {number} options.y - Mouse Y position
    */
-  showTabContextMenu({ tabId, terminalType, launchCommand, x, y }) {
+  showTabContextMenu({ tabId, terminalType, launchCommand, x, y }: TabContextMenuOptions): void {
     // Send message to extension host to show native context menu
     this.vscode.postMessage({
       command: "showContextMenu",
@@ -48,11 +51,8 @@ export class ContextMenu {
 
   /**
    * Handle context menu item selection from extension host
-   * @param {string} action - Selected action
-   * @param {object} context - Context data from menu request
-   * @param {Function} callback - Callback to handle the action
    */
-  handleContextMenuAction(action, context, callback) {
+  handleContextMenuAction(action: string, context: any, callback?: (action: string, context: any) => void): void {
     if (callback) {
       callback(action, context);
     }

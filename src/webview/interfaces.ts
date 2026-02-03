@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * TypeScript Interfaces for Terminal Architecture
  *

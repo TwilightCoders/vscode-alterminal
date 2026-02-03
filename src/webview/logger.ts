@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Webview Logger Utility
  *

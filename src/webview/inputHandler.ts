@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Input Handler
  *
@@ -51,7 +50,7 @@ export class InputHandler {
   /**
    * Set up all input handling (keyboard, mouse, etc.)
    */
-  setupInputHandling() {
+  setupInputHandling(): void {
     // Custom key event handler to pass through VS Code shortcuts
     this.terminal.attachCustomKeyEventHandler((event) => {
       return this.handleKeyEvent(event);
@@ -68,7 +67,7 @@ export class InputHandler {
   /**
    * Handle key events - intercept navigation keys and pass through VS Code shortcuts
    */
-  handleKeyEvent(event) {
+  handleKeyEvent(event: KeyboardEvent): boolean {
     if (event.type === "keydown") {
       const key = event.key;
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -120,7 +119,7 @@ export class InputHandler {
   /**
    * Handle regular input data from terminal
    */
-  handleInputData(data) {
+  handleInputData(data: string): void {
     // Check if this input represents meaningful user interaction
     if (this.isMeaningfulInput(data)) {
       if (this.terminalInstance && typeof this.terminalInstance.markUserInteraction === 'function') {
@@ -140,7 +139,7 @@ export class InputHandler {
   /**
    * Check if input represents meaningful user interaction that should trigger state saving
    */
-  isMeaningfulInput(data) {
+  isMeaningfulInput(data: string): boolean {
     if (!data || typeof data !== 'string') return false;
     
     // Check for Enter key (carriage return/newline - the main trigger)
@@ -165,7 +164,7 @@ export class InputHandler {
   /**
    * Send data to PTY process
    */
-  sendDataToPty(data) {
+  sendDataToPty(data: string): void {
     this.vscode.postMessage({
       command: "data",
       data: data,
@@ -176,7 +175,7 @@ export class InputHandler {
   /**
    * Send file path to PTY process for insertion
    */
-  sendFilePathToPty(filePath) {
+  sendFilePathToPty(filePath: string): void {
     this.vscode.postMessage({
       command: "sendFilePath",
       filePath: filePath,
@@ -187,7 +186,7 @@ export class InputHandler {
   /**
    * Send file data to PTY process
    */
-  sendFileDataToPty(fileData, fileName, fileType) {
+  sendFileDataToPty(fileData: string, fileName: string, fileType: string): void {
     this.vscode.postMessage({
       command: "sendFileData",
       fileData: fileData,
@@ -200,7 +199,7 @@ export class InputHandler {
   /**
    * Dispose of event handlers
    */
-  dispose() {
+  dispose(): void {
     this.disposables.forEach((disposable) => {
       if (disposable && disposable.dispose) {
         disposable.dispose();

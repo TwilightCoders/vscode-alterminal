@@ -1,8 +1,26 @@
-// @ts-nocheck
 import { TerminalInstance } from "./terminal.js";
 import { TabTitleManager } from "./tabTitleManager.js";
+import { Logger } from "./logger.js";
 // Import shared Debouncer (was missing, causing ReferenceError at runtime)
 import { Debouncer } from "../utils/debouncer.js";
+
+// Extend Window interface for webview globals
+declare const window: Window & {
+  scrollbackLines?: number;
+  tabManager?: any;
+  workspaceFileCache?: Set<string>;
+  DEVELOPER_MODE?: boolean;
+  __terminalPerf?: {
+    samples: any[];
+  };
+  linkModeState?: {
+    isCmdPressed: boolean;
+    isCtrlPressed: boolean;
+  };
+};
+
+// VS Code webview API
+declare const vscode: any;
 /**
  * Tab Manager Class (Refactored)
  *
@@ -29,7 +47,24 @@ import { Debouncer } from "../utils/debouncer.js";
  */
 
 export class TabManager {
-  constructor(vscode, terminalTheme, getThemeColor) {
+  public vscode: any;
+  public terminalTheme: any;
+  public getThemeColor: (cssVar: string, fallback: string) => string;
+  public terminals: Map<number, any>;
+  public titleManagers: Map<number, any>;
+  public activeTabId: number | null;
+  public nextTabId: number;
+  public isInitialized: boolean;
+  private _savedCommandsSet: Set<string>;
+  private _historyBannerInjected: boolean;
+  private _historyBannerShownEver: boolean;
+  private _alwaysShowTabs: boolean;
+  private _windowResizeHandler: (() => void) | null;
+  private _windowFocusHandler: (() => void) | null;
+  private _windowBeforeUnloadHandler: (() => void) | null;
+  private _windowBlurHandler: (() => void) | null;
+
+  constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
     this.terminalTheme = terminalTheme;
     this.getThemeColor = getThemeColor;
@@ -500,8 +535,8 @@ export class TabManager {
   /**
    * Set up keyboard event interception to allow VS Code shortcuts
    */
-  setupKeyboardPassthrough() {
-    const vsCodeShortcuts = [
+  setupKeyboardPassthrough(): void {
+    const vsCodeShortcuts: Array<{key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean}> = [
       { key: "F5", ctrlKey: false, shiftKey: false, altKey: false },
       { key: "F1", ctrlKey: false, shiftKey: false, altKey: false },
       { key: "F11", ctrlKey: false, shiftKey: false, altKey: false },
@@ -802,9 +837,9 @@ export class TabManager {
   /**
    * Update save button visibility for a specific command
    */
-  updateSaveButtonVisibility(command, isSaved) {
+  updateSaveButtonVisibility(command: any, isSaved: any): void {
     // Handle save items in dropdowns only (no more tab bar save buttons)
-    const dropdownSaveItems = document.querySelectorAll(
+    const dropdownSaveItems = document.querySelectorAll<HTMLElement>(
       `.tab-dropdown-item[data-action="save"][data-command="${command}"]`,
     );
     dropdownSaveItems.forEach((item) => {
@@ -1033,9 +1068,9 @@ export class TabManager {
     }
 
     // Get tabs in DOM order to preserve user's reordering
-    const tabElements = document.querySelectorAll(".tab");
+    const tabElements = document.querySelectorAll<HTMLElement>(".tab");
     const tabIdsInOrder = Array.from(tabElements).map((tab) =>
-      parseInt(tab.dataset.tabId),
+      parseInt(tab.dataset.tabId!),
     );
 
     // Iterate in DOM order instead of Map order
@@ -1500,12 +1535,13 @@ export class TabManager {
     if (tabBar) {
       // Keyboard navigation support
       tabBar.addEventListener("keydown", (e) => {
+        const target = e.target as HTMLElement;
         if (
-          e.target.classList.contains("tab") ||
-          e.target.classList.contains("tab-close")
+          target.classList.contains("tab") ||
+          target.classList.contains("tab-close")
         ) {
           if (e.key === "Enter" || e.key === " ") {
-            e.target.click();
+            target.click();
             e.preventDefault();
           }
         }
@@ -1513,19 +1549,20 @@ export class TabManager {
 
       // Click handlers
       tabBar.addEventListener("click", (e) => {
+        const target = e.target as HTMLElement;
         // Handle tab icon clicks (show dropdown or handle notification)
         if (
-          e.target.classList.contains("tab-icon") ||
-          e.target.parentElement.classList.contains("tab-icon")
+          target.classList.contains("tab-icon") ||
+          target.parentElement?.classList.contains("tab-icon")
         ) {
-          const icon = e.target.classList.contains("tab-icon")
-            ? e.target
-            : e.target.parentElement;
+          const icon = target.classList.contains("tab-icon")
+            ? target
+            : target.parentElement as HTMLElement;
           const tab = icon.closest(".tab");
 
           // If clicking on notification bell, switch to tab instead of showing dropdown
           if (icon.classList.contains("notification")) {
-            const tabId = parseInt(tab.dataset.tabId);
+            const tabId = parseInt((tab as HTMLElement).dataset.tabId!);
             if (!isNaN(tabId)) {
               this.switchToTab(tabId);
             }
@@ -1543,14 +1580,14 @@ export class TabManager {
 
         // Handle dropdown item clicks
         if (
-          e.target.classList.contains("tab-dropdown-item") ||
-          e.target.parentElement.classList.contains("tab-dropdown-item")
+          target.classList.contains("tab-dropdown-item") ||
+          target.parentElement?.classList.contains("tab-dropdown-item")
         ) {
-          const item = e.target.classList.contains("tab-dropdown-item")
-            ? e.target
-            : e.target.parentElement;
+          const item = target.classList.contains("tab-dropdown-item")
+            ? target
+            : target.parentElement as HTMLElement;
           const action = item.getAttribute("data-action");
-          const tab = item.closest(".tab");
+          const tab = item.closest(".tab") as HTMLElement;
 
           if (tab && tab.dataset.tabId) {
             const tabId = parseInt(tab.dataset.tabId);
@@ -1568,12 +1605,12 @@ export class TabManager {
 
         // Handle tab clicks for switching
         if (
-          e.target.classList.contains("tab") ||
-          e.target.parentElement.classList.contains("tab")
+          target.classList.contains("tab") ||
+          target.parentElement?.classList.contains("tab")
         ) {
-          const tab = e.target.classList.contains("tab")
-            ? e.target
-            : e.target.parentElement;
+          const tab = target.classList.contains("tab")
+            ? target
+            : target.parentElement as HTMLElement;
           const tabId = parseInt(tab.dataset.tabId);
           if (!isNaN(tabId)) {
             this.switchToTab(tabId);
@@ -1583,13 +1620,14 @@ export class TabManager {
 
       // Double-click handler for tab renaming
       tabBar.addEventListener("dblclick", (e) => {
+        const target = e.target as HTMLElement;
         // Handle double-clicks on tab labels for renaming
-        if (e.target.classList.contains("tab-label")) {
-          const tab = e.target.closest(".tab");
+        if (target.classList.contains("tab-label")) {
+          const tab = target.closest(".tab") as HTMLElement;
           if (tab && tab.dataset.tabId) {
             const tabId = parseInt(tab.dataset.tabId);
             if (!isNaN(tabId)) {
-              this.startTabRename(tabId, e.target);
+              this.startTabRename(tabId, target);
             }
           }
           e.preventDefault();
@@ -1599,11 +1637,12 @@ export class TabManager {
 
       // Keyboard handlers for accessibility
       tabBar.addEventListener("keydown", (e) => {
-        if (e.target.classList.contains("tab")) {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains("tab")) {
           switch (e.key) {
             case "Enter":
             case " ":
-              const tabId = parseInt(e.target.dataset.tabId);
+              const tabId = parseInt(target.dataset.tabId!);
               if (!isNaN(tabId)) {
                 this.switchToTab(tabId);
               }
@@ -1611,36 +1650,36 @@ export class TabManager {
               break;
             case "Delete":
             case "Backspace":
-              const deleteTabId = parseInt(e.target.dataset.tabId);
+              const deleteTabId = parseInt(target.dataset.tabId!);
               if (!isNaN(deleteTabId)) {
                 this.closeTab(deleteTabId);
               }
               e.preventDefault();
               break;
           }
-        } else if (e.target.classList.contains("tab-icon")) {
+        } else if (target.classList.contains("tab-icon")) {
           if (e.key === "Enter" || e.key === " ") {
             // If icon has notification, switch to tab instead of showing dropdown
-            if (e.target.classList.contains("notification")) {
-              const tab = e.target.closest(".tab");
-              const tabId = parseInt(tab.dataset.tabId);
+            if (target.classList.contains("notification")) {
+              const tab = target.closest(".tab") as HTMLElement;
+              const tabId = parseInt(tab.dataset.tabId!);
               if (!isNaN(tabId)) {
                 this.switchToTab(tabId);
               }
             } else {
-              const dropdown = e.target.querySelector(".tab-dropdown");
+              const dropdown = target.querySelector(".tab-dropdown");
               if (dropdown) {
                 this.toggleDropdown(dropdown);
               }
             }
             e.preventDefault();
           }
-        } else if (e.target.classList.contains("tab-dropdown-item")) {
+        } else if (target.classList.contains("tab-dropdown-item")) {
           switch (e.key) {
             case "Enter":
             case " ":
-              const action = e.target.getAttribute("data-action");
-              const tab = e.target.closest(".tab");
+              const action = target.getAttribute("data-action");
+              const tab = target.closest(".tab") as HTMLElement;
               if (tab && tab.dataset.tabId) {
                 const tabId = parseInt(tab.dataset.tabId);
                 if (!isNaN(tabId)) {
@@ -1672,9 +1711,10 @@ export class TabManager {
 
     // Close dropdowns when clicking outside
     document.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
       if (
-        !e.target.closest(".tab-icon") &&
-        !e.target.closest(".tab-dropdown")
+        !target.closest(".tab-icon") &&
+        !target.closest(".tab-dropdown")
       ) {
         this.hideAllDropdowns();
       }
@@ -1957,8 +1997,8 @@ export class TabManager {
   /**
    * Show the main interface and hide loading screen
    */
-  showInterface() {
-    const loadingDiv = document.querySelector(".loading");
+  showInterface(): void {
+    const loadingDiv = document.querySelector<HTMLElement>(".loading");
     const container = document.getElementById("container");
 
     if (loadingDiv) {
@@ -2015,7 +2055,7 @@ export class TabManager {
   /**
    * Request a formatted tab title from the extension using the configured template
    */
-  requestFormattedTitle(tabId, opts = {}) {
+  requestFormattedTitle(tabId: number, opts: { processName?: string } = {}): void {
     try {
       const terminal = this.terminals.get(tabId);
       if (!terminal) return;

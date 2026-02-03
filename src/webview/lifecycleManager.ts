@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ILifecycleManager, IEventEmitter } from "./interfaces.js";
 import { Logger } from "./logger.js";
 
