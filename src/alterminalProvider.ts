@@ -1,39 +1,61 @@
 import * as vscode from "vscode";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import { PtyManager } from "./terminal/ptyManager";
-import { TemplateUtils } from "./utils/templateUtils";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
 import { TabTitleProvider } from "./providers/tabTitleProvider";
-import { Debouncer } from "./utils/debouncer";
-import { DEBOUNCE_TIMINGS } from "./constants";
+import { StateManager } from "./managers/stateManager";
+import { ConfigurationWatcher } from "./managers/configurationWatcher";
+import { NotificationManager } from "./managers/notificationManager";
+import { CommandLauncher } from "./managers/commandLauncher";
+import { FileOperationHandler } from "./managers/fileOperationHandler";
+import { TabContextMenuHandler } from "./managers/tabContextMenuHandler";
+import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
+import { MessageDispatcher } from "./managers/messageDispatcher";
+import { TerminalController } from "./managers/terminalController";
 
+/**
+ * AlterminalProvider
+ *
+ * Primary responsibility: Orchestrate managers and provide public API
+ *
+ * SOLID Principles:
+ * - Single Responsibility: Facade that coordinates managers
+ * - Open/Closed: Extensible through manager composition
+ * - Dependency Inversion: Depends on manager abstractions
+ */
 export class AlterminalProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "alterminalView";
   private static _instance?: AlterminalProvider;
   private _view?: vscode.WebviewView;
   private _ptyManager: PtyManager;
   private _context: vscode.ExtensionContext;
-  private _isColdBoot = true; // determined once at construction/activation
   private _commandManager: CommandManager;
-  private _restoreTriggered = false; // guard to avoid missing restore due to race
   private _serializer?: any;
   private _tabTitleProvider = new TabTitleProvider();
-  private _pendingBufferRequests = new Map<number, (buffer: string) => void>();
+
+  // Managers
+  private stateManager: StateManager;
+  private configurationWatcher: ConfigurationWatcher;
+  private notificationManager: NotificationManager;
+  private commandLauncher: CommandLauncher;
+  private fileOperationHandler: FileOperationHandler;
+  private tabContextMenuHandler: TabContextMenuHandler;
+  private webviewLifecycleManager: WebViewLifecycleManager;
+  private messageDispatcher: MessageDispatcher;
+  private terminalController: TerminalController;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
     context: vscode.ExtensionContext,
-  ptyManager: PtyManager,
-  serializer?: any,
+    ptyManager: PtyManager,
+    serializer?: any,
   ) {
     AlterminalProvider._instance = this;
     this._context = context;
     this._ptyManager = ptyManager;
-  this._serializer = serializer;
-    // Initialize CommandManager asynchronously to avoid blocking extension startup
+    this._serializer = serializer;
+
+    // Initialize CommandManager
     this._commandManager = new CommandManager(
       {
         getConfiguration: (section: string) =>
@@ -44,26 +66,72 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       (command: string) => this.createNewTabWithCommand(command),
     );
 
+    // Initialize managers
+    this.stateManager = new StateManager(context);
+    this.configurationWatcher = new ConfigurationWatcher(context);
+    this.notificationManager = new NotificationManager();
+    this.commandLauncher = new CommandLauncher(
+      this._commandManager,
+      (command: string) => this.createNewTabWithCommand(command),
+    );
+    this.fileOperationHandler = new FileOperationHandler(this._ptyManager);
+    this.tabContextMenuHandler = new TabContextMenuHandler(
+      this._commandManager,
+      () => this._view?.webview,
+    );
+    this.terminalController = new TerminalController(
+      () => this._view?.webview,
+      this._ptyManager,
+      this._extensionUri,
+    );
+
+    // MessageDispatcher needs to be created after other managers
+    this.messageDispatcher = new MessageDispatcher(
+      this._ptyManager,
+      this.commandLauncher,
+      this.fileOperationHandler,
+      this.tabContextMenuHandler,
+      this.stateManager,
+      this.notificationManager,
+      (msg: any) => this._handleFormatTabTitle(msg),
+      () => this._handleWebviewReady(),
+      this._serializer ? (msg: any) => this._serializer.handleMessage(msg) : undefined,
+    );
+
+    // WebViewLifecycleManager needs MessageDispatcher
+    this.webviewLifecycleManager = new WebViewLifecycleManager(
+      this._extensionUri,
+      this._ptyManager,
+      this.stateManager,
+      this.configurationWatcher,
+      this.messageDispatcher,
+      this._commandManager,
+      () => this._checkDeveloperMode(),
+    );
+
     // Listen for configuration changes
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("alterminal")) {
-        const config = vscode.workspace.getConfiguration("alterminal");
-        this._view?.webview.postMessage({
-          command: "updateConfig",
-          config: {
-            alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
-            scrollback: config.get<number>("terminal.scrollback", 1000),
-          },
-        });
+    this.configurationWatcher.onConfigChanged((config) => {
+      if (this._view) {
+        this.webviewLifecycleManager.handleConfigChange(
+          this._view.webview,
+          config.alwaysShowTabs,
+          config.scrollback,
+        );
       }
     });
+
+    // Start watching configuration
+    this.configurationWatcher.startWatching();
   }
 
+  /**
+   * Resolve and initialize webview
+   */
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
-  ) {
+  ): void {
     this._view = webviewView;
 
     // Serializer will handle webview lifecycle
@@ -71,164 +139,31 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this._serializer.setWebviewView(webviewView);
     }
 
-    webviewView.webview.options = {
-      enableScripts: true,
-      enableCommandUris: true,
-      localResourceRoots: [this._extensionUri],
-    };
-
-  // Set up message router BEFORE loading HTML so we don't miss early messages (e.g., webviewReady)
-  this.setupMessageRouter(webviewView);
-
-    // Get configuration
-    const config = vscode.workspace.getConfiguration("alterminal");
-    const scrollback = config.get<number>("terminal.scrollback", 1000);
-
-    // Set up components with the webview
-    this._ptyManager.setWebviewView(webviewView);
-    this._ptyManager.setScrollback(scrollback);
-
-  // Always include a unique timestamp to force webview refresh (from PostgreSQL extension pattern)
-    const timeNow = new Date().getTime();
-    try {
-      webviewView.webview.html = TemplateUtils.getHtmlTemplate(
-        this._extensionUri,
-        webviewView.webview,
-        timeNow,
-      );
-    } catch (error) {
-      Logger.error("Failed to generate webview HTML template:", error);
-      webviewView.webview.html = `
-                <html><body>
-                <h1>Error Loading Alterminal</h1>
-                <p>Failed to generate webview template: ${error.message}</p>
-                <p>Check the extension logs for more details.</p>
-                </body></html>
-            `;
-    }
-
-    // State restoration will happen when webview emits 'webviewReady' event
-
-    // Monitor webview visibility changes and lifecycle
-    this.setupWebviewLifecycle(webviewView);
-
-    // DISABLED: Workspace file cache causes crashes on large workspaces (e.g., home directory)
-    // The file cache was used for link validation in old registerLinkMatcher fallback.
-    // Modern registerLinkProvider doesn't need pre-validation, so this is no longer necessary.
-    // this.initializeWorkspaceFileCache();
-  }
-
-  /**
-   * Set up webview lifecycle event handlers
-   */
-  private setupWebviewLifecycle(webviewView: vscode.WebviewView) {
-    // Monitor visibility changes (no restoration here - purely event-driven via webviewReady)
-    webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) {
-        // Just refresh active state, restoration happens via webviewReady event
-        this._view?.webview.postMessage({ command: "refreshActive" });
-      }
-    });
-
-    // Monitor disposal
-    webviewView.onDidDispose(() => {
-      // Note: State is already saved synchronously by webview, no need for async save here
-    });
-  }
-
-  /**
-   * Set up message router with clean handler delegation
-   */
-  private setupMessageRouter(webviewView: vscode.WebviewView) {
-    // Provider-specific message handlers
-    const providerHandlers = {
-      fileDrop: (msg: any) =>
-        this._handleDroppedFile(
-          msg.fileName,
-          msg.fileType,
-          msg.fileSize,
-          msg.fileData,
-          msg.tabId,
-        ),
-      openFile: (msg: any) => this._handleOpenFile(msg.filePath),
-      openUrl: (msg: any) => this._handleOpenUrl(msg.url),
-      stateUpdate: (msg: any) => {
-        this._handleBackupStateUpdate(msg.state);
-        if (this._serializer?.handleMessage) this._serializer.handleMessage(msg);
-      },
-      stateResponse: (msg: any) => {
-        this._handleBackupStateUpdate(msg.state);
-        if (this._serializer?.handleMessage) this._serializer.handleMessage(msg);
-      },
-      webviewReady: () => {
-  this._restoreTriggered = true;
-  this.restoreWebviewState();
-        // Check for developer mode
-        this._checkDeveloperMode();
-        // Send saved commands list so webview can hide Save Command where appropriate
-        try {
-          const saved = this._commandManager
-            .getSavedCommands()
-            .map((c) => c.command);
-          this._view?.webview.postMessage({
-            command: "savedCommandsList",
-            commands: saved,
-          });
-        } catch (e) {
-          Logger.warn("Failed sending savedCommandsList", e);
-        }
-        // Send configuration to webview
-        const config = vscode.workspace.getConfiguration("alterminal");
-        this._view?.webview.postMessage({
-          command: "updateConfig",
-          config: {
-            alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
-            scrollback: config.get<number>("terminal.scrollback", 1000),
-          },
-        });
-      },
-      switchTab: () => {}, // No-op - handled in webview
-      playBellSound: (msg: any) => this._playBellSound(msg.tabId, msg.tabLabel),
-      setDebugFilter: (msg: any) => {}, // Handled in webview
-      debugLog: () => {}, // Disabled
-      setDeveloperMode: (msg: any) => {}, // Handled in webview
-      performanceReport: (msg: any) => this._showPerformanceReport(msg.data),
-      saveCommand: (msg: any) => this._handleSaveCommand(msg),
-      checkCommandSaved: (msg: any) => this._handleCheckCommandSaved(msg),
-      formatTabTitle: (msg: any) => this._handleFormatTabTitle(msg),
-      bufferContent: (msg: any) => this._handleBufferContentResponse(msg),
-    };
-
-    webviewView.webview.onDidReceiveMessage(
-      (message) => {
-        try {
-          // First, check if provider can handle the message directly
-          const providerHandler =
-            providerHandlers[message.command as keyof typeof providerHandlers];
-          if (providerHandler) {
-            providerHandler(message);
-            return;
-          }
-
-          // Delegate to appropriate manager based on message type
-          if (this._ptyManager?.canHandle(message.command)) {
-            this._ptyManager.handleMessage(message);
-          } else {
-            Logger.warn(`Unhandled message command: ${message.command}`);
-          }
-        } catch (error) {
-          Logger.error(`Error handling message ${message.command}:`, error);
-        }
-      },
-      undefined,
-      [],
+    // Delegate to lifecycle manager
+    this.webviewLifecycleManager.resolveWebviewView(
+      webviewView,
+      _context,
+      _token,
     );
   }
 
-  private _handleFormatTabTitle(msg: any) {
+  /**
+   * Handle webview ready event
+   */
+  private async _handleWebviewReady(): Promise<void> {
+    if (!this._view) return;
+
+    // Delegate to lifecycle manager (it will handle marking restore as triggered)
+    await this.webviewLifecycleManager.handleWebviewReady(this._view.webview);
+  }
+
+  /**
+   * Handle tab title formatting
+   */
+  private _handleFormatTabTitle(msg: any): void {
     try {
       const template = this._tabTitleProvider.getTemplate();
-      
+
       const title = this._tabTitleProvider.render(template, {
         tabId: msg.tabId,
         tabName: msg.tabName || "Terminal",
@@ -240,7 +175,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         lastExitCode: msg.lastExitCode,
         timestamp: new Date(),
       });
-      
+
       this._view?.webview.postMessage({
         command: "formatTabTitleResponse",
         tabId: msg.tabId,
@@ -251,304 +186,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public async requestPerformanceReport() {
-    if (!this._view) return;
-    this._view.webview.postMessage({ command: "collectPerformance" });
-  }
-
-  private _showPerformanceReport(data: any) {
-    if (!data) return;
-    const summary = `Terminals: ${data.count}\nAvg Init: ${data.avgInit.toFixed(1)}ms\nAvg Open->Active: ${data.avgOpenToActive.toFixed(1)}ms`;
-    vscode.window.showInformationMessage("Performance Report", {
-      modal: true,
-      detail: summary,
-    });
-  }
-
-  public async refresh() {
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Restarting Alterminal...",
-        cancellable: false,
-      },
-      async (progress) => {
-        try {
-          progress.report({ increment: 0, message: "Disposing terminals..." });
-
-          // Kill all PTY processes
-          this._ptyManager.dispose();
-
-          progress.report({ increment: 50, message: "Disposing webview..." });
-
-          progress.report({ increment: 75, message: "Reinitializing..." });
-
-          // Reset webview HTML to force complete reload
-          if (this._view) {
-            const timeNow = new Date().getTime();
-            this._view.webview.html = TemplateUtils.getHtmlTemplate(
-              this._extensionUri,
-              this._view.webview,
-              timeNow,
-            );
-          }
-
-          // DISABLED: File system watcher and workspace file cache
-          // Causes crashes on large workspaces - not needed with modern link provider
-          // this._setupFileSystemWatcher();
-          // this._sendWorkspaceFileCache();
-
-          progress.report({ increment: 100, message: "Complete!" });
-
-          vscode.window.showInformationMessage(
-            "Alterminal restarted successfully!",
-          );
-        } catch (error) {
-          Logger.error("Error during refresh:", error);
-          vscode.window.showErrorMessage(
-            `Failed to restart Alterminal: ${error}`,
-          );
-        }
-      },
-    );
-  }
-
-  public triggerResize() {
-    if (this._view) {
-      this._view.webview.postMessage({ command: "triggerResize" });
-    }
-  }
-
-  public createNewTab(type?: string) {
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "createNewTab",
-        terminalType: type,
-      });
-    }
-  }
-
-  public createNewTabWithCommand(cmd: string) {
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "createNewTab",
-        terminalType: "command",
-        launchCommand: cmd,
-      });
-    }
-  }
-
-  public async openTerminal() {
-    // Just focus the view, don't force show it
-    await vscode.commands.executeCommand("alterminalView.focus");
-  }
-
-  public sendFilePath(filePath: string, tabId: number) {
-    this._ptyManager.sendFilePath(filePath, tabId);
-  }
-
-  private async _handleDroppedFile(
-    fileName: string,
-    fileType: string,
-    fileSize: number,
-    fileData: string,
-    tabId: number,
-  ) {
-    // Route file operations to PtyManager
-    if (fileData) {
-      await this._ptyManager.sendFileData(fileData, fileName, fileType, tabId);
-    } else {
-      this._ptyManager.writeToPty(`Failed to read file: ${fileName}\n`, tabId);
-    }
-  }
-
-  private async _handleOpenFile(filePath: string) {
-    try {
-      let resolvedPath = filePath;
-
-      // Handle tilde paths first
-      if (filePath.startsWith("~/")) {
-        const homeDir = require("os").homedir();
-        resolvedPath = filePath.replace("~", homeDir);
-      }
-      // Handle absolute paths (keep as-is)
-      else if (filePath.startsWith("/")) {
-        resolvedPath = filePath;
-      }
-      // Handle all other paths as relative to workspace (includes ./, ../, and bare paths like src/file.ts)
-      else {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (workspaceFolder) {
-          resolvedPath = vscode.Uri.joinPath(
-            workspaceFolder.uri,
-            filePath,
-          ).fsPath;
-        }
-      }
-
-      // Workspace containment guard (only allow outside workspace with confirmation)
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (workspaceRoot) {
-        const path = require("path");
-        const relative = path.relative(workspaceRoot, resolvedPath);
-        const isOutside =
-          relative.startsWith("..") ||
-          (path.isAbsolute(relative) &&
-            !resolvedPath.startsWith(workspaceRoot));
-        if (isOutside) {
-          const choice = await vscode.window.showWarningMessage(
-            `Open external file outside workspace?\n${resolvedPath}`,
-            {
-              modal: true,
-              detail:
-                "Links are limited to workspace files for safety. Proceed only if you trust the source.",
-            },
-            "Open",
-            "Cancel",
-          );
-          if (choice !== "Open") {
-            return;
-          }
-        }
-      }
-
-      const uri = vscode.Uri.file(resolvedPath);
-
-      // Check if it's a directory or file
-      const fs = require('fs');
-      const stats = await fs.promises.stat(resolvedPath);
-
-      if (stats.isDirectory()) {
-        // For directories, reveal in explorer
-        await vscode.commands.executeCommand('revealInExplorer', uri);
-      } else {
-        // For files, open as text document
-        await vscode.window.showTextDocument(uri);
-      }
-    } catch (error) {
-      Logger.error("Failed to open file:", error);
-      vscode.window.showErrorMessage(`Failed to open file: ${filePath}`);
-    }
-  }
-
-  private async _handleOpenUrl(url: string) {
-    try {
-      const uri = vscode.Uri.parse(url);
-      await vscode.env.openExternal(uri);
-    } catch (error) {
-      console.error("Failed to open URL:", error);
-    }
-  }
-
-  private _playBellSound(tabId: number, tabLabel: string) {
-    try {
-      // Show clickable notification with action to go to the tab
-      vscode.window
-        .showInformationMessage(
-          `Terminal Bell: ${tabLabel || `Tab ${tabId}`}`,
-          "Go to Terminal",
-        )
-        .then((selection) => {
-          if (selection === "Go to Terminal") {
-            // Focus the Alterminal view and switch to the specific tab
-            this.openTerminal().then(() => {
-              // Send message to switch to the specific tab
-              if (this._view) {
-                this._view.webview.postMessage({
-                  command: "switchToTab",
-                  tabId: tabId,
-                });
-              }
-            });
-          }
-        });
-
-      // Also try to focus the VS Code window (OS-level attention getting)
-      vscode.commands
-        .executeCommand("workbench.action.focusActiveEditorGroup")
-        .then(
-          () => {},
-          () => {
-            // Fallback if focus command fails
-          },
-        );
-    } catch (error) {
-      Logger.error("Failed to play bell sound:", error);
-    }
-  }
-
-  private async _handleBackupStateUpdate(state: any) {
-    // Debounce backup state saves to avoid excessive writes
-    Debouncer.debounce(
-      "backup-state-save",
-      DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE,
-      async () => {
-        try {
-          // Save backup state to extension workspace (non-critical)
-          if (state) {
-            await this._context.workspaceState.update("alterminal.webviewState", {
-              terminals: state.terminals || [],
-              activeTabId: state.activeTabId || 1,
-              timestamp: Date.now(),
-            });
-          }
-        } catch (error) {
-          Logger.warn("⚠️ Failed to save backup state (non-critical):", error);
-        }
-      },
-      { maxWait: DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE_MAX_WAIT },
-    );
-  }
-
-  private async restoreWebviewState() {
-    if (!this._view) return;
-
-    try {
-  this._restoreTriggered = true;
-      // Get saved backup state from extension context (webview handles primary state itself)
-      const backupState = this._context.workspaceState.get(
-        "alterminal.webviewState",
-      ) as any;
-
-      if (
-        backupState &&
-        backupState.terminals &&
-        backupState.terminals.length > 0
-      ) {
-        this._view.webview.postMessage({
-          command: "restoreState",
-          state: backupState,
-          cold: this._isColdBoot,
-        });
-      } else {
-        this._view.webview.postMessage({
-          command: "initializeEmpty",
-          cold: this._isColdBoot,
-        });
-      }
-    } catch (error) {
-      Logger.error("❌ Failed to restore webview state:", error);
-    } finally {
-      this._isColdBoot = false;
-    }
-  }
-
-
-  // Removed legacy _debounce helper in favor of shared Debouncer
-
-  public setDebugFilter(filter: string[] | null) {
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "setDebugFilter",
-        filter,
-      });
-    }
-  }
-
   /**
-   * Check for developer mode using VS Code extension development mode
+   * Check for developer mode
    */
-  private async _checkDeveloperMode() {
+  private async _checkDeveloperMode(): Promise<void> {
     const isDeveloper =
       this._context.extensionMode === vscode.ExtensionMode.Development;
 
@@ -561,12 +202,78 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public async showSavedCommands() {
-    await this._commandManager.showSavedCommandsPicker();
+  // ==================== Public API Methods ====================
+
+  /**
+   * Request performance report from terminals
+   */
+  public async requestPerformanceReport(): Promise<void> {
+    await this.terminalController.requestPerformanceReport();
   }
 
-  public async saveCurrentCommand() {
-    await this._commandManager.showSaveCommandDialog();
+  /**
+   * Refresh/restart all terminals
+   */
+  public async refresh(): Promise<void> {
+    await this.terminalController.refresh(() => this._view);
+  }
+
+  /**
+   * Trigger terminal resize
+   */
+  public triggerResize(): void {
+    this.terminalController.triggerResize();
+  }
+
+  /**
+   * Create a new terminal tab
+   */
+  public createNewTab(type?: string): void {
+    this.terminalController.createNewTab(type);
+  }
+
+  /**
+   * Create a new terminal tab with a command
+   */
+  public createNewTabWithCommand(cmd: string): void {
+    this.terminalController.createNewTabWithCommand(cmd);
+  }
+
+  /**
+   * Focus the terminal view
+   */
+  public async openTerminal(): Promise<void> {
+    await this.terminalController.openTerminal();
+  }
+
+  /**
+   * Send file path to terminal
+   */
+  public sendFilePath(filePath: string, tabId: number): void {
+    this.fileOperationHandler.sendFilePath(tabId, filePath);
+  }
+
+  /**
+   * Set debug filter for developer mode
+   */
+  public setDebugFilter(filter: string[] | null): void {
+    this.terminalController.setDebugFilter(filter);
+  }
+
+  /**
+   * Show saved commands picker
+   */
+  public async showSavedCommands(): Promise<void> {
+    await this.commandLauncher.showSavedCommands();
+  }
+
+  /**
+   * Save current command dialog
+   */
+  public async saveCurrentCommand(): Promise<void> {
+    if (this._view) {
+      await this.commandLauncher.saveCurrentCommand(this._view.webview);
+    }
   }
 
   /**
@@ -575,7 +282,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * - Enter with no selection launches typed command (unsaved)
    * - Selecting saved command increments usage & launches
    */
-  public async launchCommandPicker() {
+  public async launchCommandPicker(): Promise<void> {
     try {
       const saved = this._commandManager.getSavedCommands();
       const qp = vscode.window.createQuickPick<{
@@ -613,7 +320,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       disposables.push(
         qp.onDidChangeValue((val) => {
           qp.items = buildItems(val);
-          // Don't auto-select - let user explicitly select or press Enter
         }),
         qp.onDidAccept(async () => {
           const value = qp.value.trim();
@@ -645,299 +351,28 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleSaveCommand(msg: any) {
-    try {
-      if (!msg.launchCommand) {
-        Logger.warn("Cannot save command: no launch command provided");
-        return;
-      }
-
-      // Use CommandManager to save the command
-      await this._commandManager.saveCommand(msg.launchCommand);
-
-      // Show success message
-      vscode.window.showInformationMessage(
-        `Command "${msg.launchCommand}" saved to quick launch menu!`,
-      );
-
-      Logger.info(`Command saved from tab ${msg.tabId}: ${msg.launchCommand}`);
-    } catch (error) {
-      Logger.error("Failed to save command:", error);
-      vscode.window.showErrorMessage(
-        "Failed to save command. Please try again.",
-      );
-    }
-  }
-
-  private _handleCheckCommandSaved(msg: any) {
-    try {
-      if (!msg.launchCommand) {
-        Logger.warn(
-          "Cannot check command saved status: no launch command provided",
-        );
-        return;
-      }
-
-      // Check if command exists in saved commands
-      const savedCommands = this._commandManager.getSavedCommands();
-      const isSaved = savedCommands.some(
-        (cmd) => cmd.command === msg.launchCommand,
-      );
-
-      // Send response back to webview
-      if (this._view) {
-        this._view.webview.postMessage({
-          command: "commandSavedResponse",
-          launchCommand: msg.launchCommand,
-          isSaved: isSaved,
-        });
-      }
-
-    } catch (error) {
-      Logger.error("Failed to check command saved status:", error);
-    }
-  }
-
   /**
    * Handle context menu commands from VS Code
    */
-  public handleContextMenuCommand(command: string, args: any) {
-    switch (command) {
-      case "saveTabCommand":
-        this._handleContextMenuSaveCommand(args);
-        break;
-      case "renameTab":
-        this._handleContextMenuRenameTab(args);
-        break;
-      case "closeTab":
-        this._handleContextMenuCloseTab(args);
-        break;
-      case "showTabBuffer":
-        this._handleContextMenuShowTabBuffer(args);
-        break;
-      case "setTabIcon":
-        this._handleContextMenuSetTabIcon(args);
-        break;
-      default:
-        Logger.warn(`Unknown context menu command: ${command}`);
-    }
+  public async handleContextMenuCommand(
+    command: string,
+    args: any,
+  ): Promise<void> {
+    await this.tabContextMenuHandler.handleContextMenuCommand(command, args);
   }
 
-  private async _handleContextMenuSaveCommand(args: any) {
-    try {
-      const tabId = args?.tabId;
-      const launchCommand = args?.launchCommand;
-
-      if (!launchCommand) {
-        Logger.warn(
-          "Cannot save command: no launchCommand provided in context",
-        );
-        vscode.window.showErrorMessage("No command to save");
-        return;
-      }
-
-      await this._commandManager.saveCommand(launchCommand);
-      vscode.window.showInformationMessage(
-        `Command "${launchCommand}" saved to quick launch menu!`,
-      );
-      Logger.info(
-        `Context menu - Command saved from tab ${tabId}: ${launchCommand}`,
-      );
-    } catch (error) {
-      Logger.error("Failed to save command from context menu:", error);
-      vscode.window.showErrorMessage(
-        "Failed to save command. Please try again.",
-      );
-    }
+  /**
+   * Get singleton instance
+   */
+  public static getInstance(): AlterminalProvider | undefined {
+    return AlterminalProvider._instance;
   }
 
-  private async _handleContextMenuRenameTab(args: any) {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot rename tab: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      if (this._view) {
-        // Send rename command to webview to start inline editing
-        this._view.webview.postMessage({
-          command: "renameTab",
-          tabId: parseInt(tabId),
-        });
-
-        Logger.info(`Context menu - Starting inline rename for tab ${tabId}`);
-      }
-    } catch (error) {
-      Logger.error("Failed to start tab rename from context menu:", error);
-      vscode.window.showErrorMessage(
-        "Failed to start tab rename. Please try again.",
-      );
-    }
-  }
-
-  private _handleContextMenuCloseTab(args: any) {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot close tab: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      if (this._view) {
-        // Send close command to webview
-        this._view.webview.postMessage({
-          command: "closeTab",
-          tabId: parseInt(tabId),
-        });
-
-        Logger.info(`Context menu - Closed tab ${tabId}`);
-      }
-    } catch (error) {
-      Logger.error("Failed to close tab from context menu:", error);
-      vscode.window.showErrorMessage("Failed to close tab. Please try again.");
-    }
-  }
-
-  private _handleBufferContentResponse(msg: any) {
-    const tabId = msg.tabId;
-    const resolver = this._pendingBufferRequests.get(tabId);
-    if (resolver) {
-      this._pendingBufferRequests.delete(tabId);
-      resolver(msg.buffer || "");
-    }
-  }
-
-  private async _handleContextMenuShowTabBuffer(args: any) {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot show buffer: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      if (!this._view) {
-        vscode.window.showErrorMessage("Alterminal view not available");
-        return;
-      }
-
-      const tabIdNum = parseInt(tabId);
-
-      // Set up Promise to wait for response
-      const bufferPromise = new Promise<string>((resolve, reject) => {
-        this._pendingBufferRequests.set(tabIdNum, resolve);
-
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          if (this._pendingBufferRequests.has(tabIdNum)) {
-            this._pendingBufferRequests.delete(tabIdNum);
-            reject(new Error("Timeout"));
-          }
-        }, 5000);
-      });
-
-      // Send request to webview
-      this._view.webview.postMessage({
-        command: "getTabBuffer",
-        tabId: tabIdNum,
-      });
-
-      // Wait for response
-      let content: string;
-      try {
-        content = await bufferPromise;
-        if (!content) {
-          content = "(Empty buffer)";
-        }
-      } catch (error) {
-        vscode.window.showErrorMessage("Failed to get buffer content - timeout");
-        return;
-      }
-
-      // Write to temporary file
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const tempFile = path.join(os.tmpdir(), `alterminal-tab-${tabId}-buffer-${timestamp}.txt`);
-      fs.writeFileSync(tempFile, content, "utf8");
-
-      // Open the file
-      const doc = await vscode.workspace.openTextDocument(tempFile);
-      await vscode.window.showTextDocument(doc, {
-        preview: false,
-        viewColumn: vscode.ViewColumn.Active,
-      });
-
-      Logger.info(`Opened buffer for tab ${tabId}`);
-    } catch (error) {
-      Logger.error("Failed to show tab buffer:", error);
-      vscode.window.showErrorMessage(
-        "Failed to show tab buffer. Please try again.",
-      );
-    }
-  }
-
-  private async _handleContextMenuSetTabIcon(args: any) {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot set icon: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      // Common codicons for terminals
-      const iconOptions = [
-        { label: "$(terminal)", description: "Terminal" },
-        { label: "$(console)", description: "Console" },
-        { label: "$(server)", description: "Server" },
-        { label: "$(database)", description: "Database" },
-        { label: "$(tools)", description: "Tools" },
-        { label: "$(play)", description: "Run/Build" },
-        { label: "$(bug)", description: "Debug" },
-        { label: "$(gear)", description: "Settings" },
-        { label: "$(rocket)", description: "Deploy" },
-        { label: "$(beaker)", description: "Test" },
-        { label: "$(package)", description: "Package" },
-        { label: "$(pulse)", description: "Watch" },
-      ];
-
-      const selected = await vscode.window.showQuickPick(iconOptions, {
-        placeHolder: "Select an icon for this tab",
-        matchOnDescription: true,
-      });
-
-      if (!selected) {
-        return;
-      }
-
-      if (this._view) {
-        // Send icon update to webview
-        this._view.webview.postMessage({
-          command: "setTabIcon",
-          tabId: parseInt(tabId),
-          icon: selected.label,
-        });
-
-        Logger.info(`Set icon for tab ${tabId} to ${selected.label}`);
-      }
-    } catch (error) {
-      Logger.error("Failed to set tab icon:", error);
-      vscode.window.showErrorMessage(
-        "Failed to set tab icon. Please try again.",
-      );
-    }
-  }
-
-  public dispose() {
-
-    // Dispose file watcher
-    // Note: State is already saved synchronously by webview, no need for async save here
+  /**
+   * Dispose of all resources
+   */
+  public dispose(): void {
     this._ptyManager.dispose();
+    this.configurationWatcher.dispose();
   }
 }
