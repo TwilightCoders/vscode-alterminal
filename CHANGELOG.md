@@ -4,10 +4,29 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 ## [0.2.13]
 
+### Architecture
+
+- **Major Refactoring - SOLID Decomposition**: Decomposed 943-line `AlterminalProvider` god object into 9 focused manager classes following SOLID principles:
+  - **StateManager**: State persistence and restoration
+  - **ConfigurationWatcher**: Configuration monitoring
+  - **NotificationManager**: UI notifications and alerts
+  - **CommandLauncher**: Command selection and launching UI
+  - **FileOperationHandler**: File drops, path resolution, file/URL opening
+  - **TabContextMenuHandler**: Tab context menu actions
+  - **WebViewLifecycleManager**: Webview creation and lifecycle events
+  - **MessageDispatcher**: Routes messages from webview to handlers
+  - **TerminalController**: High-level terminal operations
+- **Benefits**: Single Responsibility per class, improved testability, better maintainability, clearer separation of concerns, easier to extend without modifying existing code
+
 ### Code Quality
 
-- **Improved Error Handling**: Replaced 30+ silent catch blocks with proper error logging, improving debugging and error visibility
-- **TypeScript Type Safety**: Removed `@ts-nocheck` pragma from terminal.ts and fixed all 80+ type errors with proper property declarations and interfaces. Enables compile-time error detection.
+- **Full TypeScript Type Safety**: Removed `@ts-nocheck` pragma from all 9 webview files (terminal.ts, tabManager.ts, tabTitleManager.ts, contextMenu.ts, interfaces.ts, logger.ts, init.ts, inputHandler.ts, dragDropHandler.ts, lifecycleManager.ts) and fixed 100+ type errors. Zero TypeScript compilation errors.
+- **Improved Error Handling**: Replaced 30+ silent catch blocks with proper error logging using Logger.error/warn, improving debugging and error visibility
+
+### Bug Fixes
+
+- **Fixed State Restoration**: Corrected state restoration flow to properly initialize terminals on first load and restore saved state on subsequent loads
+- **Fixed Serializer Context Binding**: Fixed `this` context loss in serializer's handleMessage method by wrapping in arrow function
 
 ## [0.2.12]
 
