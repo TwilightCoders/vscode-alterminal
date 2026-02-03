@@ -2,6 +2,12 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.13]
+
+### Code Quality
+
+- **Improved Error Handling**: Replaced 30+ silent catch blocks with proper error logging, improving debugging and error visibility
+
 ## [0.2.12]
 
 ### Performance Improvements

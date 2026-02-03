@@ -334,11 +334,15 @@ export class TerminalInstance {
             if (window.tabManager?.scheduleSaveState) {
               try {
                 window.tabManager.scheduleSaveState("terminalData");
-              } catch (_) {}
+              } catch (e) {
+                Logger.warn(`Failed to schedule state save for terminal ${this.id}:`, e);
+              }
             } else if (window.tabManager?.saveToLocalState) {
               try {
                 window.tabManager.saveToLocalState();
-              } catch (_) {}
+              } catch (e) {
+                Logger.warn(`Failed to save state for terminal ${this.id}:`, e);
+              }
             }
           },
           { maxWait: DEBOUNCE_TIMINGS.TERMINAL_DATA_MAX_WAIT },
@@ -436,7 +440,9 @@ export class TerminalInstance {
               window.tabManager.scheduleSaveState("terminalWrite");
             else if (window.tabManager?.saveToLocalState)
               window.tabManager.saveToLocalState();
-          } catch (_) {}
+          } catch (e) {
+            Logger.warn(`Failed to save state after write for terminal ${this.id}:`, e);
+          }
         },
         { maxWait: DEBOUNCE_TIMINGS.TERMINAL_WRITE_MAX_WAIT },
       );
@@ -508,7 +514,9 @@ export class TerminalInstance {
               `🧹 Post-clear snapshot still empty for terminal ${this.id}`,
             );
           }
-        } catch (_) {}
+        } catch (e) {
+          Logger.warn(`Failed to capture post-clear snapshot for terminal ${this.id}:`, e);
+        }
       }, 60); // small delay to allow prompt redraw
 
       Logger.debug(`Terminal ${this.id} cleared and state saved`);
@@ -641,7 +649,9 @@ export class TerminalInstance {
             if (window.tabManager && window.tabManager._recordTerminalTiming) {
               window.tabManager._recordTerminalTiming(this.id);
             }
-          } catch (e) {}
+          } catch (e) {
+            // Performance timing is non-critical, ignore failures
+          }
           // Simple refit after activation
           setTimeout(() => this.fit(), 50);
         });
@@ -895,7 +905,11 @@ export class TerminalInstance {
     if (container && "ResizeObserver" in window) {
       const ro = new ResizeObserver(() => {
         if (this.isActive) {
-          try { this.fit(); } catch (_) {}
+          try {
+            this.fit();
+          } catch (e) {
+            Logger.warn(`Fit failed for terminal ${this.id}:`, e);
+          }
           // If width/height just became non-zero, force redraw sequence
           if (
             this.terminalContainer &&
@@ -909,7 +923,11 @@ export class TerminalInstance {
       ro.observe(container);
       // Also observe the terminal container directly for more accurate size changes
       if (this.terminalContainer) {
-        try { ro.observe(this.terminalContainer); } catch (_) {}
+        try {
+          ro.observe(this.terminalContainer);
+        } catch (e) {
+          Logger.warn(`Failed to observe terminal container for ${this.id}:`, e);
+        }
       }
       this._resizeObserver = ro;
     }

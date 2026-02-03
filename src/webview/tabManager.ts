@@ -100,7 +100,9 @@ export class TabManager {
                 this.updateTabLabel(message.tabId, message.title);
                 this.scheduleSaveState("formatTabTitleResponse");
               }
-            } catch (_) {}
+            } catch (e) {
+              Logger.warn("Failed to parse tab context:", e);
+            }
             break;
           case "savedCommandsList":
             try {
@@ -125,7 +127,9 @@ export class TabManager {
                   }
                 }
               }
-            } catch (_) {}
+            } catch (e) {
+              Logger.warn("Failed to parse tab context:", e);
+            }
             break;
           case "restoreState":
             Logger.debug(
@@ -242,7 +246,9 @@ export class TabManager {
             if (a && a.terminal) {
               try {
                 a.fit();
-              } catch (_) {}
+              } catch (e) {
+              Logger.warn("Failed to parse tab context:", e);
+            }
             }
             break;
 
@@ -459,7 +465,9 @@ export class TabManager {
         for (const [, term] of this.terminals) {
           try {
             term.serialize();
-          } catch (_) {}
+          } catch (e) {
+            Logger.warn("Failed to update tab context:", e);
+          }
         }
         // Persist immediately
         this.saveToLocalState();
@@ -654,7 +662,9 @@ export class TabManager {
     // Ask extension to format the initial title using user template
     try {
   this.requestFormattedTitle(tabId);
-    } catch (_) {}
+    } catch (e) {
+      Logger.warn("Operation failed:", e);
+    }
 
     // Set as active if first tab, otherwise switch to it
     if (this.activeTabId === null) {
@@ -1198,7 +1208,9 @@ export class TabManager {
                 `📌 Anchored snapshot post-open for terminal ${terminal.id} (chars=${snap.length})`,
               );
             }
-          } catch (_) {}
+          } catch (e) {
+            Logger.warn("Failed to update tab context:", e);
+          }
         });
       } else {
         // Fallback immediate start if promise missing
@@ -1229,7 +1241,9 @@ export class TabManager {
       // Request initial formatted title from extension
       try {
         this.requestFormattedTitle(terminalData.id, { processName: undefined });
-      } catch (_) {}
+      } catch (e) {
+      Logger.warn("Operation failed:", e);
+    }
 
       // PTY process creation is now handled by the Terminal instance itself
     }
@@ -1274,9 +1288,13 @@ export class TabManager {
             label: state.label,
             bufferLength: (state.buffer || "").length,
           });
-        } catch (_) {}
+        } catch (e) {
+      Logger.warn("Operation failed:", e);
+    }
       }
-    } catch (_) {}
+    } catch (e) {
+      Logger.warn("Operation failed:", e);
+    }
     Logger.debug("🧷 Post-restore immediate baseline save");
     this.saveToLocalState();
     Logger.debug(
@@ -1987,7 +2005,9 @@ export class TabManager {
   // Ask extension to apply full template formatting (single source of truth)
     try {
       this.requestFormattedTitle(tabId, { processName });
-    } catch (_) {}
+    } catch (e) {
+      Logger.warn("Operation failed:", e);
+    }
   }
 
   // Title generation is delegated to the extension formatter
