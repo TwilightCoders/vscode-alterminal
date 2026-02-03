@@ -7,6 +7,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 ### Code Quality
 
 - **Improved Error Handling**: Replaced 30+ silent catch blocks with proper error logging, improving debugging and error visibility
+- **TypeScript Type Safety**: Removed `@ts-nocheck` pragma from terminal.ts and fixed all 80+ type errors with proper property declarations and interfaces. Enables compile-time error detection.
 
 ## [0.2.12]
 

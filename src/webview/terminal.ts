@@ -1,9 +1,23 @@
-// @ts-nocheck
 import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { TERMINAL_DEFAULTS, DEBOUNCE_TIMINGS } from "../constants.js";
+
+// Type declarations for xterm.js and addons (loaded dynamically in webview)
+declare const window: Window & {
+  Terminal?: any;
+  scrollbackLines?: number;
+  tabManager?: any;
+  DEVELOPER_MODE?: boolean;
+};
+
+declare const globalThis: any;
+
+interface TerminalOptions {
+  autoStartPty?: boolean;
+  launchCommand?: string | null;
+}
 
 /**
  * Terminal Class - Unified Frontend + Backend Terminal Instance
@@ -29,14 +43,66 @@ import { TERMINAL_DEFAULTS, DEBOUNCE_TIMINGS } from "../constants.js";
  */
 
 export class TerminalInstance {
+  // Core properties
+  id: number;
+  label: string;
+  baseLabel: string;
+  icon: string | null;
+  vscode: any;
+  terminalTheme: any;
+  getThemeColor: (cssVar: string, fallback: string) => string;
+  terminalType: string;
+  launchCommand: string | null;
+
+  // Terminal and addons
+  terminal: any;
+  fitAddon: any;
+  serializeAddon: any;
+  unicodeAddon: any;
+  webglAddon?: any;
+
+  // Managers and handlers
+  lifecycleManager: TerminalLifecycleManager;
+  inputHandler: any;
+  linkProviderDisposable: any;
+  linkProviders?: any[];
+  linkMatcherIds?: number[];
+
+  // Event disposables
+  dataDisposable: any;
+  resizeDisposable: any;
+  bellDisposable: any;
+  renderDisposable: any;
+
+  // State tracking
+  hasUserInteraction: boolean;
+  _isDirty: boolean;
+  _cachedSerializedState: string | null;
+  _simpleHistory: boolean;
+  _didInit: boolean;
+  _pendingPtyStart: boolean;
+  _mutationObserver: MutationObserver | null;
+  _lastWriteTs?: number;
+  _openedResolve?: (value: any) => void;
+
+  // Lifecycle
+  isActive: boolean;
+  whenOpened: Promise<any>;
+  terminalContainer: HTMLElement | null;
+  onBellReceived?: () => void;
+  _openedResolved?: boolean;
+  _ptyStarted?: boolean;
+  _visibilityInstalled?: boolean;
+  _resizeObserver?: ResizeObserver;
+
   constructor(
-    id,
-    label,
-    vscode,
-    terminalTheme,
-    getThemeColor,
-    terminalType = "default",
-    options = {},
+    id: number,
+    label: string,
+    vscode: any,
+    terminalTheme: any,
+    getThemeColor: (cssVar: string, fallback: string) => string,
+    terminalType: string = "default",
+    options: TerminalOptions = {},
   ) {
     const { autoStartPty = true, launchCommand = null } = options;
     this.launchCommand = launchCommand;
@@ -67,7 +133,7 @@ export class TerminalInstance {
     this.unicodeAddon = null;
 
     // Providers
-    this.lifecycleManager = new TerminalLifecycleManager(this, vscode, id);
+    this.lifecycleManager = new TerminalLifecycleManager(this, vscode, String(id));
     this.linkProviderDisposable = null;
     this._mutationObserver = null;
 
@@ -102,10 +168,10 @@ export class TerminalInstance {
         XTerminal = window.Terminal;
       else if (globalThis.Terminal && typeof globalThis.Terminal === "function")
         XTerminal = globalThis.Terminal;
-      else if (self.Terminal && typeof self.Terminal === "function")
-        XTerminal = self.Terminal;
+      else if ((self as any).Terminal && typeof (self as any).Terminal === "function")
+        XTerminal = (self as any).Terminal;
       else {
-        const possible = window.Terminal || globalThis.Terminal;
+        const possible = (window as any).Terminal || globalThis.Terminal;
         if (possible && possible.Terminal) XTerminal = possible.Terminal;
         else throw new Error("Terminal constructor not found");
       }
@@ -142,7 +208,7 @@ export class TerminalInstance {
       });
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
-      this.unicodeAddon = new Unicode11Addon.Unicode11Addon();
+      this.unicodeAddon = new (window as any).Unicode11Addon.Unicode11Addon();
       // Use WebGL renderer for best performance, fallback to DOM if unsupported
       try {
         this.webglAddon = new WebglAddon.WebglAddon();
@@ -317,7 +383,7 @@ export class TerminalInstance {
       if (!this.isActive) {
         // Show bell notification on inactive tabs
         if (this.onBellReceived) {
-          this.onBellReceived(this.id);
+          (this.onBellReceived as any)(this.id);
         }
       }
     });
@@ -408,7 +474,7 @@ export class TerminalInstance {
     this._openedResolved = true;
     if (this._openedResolve) {
       try {
-        this._openedResolve();
+        (this._openedResolve as any)();
       } catch {}
     }
     // Start PTY immediately if not deferred
