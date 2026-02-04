@@ -215,7 +215,8 @@ export class TerminalInstance {
         this.webglAddon.onContextLoss(() => {
           this.webglAddon.dispose();
           this.webglAddon = null;
-          Logger.debug(`Terminal ${this.id}: WebGL context lost, using DOM renderer`);
+          Logger.warn(`Terminal ${this.id}: WebGL context lost`);
+          this.showWebGLError();
         });
         this.terminal.loadAddon(this.webglAddon);
         Logger.debug(`Terminal ${this.id}: Using WebGL renderer (GPU accelerated)`);
@@ -258,6 +259,8 @@ export class TerminalInstance {
   setupFilePathLinks() {
     // Use native xterm.js link provider API for better compatibility
     const provider = {
+      // Prevent xterm.js from trying to open links itself (causes sandbox errors)
+      willLinkActivate: () => false,
       provideLinks: (y, callback) => {
         try {
           // y parameter is 1-based, convert to 0-based buffer line like WebLinksAddon does
@@ -560,13 +563,17 @@ export class TerminalInstance {
     try {
       this.terminal.clear();
       
+      // Invalidate cached state since we just cleared
+      this._cachedSerializedState = null;
+      this._isDirty = true;
+      
       // Reset interaction tracking since user is starting fresh
       this.resetUserInteraction();
       
-      // Don't immediately wipe snapshots; the shell usually redraws a fresh prompt shortly after clear
-      // Instead schedule a short delayed snapshot capture so the prompt line is preserved
+      // Schedule a snapshot capture after the shell redraws the prompt
       setTimeout(() => {
         try {
+          this._isDirty = true; // Force fresh serialize
           const snap = this.serialize();
           if (snap && snap.trim().length > 0) {
             if (window.tabManager?.scheduleSaveState) {
@@ -575,17 +582,13 @@ export class TerminalInstance {
             Logger.debug(
               `🧹 Post-clear snapshot captured for terminal ${this.id} (chars=${snap.length})`,
             );
-          } else {
-            Logger.debug(
-              `🧹 Post-clear snapshot still empty for terminal ${this.id}`,
-            );
           }
         } catch (e) {
           Logger.warn(`Failed to capture post-clear snapshot for terminal ${this.id}:`, e);
         }
-      }, 60); // small delay to allow prompt redraw
+      }, 100); // delay to allow prompt redraw
 
-      Logger.debug(`Terminal ${this.id} cleared and state saved`);
+      Logger.debug(`Terminal ${this.id} cleared`);
     } catch (error) {
       Logger.error(`Failed to clear terminal ${this.id}:`, error);
     }
@@ -730,7 +733,9 @@ export class TerminalInstance {
    * Uses cached state if terminal hasn't changed (dirty tracking optimization)
    */
   serialize() {
-    if (!this.serializeAddon) return null;
+    if (!this.serializeAddon) {
+      return null;
+    }
 
     // Return cached state if not dirty (performance optimization)
     if (!this._isDirty && this._cachedSerializedState !== null) {
@@ -766,6 +771,10 @@ export class TerminalInstance {
     try {
       // Write content directly - xterm.js 6.0.0 handles all sequences properly
       this.terminal.write(serializedContent);
+
+      // Mark as dirty and cache the restored content so serialize() works immediately
+      this._isDirty = false; // Content is already saved, mark as clean
+      this._cachedSerializedState = serializedContent; // Cache the restored content
 
       window.dispatchEvent(new Event("resize"));
     } catch (error) {
@@ -1016,10 +1025,8 @@ export class TerminalInstance {
           "webglcontextlost",
           (e) => {
             e.preventDefault();
-            Logger.warn("WebGL context lost – falling back to DOM renderer");
-            // DOM renderer is automatically used when WebGL fails
-            // No need to manually load a fallback addon
-            this.fit();
+            Logger.warn("WebGL context lost at canvas level");
+            this.showWebGLError();
           },
           { passive: false },
         );
@@ -1058,6 +1065,62 @@ export class TerminalInstance {
     } catch (e) {
       Logger.debug("MutationObserver unavailable:", e);
     }
+  }
+
+  /**
+   * Show a user-visible error overlay when WebGL context is lost
+   */
+  showWebGLError(): void {
+    if (!this.terminalContainer) return;
+
+    // Don't show multiple overlays
+    if (this.terminalContainer.querySelector(".webgl-error-overlay")) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "webgl-error-overlay";
+    overlay.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--vscode-panel-background, #1e1e1e);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      gap: 12px;
+    `;
+
+    const message = document.createElement("div");
+    message.style.cssText = `
+      color: var(--vscode-errorForeground, #f48771);
+      font-size: 14px;
+      text-align: center;
+      padding: 0 20px;
+    `;
+    message.textContent = "Terminal rendering error: WebGL context was lost.";
+
+    const refreshButton = document.createElement("button");
+    refreshButton.style.cssText = `
+      background: var(--vscode-button-background, #0e639c);
+      color: var(--vscode-button-foreground, #ffffff);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    `;
+    refreshButton.textContent = "Refresh Terminal";
+    refreshButton.addEventListener("click", () => {
+      // Request a refresh from the extension
+      this.vscode.postMessage({ command: "refresh" });
+    });
+
+    overlay.appendChild(message);
+    overlay.appendChild(refreshButton);
+    this.terminalContainer.appendChild(overlay);
   }
 
 }
