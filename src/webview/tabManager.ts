@@ -4,6 +4,7 @@ import { Logger } from "./logger.js";
 import { MessageHandler, MessageHandlerCallbacks } from "./messageHandler.js";
 import { KeyboardManager } from "./keyboardManager.js";
 import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
+import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
 // Import shared Debouncer (was missing, causing ReferenceError at runtime)
 import { Debouncer } from "../utils/debouncer.js";
 
@@ -62,14 +63,11 @@ export class TabManager {
   private _historyBannerInjected: boolean;
   private _historyBannerShownEver: boolean;
   private _alwaysShowTabs: boolean;
-  private _windowResizeHandler: (() => void) | null;
-  private _windowFocusHandler: (() => void) | null;
-  private _windowBeforeUnloadHandler: (() => void) | null;
-  private _windowBlurHandler: (() => void) | null;
   private _initTimeoutId: ReturnType<typeof setTimeout> | null;
   private _messageHandler: MessageHandler;
   private _keyboardManager: KeyboardManager;
   private _tabUIManager: TabUIManager;
+  private _layoutManager: LayoutManager;
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -93,11 +91,6 @@ export class TabManager {
     // Configuration settings
     this._alwaysShowTabs = false;
 
-    // Event handler references for cleanup
-    this._windowResizeHandler = null;
-    this._windowFocusHandler = null;
-    this._windowBeforeUnloadHandler = null;
-    this._windowBlurHandler = null;
     this._initTimeoutId = null;
 
     // Initialize message handler with callbacks
@@ -115,9 +108,10 @@ export class TabManager {
     this._tabUIManager = new TabUIManager(this._createTabUICallbacks());
     this._tabUIManager.setup();
 
-    // Initialize everything
-    this.setupResponsiveLayout();
-    this.setupWindowEventHandlers();
+    // Initialize layout manager for responsive layout and window events
+    this._layoutManager = new LayoutManager(this._createLayoutCallbacks());
+    this._layoutManager.setupResponsiveLayout();
+    this._layoutManager.setupWindowEventHandlers();
 
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
@@ -189,6 +183,17 @@ export class TabManager {
     };
   }
 
+  /**
+   * Create callbacks for LayoutManager
+   */
+  private _createLayoutCallbacks(): LayoutManagerCallbacks {
+    return {
+      getActiveTerminal: () => this.getActiveTerminal(),
+      saveToLocalState: () => this.saveToLocalState(),
+      scheduleSaveState: (reason) => this.scheduleSaveState(reason),
+    };
+  }
+
   _findTabIdByCommand(cmd: string | null): number | null {
     if (!cmd) return null;
     for (const [id, term] of this.terminals) {
@@ -240,50 +245,6 @@ export class TabManager {
   }
 
   /**
-   * Setup window event handlers
-   */
-  setupWindowEventHandlers() {
-    // Window resize handling
-    this._windowResizeHandler = () => {
-      const activeTerminal = this.getActiveTerminal();
-      if (activeTerminal) {
-        activeTerminal.fit();
-      }
-    };
-    window.addEventListener("resize", this._windowResizeHandler);
-
-    // Focus handling
-    this._windowFocusHandler = () => {
-      requestAnimationFrame(() => {
-        const activeTerminal = this.getActiveTerminal();
-        if (activeTerminal) activeTerminal.fit();
-      });
-    };
-    window.addEventListener("focus", this._windowFocusHandler);
-
-    // Keyboard shortcuts are handled by KeyboardManager (initialized in constructor)
-
-    // Flush any pending debounced saves just before the webview unloads (window/tab close, reload)
-    this._windowBeforeUnloadHandler = () => {
-      try {
-        // Force each terminal to produce a fresh snapshot (ignores debounce timers)
-        for (const [, term] of this.terminals) {
-          try {
-            term.serialize();
-          } catch (e) {
-            Logger.warn("Failed to update tab context:", e);
-          }
-        }
-        // Persist immediately
-        this.saveToLocalState();
-      } catch (e) {
-        console.warn("beforeunload save failed", e);
-      }
-    };
-    window.addEventListener("beforeunload", this._windowBeforeUnloadHandler);
-  }
-
-  /**
    * Ensure we have at least one terminal
    */
   ensureInitialized() {
@@ -298,7 +259,7 @@ export class TabManager {
    */
   initialize() {
     // Show the main interface and hide loading screen
-    this.showInterface();
+    this._layoutManager.showInterface();
     this.isInitialized = true;
   }
 
@@ -313,7 +274,7 @@ export class TabManager {
     }
 
     // Show interface if not already shown
-    this.showInterface();
+    this._layoutManager.showInterface();
 
     Logger.debug(
       "📝 createNewTab called with type:",
@@ -975,7 +936,7 @@ export class TabManager {
     }
 
     // Show the interface after restoring
-    this.showInterface();
+    this._layoutManager.showInterface();
 
     // Clear the init timeout since we successfully received state
     if (this._initTimeoutId) {
@@ -1121,96 +1082,6 @@ export class TabManager {
   }
 
   /**
-   * Set up responsive layout detection and switching
-   */
-  setupResponsiveLayout() {
-    const container = document.getElementById("container");
-    if (!container) return;
-
-    // ResizeObserver for responsive tab layout
-    const resizeObserver = new ResizeObserver((entries) => {
-      this.updateTabLayout(entries[0].contentRect);
-    });
-
-    resizeObserver.observe(container);
-
-    // Apply initial layout
-    requestAnimationFrame(() => {
-      const rect = container.getBoundingClientRect();
-      this.updateTabLayout(rect);
-    });
-  }
-
-  /**
-   * Update tab layout based on configuration and container size
-   */
-  updateTabLayout(rect) {
-    const container = document.getElementById("container");
-    if (!container) return;
-
-    const { width, height } = rect;
-    const aspectRatio = width / height;
-
-    // Get layout preference from configuration
-    const layoutPreference = this.getTabLayoutPreference();
-
-    let useVerticalTabs = false;
-
-    switch (layoutPreference) {
-      case "vertical":
-        useVerticalTabs = true;
-        break;
-      case "horizontal":
-        useVerticalTabs = false;
-        break;
-      case "auto":
-      default:
-        // Switch to vertical tabs if width > height * 1.5
-        useVerticalTabs = aspectRatio > 1.5;
-        break;
-    }
-
-    // Apply the layout
-    if (useVerticalTabs) {
-      container.classList.add("vertical-tabs");
-    } else {
-      container.classList.remove("vertical-tabs");
-    }
-
-    // Refit active terminal after layout change
-    requestAnimationFrame(() => {
-      const activeTerminal = this.getActiveTerminal();
-      if (activeTerminal) activeTerminal.fit();
-    });
-  }
-
-  /**
-   * Show the main interface and hide loading screen
-   */
-  showInterface(): void {
-    const loadingDiv = document.getElementById("loading-screen");
-    const container = document.getElementById("container");
-
-    if (loadingDiv) {
-      loadingDiv.style.display = "none";
-    }
-
-    if (container) {
-      container.style.display = "flex";
-    }
-    
-    Logger.debug("🎬 Interface shown");
-  }
-
-  /**
-   * Get tab layout preference from configuration
-   */
-  getTabLayoutPreference() {
-    // For now, return 'auto' - this will be connected to VS Code settings later
-    return "auto";
-  }
-
-  /**
    * Handle process name changes for dynamic tab labeling
    */
   handleProcessChange(processName, tabId) {
@@ -1301,22 +1172,9 @@ export class TabManager {
    * Dispose of all terminals and cleanup
    */
   dispose() {
-    // Remove window event listeners to prevent memory leaks
-    if (this._windowResizeHandler) {
-      window.removeEventListener("resize", this._windowResizeHandler);
-      this._windowResizeHandler = null;
-    }
-    if (this._windowFocusHandler) {
-      window.removeEventListener("focus", this._windowFocusHandler);
-      this._windowFocusHandler = null;
-    }
-    if (this._windowBeforeUnloadHandler) {
-      window.removeEventListener("beforeunload", this._windowBeforeUnloadHandler);
-      this._windowBeforeUnloadHandler = null;
-    }
-    if (this._windowBlurHandler) {
-      window.removeEventListener("blur", this._windowBlurHandler);
-      this._windowBlurHandler = null;
+    // Dispose layout manager (handles window event cleanup)
+    if (this._layoutManager) {
+      this._layoutManager.dispose();
     }
 
     // Dispose keyboard manager
