@@ -471,10 +471,26 @@
         
         .loading {
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
+            gap: 16px;
             color: var(--vscode-foreground, #cccccc);
+            font-size: 13px;
+        }
+        
+        .loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--vscode-foreground, #cccccc);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         
         /* Tab responsiveness */
@@ -513,7 +529,10 @@
     </style>
 </head>
 <body>
-    <div class="loading">Loading terminal...</div>
+    <div class="loading" id="loading-screen">
+        <div class="loading-spinner"></div>
+        <span>Loading terminal...</span>
+    </div>
     
     <div id="container" class="container" style="display: none;">
         <nav id="tab-bar" class="tab-bar">
@@ -556,6 +575,9 @@
             "./inputHandler.js": "{{inputHandlerUri}}",
             "./tabTitleManager.js": "{{tabTitleManagerUri}}",
             "./terminal.js": "{{terminalUri}}",
+            "./messageHandler.js": "{{messageHandlerUri}}",
+            "./keyboardManager.js": "{{keyboardManagerUri}}",
+            "./tabUIManager.js": "{{tabUIManagerUri}}",
             "./tabManager.js": "{{tabManagerUri}}",
             "./dragDropHandler.js": "{{dragDropHandlerUri}}",
             "./init.js": "{{initUri}}"
@@ -567,6 +589,9 @@
     <script type="module" src="{{inputHandlerUri}}"></script>
     <script type="module" src="{{tabTitleManagerUri}}"></script>
     <script type="module" src="{{terminalUri}}"></script>
+    <script type="module" src="{{messageHandlerUri}}"></script>
+    <script type="module" src="{{keyboardManagerUri}}"></script>
+    <script type="module" src="{{tabUIManagerUri}}"></script>
     <script type="module" src="{{tabManagerUri}}"></script>
     <script type="module" src="{{dragDropHandlerUri}}"></script>
     <script type="module" src="{{initUri}}"></script>

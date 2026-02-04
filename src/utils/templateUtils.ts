@@ -68,6 +68,9 @@ export class TemplateUtils {
     const inputHandlerUri = getWebviewScriptUri("inputHandler.js");
     const tabTitleManagerUri = getWebviewScriptUri("tabTitleManager.js");
     const terminalUri = getWebviewScriptUri("terminal.js");
+    const messageHandlerUri = getWebviewScriptUri("messageHandler.js");
+    const keyboardManagerUri = getWebviewScriptUri("keyboardManager.js");
+    const tabUIManagerUri = getWebviewScriptUri("tabUIManager.js");
     const tabManagerUri = getWebviewScriptUri("tabManager.js");
     const dragDropHandlerUri = getWebviewScriptUri("dragDropHandler.js");
     const initUri = getWebviewScriptUri("init.js");
@@ -123,6 +126,9 @@ export class TemplateUtils {
       inputHandlerUri,
       tabTitleManagerUri,
       terminalUri,
+      messageHandlerUri,
+      keyboardManagerUri,
+      tabUIManagerUri,
       tabManagerUri,
       dragDropHandlerUri,
       initUri,

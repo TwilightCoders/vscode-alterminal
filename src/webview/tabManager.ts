@@ -1,6 +1,9 @@
 import { TerminalInstance } from "./terminal.js";
 import { TabTitleManager } from "./tabTitleManager.js";
 import { Logger } from "./logger.js";
+import { MessageHandler, MessageHandlerCallbacks } from "./messageHandler.js";
+import { KeyboardManager } from "./keyboardManager.js";
+import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 // Import shared Debouncer (was missing, causing ReferenceError at runtime)
 import { Debouncer } from "../utils/debouncer.js";
 
@@ -63,6 +66,10 @@ export class TabManager {
   private _windowFocusHandler: (() => void) | null;
   private _windowBeforeUnloadHandler: (() => void) | null;
   private _windowBlurHandler: (() => void) | null;
+  private _initTimeoutId: ReturnType<typeof setTimeout> | null;
+  private _messageHandler: MessageHandler;
+  private _keyboardManager: KeyboardManager;
+  private _tabUIManager: TabUIManager;
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -91,342 +98,103 @@ export class TabManager {
     this._windowFocusHandler = null;
     this._windowBeforeUnloadHandler = null;
     this._windowBlurHandler = null;
+    this._initTimeoutId = null;
+
+    // Initialize message handler with callbacks
+    this._messageHandler = new MessageHandler(vscode, this._createMessageCallbacks());
+    this._messageHandler.setup();
+
+    // Initialize keyboard manager for shortcuts
+    this._keyboardManager = new KeyboardManager({
+      clearActiveTerminal: () => this.clearActiveTerminal(),
+      resetActiveTerminal: () => this.resetActiveTerminal(),
+    });
+    this._keyboardManager.setup();
+
+    // Initialize tab UI manager for tab bar interactions
+    this._tabUIManager = new TabUIManager(this._createTabUICallbacks());
+    this._tabUIManager.setup();
 
     // Initialize everything
-    this.initializeEventListeners();
     this.setupResponsiveLayout();
-    this.setupMessageHandling();
     this.setupWindowEventHandlers();
-    this.autoInitialize();
 
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
     // The extension will respond with restoreState or initializeEmpty
     this.vscode.postMessage({ command: "webviewReady" });
 
+    // Fallback: if no state arrives within 5 seconds, create a default terminal
+    // This handles edge cases where extension message is lost
+    this._initTimeoutId = setTimeout(() => {
+      if (this.terminals.size === 0) {
+        Logger.warn("⏰ Init timeout - no state received, creating default terminal");
+        this.restoreFromState(this.createDefaultState(), true);
+      }
+    }, 5000);
+
     // Performance samples storage
     window.__terminalPerf = window.__terminalPerf || { samples: [] };
   }
 
-  _findTabIdByCommand(cmd) {
+  /**
+   * Create callbacks for MessageHandler
+   */
+  private _createMessageCallbacks(): MessageHandlerCallbacks {
+    return {
+      saveAllStates: () => this.saveAllStates(),
+      saveToLocalState: () => this.saveToLocalState(),
+      restoreFromState: (state, isCold) => this.restoreFromState(state, isCold),
+      createDefaultState: () => this.createDefaultState(),
+      getActiveTerminal: () => this.getActiveTerminal(),
+      getTerminals: () => this.terminals,
+      writeToTerminal: (tabId, data) => this.writeToTerminal(tabId, data),
+      ensureInitialized: () => this.ensureInitialized(),
+      createNewTab: (type, cmd) => this.createNewTab(type, cmd),
+      closeTab: (tabId) => this.closeTab(tabId),
+      switchToTab: (tabId) => this.switchToTab(tabId),
+      updateTabLabel: (tabId, label) => this.updateTabLabel(tabId, label),
+      startTabRename: (tabId) => this.startTabRename(tabId),
+      setTabIcon: (tabId, icon) => this.setTabIcon(tabId, icon),
+      handleGetTabBuffer: (tabId) => this.handleGetTabBuffer(tabId),
+      updateTabBarVisibility: () => this.updateTabBarVisibility(),
+      updateSaveButtonVisibility: (cmd, saved) => this.updateSaveButtonVisibility(cmd, saved),
+      resetActiveTerminal: () => this.resetActiveTerminal(),
+      handleProcessChange: (name, tabId) => this.handleProcessChange(name, tabId),
+      scheduleSaveState: (reason) => this.scheduleSaveState(reason),
+      getSavedCommandsSet: () => this._savedCommandsSet,
+      setSavedCommandsSet: (set) => { this._savedCommandsSet = set; },
+      getHistoryBannerShownEver: () => this._historyBannerShownEver,
+      setHistoryBannerShownEver: (val) => { this._historyBannerShownEver = val; },
+      setAlwaysShowTabs: (val) => { this._alwaysShowTabs = val; },
+      findTabIdByCommand: (cmd) => this._findTabIdByCommand(cmd),
+      reportPerformance: () => this._reportPerformance(),
+    };
+  }
+
+  /**
+   * Create callbacks for TabUIManager
+   */
+  private _createTabUICallbacks(): TabUIManagerCallbacks {
+    return {
+      switchToTab: (tabId) => this.switchToTab(tabId),
+      closeTab: (tabId) => this.closeTab(tabId),
+      startTabRename: (tabId, labelElement) => this.startTabRename(tabId, labelElement),
+      saveCommand: (tabId) => this.saveCommand(tabId),
+      openTabSettings: (tabId) => this.openTabSettings(tabId),
+      scheduleSaveState: (reason) => this.scheduleSaveState(reason),
+      getTerminal: (tabId) => this.terminals.get(tabId),
+      getSavedCommandsSet: () => this._savedCommandsSet,
+      getTitleManagers: () => this.titleManagers,
+    };
+  }
+
+  _findTabIdByCommand(cmd: string | null): number | null {
     if (!cmd) return null;
     for (const [id, term] of this.terminals) {
       if (term.launchCommand === cmd) return id;
     }
     return null;
-  }
-
-  /**
-   * Setup message handling from extension host
-   */
-  setupMessageHandling() {
-    window.addEventListener("message", (event) => {
-      const message = event.data;
-
-      try {
-        const currentState = this.saveAllStates();
-        switch (message.command) {
-          case "formatTabTitleResponse":
-            try {
-              if (
-                typeof message.tabId === "number" &&
-                typeof message.title === "string"
-              ) {
-                this.updateTabLabel(message.tabId, message.title);
-                this.scheduleSaveState("formatTabTitleResponse");
-              }
-            } catch (e) {
-              Logger.warn("Failed to parse tab context:", e);
-            }
-            break;
-          case "savedCommandsList":
-            try {
-              this._savedCommandsSet = new Set(message.commands || []);
-              for (const [id, term] of this.terminals) {
-                if (
-                  term.launchCommand &&
-                  this._savedCommandsSet.has(term.launchCommand)
-                ) {
-                  const tabEl = document.querySelector(
-                    `.tab[data-tab-id="${id}"]`,
-                  );
-                  if (tabEl) {
-                    const ctx = JSON.parse(
-                      tabEl.getAttribute("data-vscode-context"),
-                    );
-                    ctx.savedCommand = true;
-                    tabEl.setAttribute(
-                      "data-vscode-context",
-                      JSON.stringify(ctx),
-                    );
-                  }
-                }
-              }
-            } catch (e) {
-              Logger.warn("Failed to parse tab context:", e);
-            }
-            break;
-          case "restoreState":
-            Logger.debug(
-              "🔄 Received restoreState - terminals in message:",
-              message.state?.terminals?.length,
-              ", existing terminals:",
-              this.terminals.size,
-              ", cold:",
-              !!message.cold,
-            );
-            if (this.terminals.size > 0) {
-              // Determine if what we have are just placeholder empty terminals (no buffer, default label)
-              let onlyPlaceholders = true;
-              for (const [, t] of this.terminals) {
-                try {
-                  const st = t.getState();
-                  const hasContent = st.buffer && st.buffer.trim().length > 0;
-                  const nonDefaultLabel = st.label && st.label !== "Terminal";
-                  if (hasContent || nonDefaultLabel || t.launchCommand) {
-                    onlyPlaceholders = false;
-                    break;
-                  }
-                } catch {
-                  onlyPlaceholders = false;
-                  break;
-                }
-              }
-              if (!onlyPlaceholders) {
-                Logger.debug(
-                  "⏭️ Skipping restoreState (real terminals already present) treating as warm focus",
-                );
-                break;
-              } else {
-                Logger.debug(
-                  "♻️ Existing terminals are placeholders; proceeding with full restore",
-                );
-              }
-            }
-
-            // Try webview state first, then fall back to extension state
-            const webviewState = vscode.getState();
-            Logger.debug("📦 Webview state:", webviewState ? "present" : "empty", 
-              ", fullTabState:", webviewState?.fullTabState ? `${webviewState.fullTabState.terminals?.length} terminals` : "none");
-            
-            // If we've ever shown the history banner before in ANY previous webview instance, record it separately
-            if (webviewState && webviewState.historyBannerShownOnce) {
-              this._historyBannerShownEver = true;
-            }
-            if (webviewState && webviewState.fullTabState) {
-              Logger.debug("🔄 Using webview state (more recent)");
-              this.restoreFromState(webviewState.fullTabState, !!message.cold);
-            } else if (message.state) {
-              Logger.debug("🔄 Using extension state (fallback)");
-              this.restoreFromState(message.state, !!message.cold);
-            } else {
-              Logger.debug("🔄 No state available, creating default");
-              this.restoreFromState(this.createDefaultState(), !!message.cold);
-            }
-            break;
-
-          case "initializeEmpty":
-            Logger.debug(
-              "🆕 Received initializeEmpty command - checking for existing state",
-            );
-
-            // Check if we have webview state before creating empty
-            const existingState = vscode.getState();
-            if (existingState && existingState.fullTabState) {
-              Logger.debug(
-                "🔄 Found existing webview state, restoring instead of creating empty",
-              );
-              this.restoreFromState(existingState.fullTabState, !!message.cold);
-            } else {
-              Logger.debug("🆕 No existing state, creating default terminal");
-              const defaultState = this.createDefaultState();
-              this.restoreFromState(defaultState, !!message.cold);
-            }
-            break;
-
-          case "data":
-            this.ensureInitialized();
-
-            // Write data to specific terminal
-            if (message.tabId) {
-              this.writeToTerminal(message.tabId, message.data);
-            } else {
-              // Fallback to active terminal
-              const activeTerminal = this.getActiveTerminal();
-              if (activeTerminal) {
-                activeTerminal.write(message.data);
-              }
-            }
-            break;
-
-          case "reconnect":
-          case "redraw":
-            // Simple redraw - fit the active terminal
-            const activeTerminal = this.getActiveTerminal();
-            if (activeTerminal) {
-              activeTerminal.fit();
-            }
-            break;
-          case "focus":
-            // Warm focus: just refresh active terminal visuals
-            const act = this.getActiveTerminal();
-            if (act && act.terminal) {
-            }
-            break;
-
-          case "refresh":
-            // Reset the active terminal to clean state instead of reloading
-            this.resetActiveTerminal();
-            break;
-          case "refreshActive":
-            // Lightweight visual refresh only
-            const a = this.getActiveTerminal();
-            if (a && a.terminal) {
-              try {
-                a.fit();
-              } catch (e) {
-              Logger.warn("Failed to parse tab context:", e);
-            }
-            }
-            break;
-
-          case "triggerResize":
-            window.dispatchEvent(new Event("resize"));
-            break;
-
-          case "requestState":
-            this.ensureInitialized();
-            this.vscode.postMessage({
-              command: "stateResponse",
-              state: currentState,
-            });
-            break;
-
-          case "processChange":
-            this.handleProcessChange(message.processName, message.tabId);
-            break;
-
-          case "createNewTab":
-            this.createNewTab(message.terminalType, message.launchCommand);
-            break;
-
-          case "switchToTab":
-            if (message.tabId) {
-              this.switchToTab(message.tabId);
-            }
-            break;
-
-          case "updateFileCache":
-            window.workspaceFileCache = new Set(message.files || []);
-
-            break;
-
-          case "fileExistsResponse":
-            Logger.debug(
-              "🔍 File exists response:",
-              message.filePath,
-              "->",
-              message.exists,
-            );
-            // Could be used for individual file checks if needed
-            break;
-
-          case "setDebugFilter":
-            if (message.filter) {
-              localStorage.setItem(
-                "alterminal.debugFilter",
-                JSON.stringify(message.filter),
-              );
-            } else {
-              localStorage.removeItem("alterminal.debugFilter");
-            }
-            break;
-
-          case "setDeveloperMode":
-            window.DEVELOPER_MODE = message.enabled;
-            try { Logger.configureDevMode(message.enabled); } catch { /* ignore */ }
-            break;
-
-          case "updateConfig":
-            if (message.config) {
-              if (typeof message.config.alwaysShowTabs === "boolean") {
-                this._alwaysShowTabs = message.config.alwaysShowTabs;
-                this.updateTabBarVisibility();
-              }
-              if (typeof message.config.scrollback === "number") {
-                window.scrollbackLines = message.config.scrollback;
-              }
-            }
-            break;
-
-          case "collectPerformance":
-            this._reportPerformance();
-            break;
-
-          case "commandSavedResponse":
-            Logger.debug(
-              "📋 Received command saved status:",
-              message.launchCommand,
-              message.isSaved,
-            );
-            this.updateSaveButtonVisibility(
-              message.launchCommand,
-              message.isSaved,
-            );
-            if (message.launchCommand && message.isSaved) {
-              // Keep internal set in sync so future tabs with same launchCommand start with saved flag
-              this._savedCommandsSet.add(message.launchCommand);
-            }
-            // Update tab context JSON so VS Code context menu can hide Save Command when already saved
-            try {
-              const tabEl = document.querySelector(
-                `.tab[data-tab-id="${this._findTabIdByCommand(message.launchCommand)}"]`,
-              );
-              if (tabEl) {
-                const ctx = JSON.parse(
-                  tabEl.getAttribute("data-vscode-context"),
-                );
-                ctx.savedCommand = !!message.isSaved;
-                tabEl.setAttribute("data-vscode-context", JSON.stringify(ctx));
-              }
-            } catch (_) {
-              /* ignore */
-            }
-            break;
-            break;
-
-          case "renameTab":
-            Logger.debug(
-              "✏️ Received rename tab request for inline editing:",
-              message.tabId,
-            );
-            this.startTabRename(message.tabId);
-            break;
-
-          case "closeTab":
-            Logger.debug("❌ Received close tab request:", message.tabId);
-            this.closeTab(message.tabId);
-            break;
-
-          case "setTabIcon":
-            Logger.debug("🎨 Received set tab icon request:", message.tabId, message.icon);
-            this.setTabIcon(message.tabId, message.icon);
-            break;
-
-          case "getTabBuffer":
-            Logger.debug("📋 Received get tab buffer request:", message.tabId);
-            this.handleGetTabBuffer(message.tabId);
-            break;
-
-          default:
-            Logger.warn("Unknown command received:", message.command);
-            break;
-        }
-        this.saveToLocalState();
-      } catch (error) {
-        Logger.error("Message handling error:", error);
-      }
-    });
   }
 
   _recordTerminalTiming(id) {
@@ -493,8 +261,7 @@ export class TabManager {
     };
     window.addEventListener("focus", this._windowFocusHandler);
 
-    // Setup keyboard shortcut passthrough
-    this.setupKeyboardPassthrough();
+    // Keyboard shortcuts are handled by KeyboardManager (initialized in constructor)
 
     // Flush any pending debounced saves just before the webview unloads (window/tab close, reload)
     this._windowBeforeUnloadHandler = () => {
@@ -517,15 +284,6 @@ export class TabManager {
   }
 
   /**
-   * Auto-initialize - just setup, restoration will handle terminal creation
-   */
-  autoInitialize() {
-    // Just show the interface, terminal creation will happen via restoration
-    // Show interface immediately (no artificial delay)
-    this.showInterface();
-  }
-
-  /**
    * Ensure we have at least one terminal
    */
   ensureInitialized() {
@@ -533,104 +291,6 @@ export class TabManager {
       this.initialize();
       this.isInitialized = true;
     }
-  }
-
-  /**
-   * Set up keyboard event interception to allow VS Code shortcuts
-   */
-  setupKeyboardPassthrough(): void {
-    const vsCodeShortcuts: Array<{key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean}> = [
-      { key: "F5", ctrlKey: false, shiftKey: false, altKey: false },
-      { key: "F1", ctrlKey: false, shiftKey: false, altKey: false },
-      { key: "F11", ctrlKey: false, shiftKey: false, altKey: false },
-      { key: "p", ctrlKey: true, shiftKey: true, altKey: false },
-      { key: "P", ctrlKey: true, shiftKey: true, altKey: false },
-      { key: "n", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "o", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "s", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "w", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "g", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "f", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "h", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "b", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "`", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "j", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "Tab", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "Tab", ctrlKey: true, shiftKey: true, altKey: false },
-      { key: "=", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "-", ctrlKey: true, shiftKey: false, altKey: false },
-      { key: "0", ctrlKey: true, shiftKey: false, altKey: false },
-    ];
-
-    // Add clear terminal shortcut (Cmd+K on macOS, Ctrl+K on Windows/Linux)
-    const clearShortcut = {
-      key: "k",
-      ctrlKey: true,
-      shiftKey: false,
-      altKey: false,
-    };
-
-    // Add macOS shortcuts
-    if (navigator.platform.indexOf("Mac") > -1) {
-      const macShortcuts = vsCodeShortcuts.map((shortcut) => ({
-        ...shortcut,
-        ctrlKey: false,
-        metaKey: shortcut.ctrlKey,
-      }));
-      vsCodeShortcuts.push(...macShortcuts);
-    }
-
-    document.addEventListener(
-      "keydown",
-      (event) => {
-        // Check for clear terminal shortcut first
-        const isMac = navigator.platform.indexOf("Mac") > -1;
-        const clearKeyPressed =
-          event.key === "k" &&
-          ((isMac && event.metaKey) || (!isMac && event.ctrlKey)) &&
-          !event.shiftKey &&
-          !event.altKey;
-
-        if (clearKeyPressed) {
-          event.preventDefault();
-          event.stopPropagation();
-          this.clearActiveTerminal();
-          return false;
-        }
-
-        // Check for reset terminal shortcut (Cmd+R on macOS, Ctrl+R on Windows/Linux)
-        const resetKeyPressed =
-          event.key === "r" &&
-          ((isMac && event.metaKey) || (!isMac && event.ctrlKey)) &&
-          !event.shiftKey &&
-          !event.altKey;
-
-        if (resetKeyPressed) {
-          event.preventDefault();
-          event.stopPropagation();
-          this.resetActiveTerminal();
-          return false;
-        }
-
-        const matchesShortcut = vsCodeShortcuts.some((shortcut) => {
-          return (
-            event.key === shortcut.key &&
-            event.ctrlKey === shortcut.ctrlKey &&
-            event.shiftKey === shortcut.shiftKey &&
-            event.altKey === shortcut.altKey &&
-            (shortcut.metaKey === undefined ||
-              event.metaKey === shortcut.metaKey)
-          );
-        });
-
-        if (matchesShortcut) {
-          return true;
-        }
-
-        return true;
-      },
-      true,
-    );
   }
 
   /**
@@ -646,6 +306,15 @@ export class TabManager {
    * Create a new terminal tab
    */
   createNewTab(terminalType = "default", launchCommand = null) {
+    // Clear init timeout since we're getting messages from extension
+    if (this._initTimeoutId) {
+      clearTimeout(this._initTimeoutId);
+      this._initTimeoutId = null;
+    }
+
+    // Show interface if not already shown
+    this.showInterface();
+
     Logger.debug(
       "📝 createNewTab called with type:",
       terminalType,
@@ -695,7 +364,7 @@ export class TabManager {
     this.terminals.set(tabId, terminal);
 
     // Create tab DOM element
-    this.createTabElement(tabId, label);
+    this._tabUIManager.createTabElement(tabId, label, this.vscode);
 
     // Ask extension to format the initial title using user template
     try {
@@ -708,7 +377,7 @@ export class TabManager {
     if (this.activeTabId === null) {
       this.activeTabId = tabId;
       terminal.setActive(true);
-      this.updateActiveTabUI(tabId);
+      this._tabUIManager.updateActiveTabUI(tabId);
     } else {
       this.switchToTab(tabId);
     }
@@ -742,11 +411,11 @@ export class TabManager {
     }
 
     // Update UI
-    this.updateActiveTabUI(tabId);
+    this._tabUIManager.updateActiveTabUI(tabId);
     this.activeTabId = tabId;
 
     // Clear notifications for the newly active tab
-    this.clearNotificationsOnActivation(tabId);
+    this._tabUIManager.hideNotification(tabId);
 
     // Schedule save reflecting activeTabId change
     try {
@@ -905,7 +574,7 @@ export class TabManager {
         // Filter out pure ANSI escape sequences and very short outputs
         const visibleContent = data.replace(/\x1b\[[0-9;]*m/g, "").trim();
         if (visibleContent.length > 5) {
-          this.showNotification(tabId);
+          this._tabUIManager.showNotification(tabId);
         }
       }
     }
@@ -1277,7 +946,7 @@ export class TabManager {
       // Don't re-render through template - just use what was saved
       // Future updates (process changes, etc.) will trigger normal template rendering
       const labelForTab = terminalData.label || "Terminal";
-      this.createTabElement(terminalData.id, labelForTab);
+      this._tabUIManager.createTabElement(terminalData.id, labelForTab, this.vscode);
 
       // Don't request formatted title on restore - use the saved label as-is
       // The normal update flow will handle future changes when process name changes, etc.
@@ -1307,6 +976,12 @@ export class TabManager {
 
     // Show the interface after restoring
     this.showInterface();
+
+    // Clear the init timeout since we successfully received state
+    if (this._initTimeoutId) {
+      clearTimeout(this._initTimeoutId);
+      this._initTimeoutId = null;
+    }
 
     const existing = vscode.getState() || {};
     vscode.setState({
@@ -1430,439 +1105,6 @@ export class TabManager {
   }
 
   /**
-   * Create the DOM element for a tab
-   */
-  createTabElement(tabId, label) {
-    const tabList = document.querySelector(".tab-list");
-
-    if (!tabList) return;
-
-    // Get the terminal to check if it's a command tab
-    const terminal = this.terminals.get(tabId);
-    const isCommandTab = terminal && terminal.launchCommand;
-
-    // Create semantic list item for tab
-    const tab = document.createElement("li");
-    tab.className = "tab";
-    tab.dataset.tabId = tabId.toString();
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("tabindex", "0");
-    tab.setAttribute("aria-selected", "false");
-    tab.setAttribute("aria-label", `${label} tab`);
-
-    // Set VS Code context for tab-specific context menu
-    const isSaved =
-      terminal?.launchCommand &&
-      this._savedCommandsSet &&
-      this._savedCommandsSet.has(terminal.launchCommand);
-    tab.setAttribute(
-      "data-vscode-context",
-      JSON.stringify({
-        webviewSection: "alterminal",
-        contextType: "tab",
-        tabId: tabId.toString(),
-        terminalType: terminal?.launchCommand ? "command" : "shell",
-        launchCommand: terminal?.launchCommand || null,
-        savedCommand: !!isSaved,
-        preventDefaultContextMenuItems: true,
-      }),
-    );
-
-    // Enable drag and drop for tab reordering
-    tab.setAttribute("draggable", "true");
-
-    // Create TabTitleManager instance for this tab - pass icon directly
-    const icon =
-      terminal.icon ||
-      (terminal.launchCommand ? "codicon-rocket" : "codicon-terminal");
-    const tabTitleManager = new TabTitleManager(tabId, terminal, vscode, icon);
-
-    // Store TabTitleManager instance for later use
-    this.titleManagers.set(tabId, tabTitleManager);
-
-    // Set up callback for title changes (saves state after rename)
-    tabTitleManager.setTitleChangeCallback((tabId) => {
-      this.scheduleSaveState("titleChange");
-    });
-
-    // Create tab title (icon + label) using TabTitleManager
-    const tabContent = tabTitleManager.createTabTitle(label);
-    tab.appendChild(tabContent);
-
-    // Append to the end of the tab list
-    tabList.appendChild(tab);
-  }
-
-  /**
-   * Update active tab UI
-   */
-  updateActiveTabUI(tabId) {
-    // Update all tabs to inactive state
-    document.querySelectorAll(".tab").forEach((tab) => {
-      tab.classList.remove("active");
-      tab.setAttribute("aria-selected", "false");
-      tab.setAttribute("tabindex", "-1");
-    });
-
-    // Set target tab to active state
-    const targetTab = document.querySelector(`[data-tab-id="${tabId}"]`);
-    if (targetTab) {
-      targetTab.classList.add("active");
-      targetTab.setAttribute("aria-selected", "true");
-      targetTab.setAttribute("tabindex", "0");
-    }
-  }
-
-  /**
-   * Set up event listeners for tab interactions
-   */
-  initializeEventListeners() {
-    // Track CMD/Ctrl key for link cursor styling
-    const container = document.getElementById("container");
-    document.addEventListener("keydown", (e) => {
-      if (e.metaKey || e.ctrlKey) {
-        container?.classList.add("cmd-mode");
-      }
-    });
-    document.addEventListener("keyup", (e) => {
-      if (!e.metaKey && !e.ctrlKey) {
-        container?.classList.remove("cmd-mode");
-      }
-    });
-    // Also handle focus loss (e.g., CMD+Tab away)
-    this._windowBlurHandler = () => {
-      container?.classList.remove("cmd-mode");
-    };
-    window.addEventListener("blur", this._windowBlurHandler);
-
-    // New tab functionality is now handled by title bar button
-    // No DOM-based new tab button needed
-
-    // Tab click and keyboard handlers (using event delegation)
-    const tabBar = document.getElementById("tab-bar");
-    if (tabBar) {
-      // Keyboard navigation support
-      tabBar.addEventListener("keydown", (e) => {
-        const target = e.target as HTMLElement;
-        if (
-          target.classList.contains("tab") ||
-          target.classList.contains("tab-close")
-        ) {
-          if (e.key === "Enter" || e.key === " ") {
-            target.click();
-            e.preventDefault();
-          }
-        }
-      });
-
-      // Click handlers
-      tabBar.addEventListener("click", (e) => {
-        const target = e.target as HTMLElement;
-        // Handle tab icon clicks (show dropdown or handle notification)
-        if (
-          target.classList.contains("tab-icon") ||
-          target.parentElement?.classList.contains("tab-icon")
-        ) {
-          const icon = target.classList.contains("tab-icon")
-            ? target
-            : target.parentElement as HTMLElement;
-          const tab = icon.closest(".tab");
-
-          // If clicking on notification bell, switch to tab instead of showing dropdown
-          if (icon.classList.contains("notification")) {
-            const tabId = parseInt((tab as HTMLElement).dataset.tabId!);
-            if (!isNaN(tabId)) {
-              this.switchToTab(tabId);
-            }
-          } else {
-            // Normal menu behavior
-            const dropdown = icon.querySelector(".tab-dropdown");
-            if (dropdown) {
-              this.toggleDropdown(dropdown);
-            }
-          }
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-
-        // Handle dropdown item clicks
-        if (
-          target.classList.contains("tab-dropdown-item") ||
-          target.parentElement?.classList.contains("tab-dropdown-item")
-        ) {
-          const item = target.classList.contains("tab-dropdown-item")
-            ? target
-            : target.parentElement as HTMLElement;
-          const action = item.getAttribute("data-action");
-          const tab = item.closest(".tab") as HTMLElement;
-
-          if (tab && tab.dataset.tabId) {
-            const tabId = parseInt(tab.dataset.tabId);
-            if (!isNaN(tabId)) {
-              this.handleDropdownAction(action, tabId);
-            }
-          }
-
-          // Close dropdown after action
-          this.hideAllDropdowns();
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-
-        // Handle tab clicks for switching
-        if (
-          target.classList.contains("tab") ||
-          target.parentElement?.classList.contains("tab")
-        ) {
-          const tab = target.classList.contains("tab")
-            ? target
-            : target.parentElement as HTMLElement;
-          const tabId = parseInt(tab.dataset.tabId);
-          if (!isNaN(tabId)) {
-            this.switchToTab(tabId);
-          }
-        }
-      });
-
-      // Double-click handler for tab renaming
-      tabBar.addEventListener("dblclick", (e) => {
-        const target = e.target as HTMLElement;
-        // Handle double-clicks on tab labels for renaming
-        if (target.classList.contains("tab-label")) {
-          const tab = target.closest(".tab") as HTMLElement;
-          if (tab && tab.dataset.tabId) {
-            const tabId = parseInt(tab.dataset.tabId);
-            if (!isNaN(tabId)) {
-              this.startTabRename(tabId, target);
-            }
-          }
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      });
-
-      // Keyboard handlers for accessibility
-      tabBar.addEventListener("keydown", (e) => {
-        const target = e.target as HTMLElement;
-        if (target.classList.contains("tab")) {
-          switch (e.key) {
-            case "Enter":
-            case " ":
-              const tabId = parseInt(target.dataset.tabId!);
-              if (!isNaN(tabId)) {
-                this.switchToTab(tabId);
-              }
-              e.preventDefault();
-              break;
-            case "Delete":
-            case "Backspace":
-              const deleteTabId = parseInt(target.dataset.tabId!);
-              if (!isNaN(deleteTabId)) {
-                this.closeTab(deleteTabId);
-              }
-              e.preventDefault();
-              break;
-          }
-        } else if (target.classList.contains("tab-icon")) {
-          if (e.key === "Enter" || e.key === " ") {
-            // If icon has notification, switch to tab instead of showing dropdown
-            if (target.classList.contains("notification")) {
-              const tab = target.closest(".tab") as HTMLElement;
-              const tabId = parseInt(tab.dataset.tabId!);
-              if (!isNaN(tabId)) {
-                this.switchToTab(tabId);
-              }
-            } else {
-              const dropdown = target.querySelector(".tab-dropdown");
-              if (dropdown) {
-                this.toggleDropdown(dropdown);
-              }
-            }
-            e.preventDefault();
-          }
-        } else if (target.classList.contains("tab-dropdown-item")) {
-          switch (e.key) {
-            case "Enter":
-            case " ":
-              const action = target.getAttribute("data-action");
-              const tab = target.closest(".tab") as HTMLElement;
-              if (tab && tab.dataset.tabId) {
-                const tabId = parseInt(tab.dataset.tabId);
-                if (!isNaN(tabId)) {
-                  this.handleDropdownAction(action, tabId);
-                }
-              }
-              this.hideAllDropdowns();
-              e.preventDefault();
-              break;
-            case "Escape":
-              this.hideAllDropdowns();
-              e.preventDefault();
-              break;
-            case "ArrowDown":
-              this.focusNextDropdownItem(e.target);
-              e.preventDefault();
-              break;
-            case "ArrowUp":
-              this.focusPrevDropdownItem(e.target);
-              e.preventDefault();
-              break;
-          }
-        }
-      });
-
-      // Drag and drop handlers for tab reordering
-      this.setupTabDragHandlers(tabBar);
-    }
-
-    // Close dropdowns when clicking outside
-    document.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      if (
-        !target.closest(".tab-icon") &&
-        !target.closest(".tab-dropdown")
-      ) {
-        this.hideAllDropdowns();
-      }
-    });
-  }
-
-  /**
-   * Setup drag and drop handlers for tab reordering
-   */
-  setupTabDragHandlers(tabBar) {
-    let draggedTab = null;
-    let lastTargetTab = null;
-    let lastInsertBefore = false;
-
-    tabBar.addEventListener("dragstart", (e) => {
-      if (e.target.classList.contains("tab")) {
-        draggedTab = e.target;
-        e.target.classList.add("dragging");
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", e.target.dataset.tabId);
-      }
-    });
-
-    tabBar.addEventListener("dragend", (e) => {
-      if (e.target.classList.contains("tab")) {
-        e.target.classList.remove("dragging");
-
-        // Use the last target from dragover
-        if (lastTargetTab && draggedTab && lastTargetTab !== draggedTab) {
-          const tabList = lastTargetTab.parentElement;
-          if (lastInsertBefore) {
-            tabList.insertBefore(draggedTab, lastTargetTab);
-          } else {
-            tabList.insertBefore(draggedTab, lastTargetTab.nextSibling);
-          }
-
-          // Save the new tab order
-          this.scheduleSaveState("tabReorder");
-        }
-
-        // Clear all drag-over indicators
-        document.querySelectorAll(".tab").forEach((tab) => {
-          tab.classList.remove("drag-over-left", "drag-over-right");
-        });
-
-        // Reset state
-        draggedTab = null;
-        lastTargetTab = null;
-        lastInsertBefore = false;
-      }
-    });
-
-    tabBar.addEventListener("dragenter", (e) => {
-      e.preventDefault();
-    });
-
-    tabBar.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!draggedTab) return;
-
-      const targetTab = e.target.closest(".tab");
-      if (!targetTab || targetTab === draggedTab) {
-        return;
-      }
-
-      // Track the target for use in dragend
-      lastTargetTab = targetTab;
-
-      // Clear previous indicators
-      document.querySelectorAll(".tab").forEach((tab) => {
-        tab.classList.remove("drag-over-left", "drag-over-right");
-      });
-
-      // Determine which side to show the indicator
-      const rect = targetTab.getBoundingClientRect();
-      const midpoint = rect.left + rect.width / 2;
-
-      lastInsertBefore = e.clientX < midpoint;
-
-      if (lastInsertBefore) {
-        targetTab.classList.add("drag-over-left");
-      } else {
-        targetTab.classList.add("drag-over-right");
-      }
-
-      e.dataTransfer.dropEffect = "move";
-    });
-  }
-
-  /**
-   * Toggle dropdown visibility
-   */
-  toggleDropdown(dropdown) {
-    // Hide other dropdowns first
-    this.hideAllDropdowns();
-
-    // Toggle the target dropdown
-    dropdown.classList.toggle("show");
-
-    // Focus the first item if opening
-    if (dropdown.classList.contains("show")) {
-      const firstItem = dropdown.querySelector(".tab-dropdown-item");
-      if (firstItem) {
-        firstItem.focus();
-      }
-    }
-  }
-
-  /**
-   * Hide all dropdown menus
-   */
-  hideAllDropdowns() {
-    const dropdowns = document.querySelectorAll(".tab-dropdown");
-    dropdowns.forEach((dropdown) => {
-      dropdown.classList.remove("show");
-    });
-  }
-
-  /**
-   * Handle dropdown menu actions
-   */
-  handleDropdownAction(action, tabId) {
-    switch (action) {
-      case "save":
-        this.saveCommand(tabId);
-        break;
-      case "settings":
-        this.openTabSettings(tabId);
-        break;
-      case "close":
-        this.closeTab(tabId);
-        break;
-      default:
-        Logger.warn("Unknown dropdown action:", action);
-        break;
-    }
-  }
-
-  /**
    * Open tab-specific settings (placeholder for now)
    */
   openTabSettings(tabId) {
@@ -1876,66 +1118,6 @@ export class TabManager {
     });
 
     Logger.info(`Opening settings for tab ${tabId} (${terminal.label})`);
-  }
-
-  /**
-   * Focus next dropdown item for keyboard navigation
-   */
-  focusNextDropdownItem(currentItem) {
-    const dropdown = currentItem.closest(".tab-dropdown");
-    if (!dropdown) return;
-
-    const items = dropdown.querySelectorAll(
-      ".tab-dropdown-item:not(.disabled)",
-    );
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const nextIndex = (currentIndex + 1) % items.length;
-
-    items[nextIndex].focus();
-  }
-
-  /**
-   * Focus previous dropdown item for keyboard navigation
-   */
-  focusPrevDropdownItem(currentItem) {
-    const dropdown = currentItem.closest(".tab-dropdown");
-    if (!dropdown) return;
-
-    const items = dropdown.querySelectorAll(
-      ".tab-dropdown-item:not(.disabled)",
-    );
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const prevIndex = currentIndex === 0 ? items.length - 1 : currentIndex - 1;
-
-    items[prevIndex].focus();
-  }
-
-  /**
-   * Show notification bell for a specific tab
-   */
-  showNotification(tabId) {
-    const tabTitleManager = this.titleManagers?.get(tabId);
-    if (tabTitleManager) {
-      tabTitleManager.showNotification();
-    }
-  }
-
-  /**
-   * Hide notification bell for a specific tab
-   */
-  hideNotification(tabId) {
-    const tabTitleManager = this.titleManagers?.get(tabId);
-    if (tabTitleManager) {
-      tabTitleManager.hideNotification();
-    }
-  }
-
-  /**
-   * Clear all notifications when a tab becomes active
-   */
-  clearNotificationsOnActivation(tabId) {
-    // Hide notification for the newly active tab
-    this.hideNotification(tabId);
   }
 
   /**
@@ -2006,7 +1188,7 @@ export class TabManager {
    * Show the main interface and hide loading screen
    */
   showInterface(): void {
-    const loadingDiv = document.querySelector<HTMLElement>(".loading");
+    const loadingDiv = document.getElementById("loading-screen");
     const container = document.getElementById("container");
 
     if (loadingDiv) {
@@ -2016,6 +1198,8 @@ export class TabManager {
     if (container) {
       container.style.display = "flex";
     }
+    
+    Logger.debug("🎬 Interface shown");
   }
 
   /**
@@ -2133,6 +1317,16 @@ export class TabManager {
     if (this._windowBlurHandler) {
       window.removeEventListener("blur", this._windowBlurHandler);
       this._windowBlurHandler = null;
+    }
+
+    // Dispose keyboard manager
+    if (this._keyboardManager) {
+      this._keyboardManager.dispose();
+    }
+
+    // Dispose tab UI manager
+    if (this._tabUIManager) {
+      this._tabUIManager.dispose();
     }
 
     // Dispose all terminals
