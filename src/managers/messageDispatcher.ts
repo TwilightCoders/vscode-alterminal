@@ -61,14 +61,15 @@ export class MessageDispatcher {
         }
       },
       webviewReady: () => {
+        Logger.debug("📨 Received webviewReady message");
         this.onWebviewReady();
       },
       switchTab: () => {}, // No-op - handled in webview
       playBellSound: (msg: any) =>
         this.notificationManager.playBellSound(msg.tabId, msg.tabLabel),
-      setDebugFilter: (msg: any) => {}, // Handled in webview
+      setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
-      setDeveloperMode: (msg: any) => {}, // Handled in webview
+      setDeveloperMode: () => {}, // Handled in webview
       performanceReport: (msg: any) =>
         this.notificationManager.showPerformanceReport(msg.data),
       saveCommand: (msg: any) =>
@@ -76,7 +77,6 @@ export class MessageDispatcher {
           msg.tabId,
           msg.launchCommand,
           msg.tabLabel,
-          webviewView.webview,
         ),
       checkCommandSaved: (msg: any) =>
         this.commandLauncher.handleCheckCommandSaved(

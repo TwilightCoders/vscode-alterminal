@@ -29,21 +29,20 @@ export class FileOperationHandler {
   /**
    * Handle dropped file from webview
    */
-  public handleDroppedFile(
+  public async handleDroppedFile(
     tabId: number,
     fileName: string,
     fileType: string,
     fileSize: number,
     fileData: string,
-  ): void {
+  ): Promise<void> {
     try {
-      // For now, just log the file drop
-      // Future: Could save to temp location and send path to terminal
-      Logger.info(`File dropped on terminal ${tabId}: ${fileName} (${fileType}, ${fileSize} bytes)`);
-
-      vscode.window.showInformationMessage(
-        `File "${fileName}" dropped. Drag & drop support coming soon!`,
-      );
+      // Route file operations to PtyManager
+      if (fileData) {
+        await this.ptyManager.sendFileData(fileData, fileName, fileType, tabId);
+      } else {
+        this.ptyManager.writeToPty(`Failed to read file: ${fileName}\n`, tabId);
+      }
     } catch (error) {
       Logger.error("Failed to handle dropped file:", error);
     }

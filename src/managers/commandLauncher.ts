@@ -84,22 +84,27 @@ export class CommandLauncher {
     tabId: number,
     launchCommand: string,
     tabLabel: string,
-    webview: vscode.Webview,
   ): Promise<void> {
     try {
+      if (!launchCommand) {
+        Logger.warn("Cannot save command: no launch command provided");
+        return;
+      }
+
+      // Use CommandManager to save the command
       await this.commandManager.saveCommand(launchCommand, tabLabel);
 
-      // Notify webview that command was saved
-      webview.postMessage({
-        command: "commandSavedResponse",
-        launchCommand: launchCommand,
-        isSaved: true,
-      });
+      // Show success message
+      vscode.window.showInformationMessage(
+        `Command "${launchCommand}" saved to quick launch menu!`,
+      );
 
-      Logger.info(`Command saved: ${launchCommand}`);
+      Logger.info(`Command saved from tab ${tabId}: ${launchCommand}`);
     } catch (error) {
       Logger.error("Failed to save command:", error);
-      vscode.window.showErrorMessage("Failed to save command");
+      vscode.window.showErrorMessage(
+        "Failed to save command. Please try again.",
+      );
     }
   }
 
@@ -111,16 +116,20 @@ export class CommandLauncher {
     webview: vscode.Webview,
   ): Promise<void> {
     try {
-      const commands = this.commandManager.getSavedCommands();
-      const isSaved = commands.some((cmd) => cmd.command === launchCommand);
+      if (!launchCommand) {
+        Logger.warn(
+          "Cannot check command saved status: no launch command provided",
+        );
+        return;
+      }
 
-      // Send saved commands list to webview
-      webview.postMessage({
-        command: "savedCommandsList",
-        commands: commands.map((cmd) => cmd.command),
-      });
+      // Check if command exists in saved commands
+      const savedCommands = this.commandManager.getSavedCommands();
+      const isSaved = savedCommands.some(
+        (cmd) => cmd.command === launchCommand,
+      );
 
-      // Send specific command saved status
+      // Send response back to webview
       webview.postMessage({
         command: "commandSavedResponse",
         launchCommand: launchCommand,
