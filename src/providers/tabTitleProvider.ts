@@ -114,7 +114,12 @@ export class TabTitleProvider {
       return val || defText;
     }
 
-    return val || `{${content}}`;
+    // For known tokens, return value or empty string (for use in conditionals)
+    // For unknown tokens, return placeholder so user can see the error
+    if (token) {
+      return val || '';
+    }
+    return `{${content}}`; // Unknown token - show placeholder
   }
 
   /**
