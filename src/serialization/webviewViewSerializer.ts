@@ -31,7 +31,7 @@ export interface PersistedState {
 }
 
 export class WebviewViewSerializer {
-  private static readonly STORAGE_KEY = "alterminal.webviewState";
+  private static readonly STORAGE_KEY = "alterminal.state";
   private _webviewView?: vscode.WebviewView;
   private _context: vscode.ExtensionContext;
   private _didInitialViewRestore = false;
@@ -42,7 +42,17 @@ export class WebviewViewSerializer {
 
   public setWebviewView(webviewView: vscode.WebviewView) {
     this._webviewView = webviewView;
+    // Reset flag when a new webview is set - this happens on resolveWebviewView
+    this._didInitialViewRestore = false;
     this.setupWebviewLifecycle();
+  }
+
+  /**
+   * Mark that initial restore has been completed
+   * Called by StateManager after it sends restore command
+   */
+  public markInitialRestoreComplete(): void {
+    this._didInitialViewRestore = true;
   }
 
   /**
@@ -52,11 +62,17 @@ export class WebviewViewSerializer {
     if (!this._webviewView) {
       return;
     }
-    // Monitor visibility changes
+    // Monitor visibility changes for SUBSEQUENT visibility toggles (after initial restore)
+    // Initial restore is handled by webviewReady message -> StateManager.restoreWebviewState
     this._webviewView.onDidChangeVisibility(() => {
       if (this._webviewView?.visible) {
-        // Send initialization commands when webview becomes visible
-        this.sendInitializationCommands();
+        // Only send focus/restore for subsequent visibility changes
+        // Initial restore is handled by webviewReady -> StateManager
+        if (this._didInitialViewRestore) {
+          // Already restored once, just focus
+          this._webviewView.webview.postMessage({ command: "focus" });
+        }
+        // Note: if _didInitialViewRestore is false, StateManager will handle it via webviewReady
       } else {
         this.saveState();
       }
@@ -75,6 +91,7 @@ export class WebviewViewSerializer {
     if (!this._webviewView) return;
 
     const savedState = this.loadFromExtensionStorage(this._context);
+
     if (!this._didInitialViewRestore) {
       if (
         savedState &&
@@ -134,6 +151,14 @@ export class WebviewViewSerializer {
    */
   public async handleStateResponse(state: any): Promise<void> {
     if (!state) {
+      return;
+    }
+
+    const terminalCount = state.terminals?.length ?? 0;
+
+    // DEFENSIVE: Never save empty state - we always have at least 1 tab
+    if (terminalCount === 0) {
+      Logger.warn("🛡️ Serializer refusing to save empty state");
       return;
     }
 
@@ -209,7 +234,7 @@ export class WebviewViewSerializer {
         state,
       );
     } catch (error) {
-      console.error("🚫 Failed to save state to extension storage:", error);
+      Logger.error("Failed to save state to extension storage:", error);
     }
   }
 
@@ -226,7 +251,7 @@ export class WebviewViewSerializer {
         ) || null;
       return state;
     } catch (error) {
-      console.error("🚫 Failed to load state from extension storage:", error);
+      Logger.error("Failed to load state from extension storage:", error);
       return null;
     }
   }

@@ -76,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
       "alterminal.clearWorkspaceState",
       async () => {
         await context.workspaceState.update(
-          "alterminal.webviewState",
+          "alterminal.state",
           undefined,
         );
         vscode.window.showInformationMessage(
@@ -114,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
       );
     }),
     vscode.commands.registerCommand("alterminal.debugState", async () => {
-      const savedState = context.workspaceState.get("alterminal.webviewState") as any;
+      const savedState = context.workspaceState.get("alterminal.state") as any;
 
       let content: string;
       let extension: string;

@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
-import { Debouncer } from "../utils/debouncer";
 import { Logger } from "../utils/logger";
-import { DEBOUNCE_TIMINGS } from "../constants";
 
 /**
  * StateManager
@@ -43,11 +41,29 @@ export class StateManager {
   }
 
   /**
+   * Reset restore trigger (used when webview HTML is reloaded)
+   * This is called when resolveWebviewView is invoked again, indicating
+   * the webview was destroyed and recreated (panel was closed/reopened).
+   */
+  public resetForNewWebview(): void {
+    Logger.debug(`🔃 StateManager.resetForNewWebview() called, was _restoreTriggered=${this._restoreTriggered}`);
+    this._restoreTriggered = false;
+  }
+
+  /**
    * Reset restore trigger (used when webview becomes visible again)
    */
   public resetRestoreTrigger(): void {
+    Logger.debug(`🔄 StateManager.resetRestoreTrigger() called, was _restoreTriggered=${this._restoreTriggered}`);
     this._restoreTriggered = false;
-    Logger.debug("🔄 Reset restore trigger for webview re-visibility");
+  }
+
+  /**
+   * Check if saved state exists
+   */
+  public hasSavedState(): boolean {
+    const state = this.context.workspaceState.get("alterminal.state") as any;
+    return !!(state && state.terminals && state.terminals.length > 0);
   }
 
   /**
@@ -58,19 +74,18 @@ export class StateManager {
     onStateRestored?: () => void,
   ): Promise<void> {
     try {
+      Logger.debug(`🔄 StateManager.restoreWebviewState() called, _restoreTriggered=${this._restoreTriggered}`);
       if (this._restoreTriggered) {
-        Logger.debug("⏭️ Restore already triggered, skipping duplicate restore");
+        Logger.debug("⏭️ Skipping restore - already triggered");
         return;
       }
 
       this._restoreTriggered = true;
 
-      const state = this.context.workspaceState.get("alterminal.webviewState") as any;
+      const state = this.context.workspaceState.get("alterminal.state") as any;
 
       if (state && state.terminals && state.terminals.length > 0) {
-        Logger.debug("🔄 Restoring saved state", {
-          isColdBoot: this._isColdBoot,
-        });
+        Logger.debug(`🔄 Restoring ${state.terminals.length} terminal(s)`);
         webview.postMessage({
           command: "restoreState",
           state: state,
@@ -101,28 +116,30 @@ export class StateManager {
   }
 
   /**
-   * Save state to workspace state with debouncing
+   * Save state to workspace state (immediate, no debounce)
    */
   public saveState(state: any): void {
-    Debouncer.debounce(
-      "backup-state-save",
-      DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE,
-      async () => {
-        try {
-          if (state) {
-            await this.context.workspaceState.update("alterminal.webviewState", {
-              terminals: state.terminals || [],
-              activeTabId: state.activeTabId || 1,
-              timestamp: Date.now(),
-            });
-            Logger.debug("💾 Backup state saved");
-          }
-        } catch (error) {
-          Logger.error("Failed to save backup state:", error);
-        }
-      },
-      { maxWait: DEBOUNCE_TIMINGS.BACKUP_STATE_SAVE_MAX_WAIT },
-    );
+    try {
+      if (!state) {
+        return;
+      }
+
+      const terminalCount = state.terminals?.length ?? 0;
+
+      // DEFENSIVE: Never save empty state - we always have at least 1 tab
+      if (terminalCount === 0) {
+        Logger.warn("🛡️ Refusing to save empty state");
+        return;
+      }
+
+      this.context.workspaceState.update("alterminal.state", {
+        terminals: state.terminals,
+        activeTabId: state.activeTabId || 1,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      Logger.error("Failed to save state:", error);
+    }
   }
 
   /**
@@ -130,7 +147,7 @@ export class StateManager {
    */
   public async clearState(): Promise<void> {
     try {
-      await this.context.workspaceState.update("alterminal.webviewState", undefined);
+      await this.context.workspaceState.update("alterminal.state", undefined);
       Logger.debug("🗑️ State cleared");
     } catch (error) {
       Logger.error("Failed to clear state:", error);
