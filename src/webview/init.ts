@@ -82,22 +82,20 @@ if (document.readyState === "loading") {
 }
 
 function initializeAll(): void {
-  // Small delay to ensure DOM is fully ready
-  setTimeout(() => {
-    // Initialize the TabManager (it handles everything now)
-    const tabManager = new TabManager(vscode, terminalTheme, getThemeColor);
-    // Make it globally accessible for debugging
-    window.tabManager = tabManager;
+  // Initialize the TabManager (it handles everything now)
+  const tabManager = new TabManager(vscode, terminalTheme, getThemeColor);
+  // Make it globally accessible for debugging
+  window.tabManager = tabManager;
 
-    // Initialize global CMD key state tracking for two-tier link system
-    window.linkModeState = {
-      isCmdPressed: false,
-      isCtrlPressed: false,
-    };
+  // Initialize global CMD key state tracking for two-tier link system
+  window.linkModeState = {
+    isCmdPressed: false,
+    isCtrlPressed: false,
+  };
 
-    // Add global keyboard listeners for CMD/Ctrl key detection
-    document.addEventListener("keydown", (event) => {
-      const isMac = navigator.platform.indexOf("Mac") > -1;
+  // Add global keyboard listeners for CMD/Ctrl key detection
+  document.addEventListener("keydown", (event) => {
+    const isMac = navigator.platform.indexOf("Mac") > -1;
       const wasCmdPressed = window.linkModeState.isCmdPressed;
       const wasCtrlPressed = window.linkModeState.isCtrlPressed;
 
@@ -157,5 +155,4 @@ function initializeAll(): void {
 
     // Initialize drag-drop capture
     dragDropHandler.initialize();
-  }, 100);
 }

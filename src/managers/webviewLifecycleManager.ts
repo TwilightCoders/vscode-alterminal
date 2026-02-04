@@ -18,6 +18,8 @@ import { CommandManager } from "../utils/commandManager";
  * - Dependency Inversion: Depends on manager abstractions
  */
 export class WebViewLifecycleManager {
+  private _webviewInitialized = false;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly ptyManager: PtyManager,
@@ -36,6 +38,13 @@ export class WebViewLifecycleManager {
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
+    Logger.debug("🚀 resolveWebviewView() called - VS Code is creating/recreating the webview");
+    
+    // Reset state manager for new webview instance
+    // This is critical for proper restoration when panel is closed and reopened
+    this.stateManager.resetForNewWebview();
+    this._webviewInitialized = false;
+
     // Configure webview options
     webviewView.webview.options = {
       enableScripts: true,
@@ -83,10 +92,25 @@ export class WebViewLifecycleManager {
 
   /**
    * Handle webview ready event
+   * 
+   * This is called every time the webview sends 'webviewReady', which happens:
+   * 1. When the webview is first created (resolveWebviewView)
+   * 2. When the webview iframe is reloaded (panel closed/reopened with retainContextWhenHidden)
+   * 
+   * With retainContextWhenHidden:true, VS Code may recreate the iframe without
+   * calling resolveWebviewView again, so we must reset state here.
    */
   public async handleWebviewReady(webview: vscode.Webview): Promise<void> {
-    // Restore state
+    // Reset the restore flag - webviewReady means the iframe was (re)loaded
+    // and needs fresh initialization, even if resolveWebviewView wasn't called
+    this.stateManager.resetForNewWebview();
+    
+    // Restore state - no delay needed because the webview sent us this message,
+    // which proves its message handler is ready to receive our response
     await this.stateManager.restoreWebviewState(webview);
+
+    // Mark webview as properly initialized
+    this._webviewInitialized = true;
 
     // Check for developer mode
     this.onDeveloperModeCheck();
@@ -132,14 +156,14 @@ export class WebViewLifecycleManager {
 
   /**
    * Set up visibility change handler
+   * Note: The serializer handles restoration on visibility changes.
+   * This handler only manages the _webviewInitialized flag.
    */
   private setupVisibilityHandler(webviewView: vscode.WebviewView): void {
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) {
-        // Reset restore trigger so state can be restored when webview becomes visible again
-        this.stateManager.resetRestoreTrigger();
-        // Refresh active state
-        webviewView.webview.postMessage({ command: "refreshActive" });
+      if (!webviewView.visible) {
+        // Webview hidden - mark as not initialized so next show triggers restore
+        this._webviewInitialized = false;
       }
     });
   }
@@ -149,7 +173,7 @@ export class WebViewLifecycleManager {
    */
   private setupDisposalHandler(webviewView: vscode.WebviewView): void {
     webviewView.onDidDispose(() => {
-      // Note: State is already saved synchronously by webview, no need for async save here
+      this._webviewInitialized = false;
     });
   }
 }

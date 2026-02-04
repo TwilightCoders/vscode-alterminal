@@ -99,10 +99,10 @@ export class TabManager {
     this.setupWindowEventHandlers();
     this.autoInitialize();
 
-    // Signal immediately that webview is ready
-    queueMicrotask(() => {
-      this.vscode.postMessage({ command: "webviewReady" });
-    });
+    // Signal that webview is ready and request state
+    // Using a regular message (not queueMicrotask) ensures the handler is registered
+    // The extension will respond with restoreState or initializeEmpty
+    this.vscode.postMessage({ command: "webviewReady" });
 
     // Performance samples storage
     window.__terminalPerf = window.__terminalPerf || { samples: [] };
@@ -168,11 +168,11 @@ export class TabManager {
             break;
           case "restoreState":
             Logger.debug(
-              "🔄 Received restoreState terminals:",
+              "🔄 Received restoreState - terminals in message:",
               message.state?.terminals?.length,
-              "existing:",
+              ", existing terminals:",
               this.terminals.size,
-              "providerColdFlag:",
+              ", cold:",
               !!message.cold,
             );
             if (this.terminals.size > 0) {
@@ -206,6 +206,9 @@ export class TabManager {
 
             // Try webview state first, then fall back to extension state
             const webviewState = vscode.getState();
+            Logger.debug("📦 Webview state:", webviewState ? "present" : "empty", 
+              ", fullTabState:", webviewState?.fullTabState ? `${webviewState.fullTabState.terminals?.length} terminals` : "none");
+            
             // If we've ever shown the history banner before in ANY previous webview instance, record it separately
             if (webviewState && webviewState.historyBannerShownOnce) {
               this._historyBannerShownEver = true;
@@ -1270,15 +1273,14 @@ export class TabManager {
         this.terminals.size,
       );
 
-      // Create tab element (DOM order will match saved order)
-      this.createTabElement(terminalData.id, terminalData.label);
+      // Create tab element using the saved label directly (already rendered)
+      // Don't re-render through template - just use what was saved
+      // Future updates (process changes, etc.) will trigger normal template rendering
+      const labelForTab = terminalData.label || "Terminal";
+      this.createTabElement(terminalData.id, labelForTab);
 
-      // Request initial formatted title from extension
-      try {
-        this.requestFormattedTitle(terminalData.id, { processName: undefined });
-      } catch (e) {
-      Logger.warn("Operation failed:", e);
-    }
+      // Don't request formatted title on restore - use the saved label as-is
+      // The normal update flow will handle future changes when process name changes, etc.
 
       // PTY process creation is now handled by the Terminal instance itself
     }
@@ -1345,6 +1347,12 @@ export class TabManager {
    */
   saveToLocalState() {
     try {
+      // DEFENSIVE: Never save empty state - we always have at least 1 tab
+      if (this.terminals.size === 0) {
+        Logger.debug("🛡️ Skipping save - no terminals yet (probably not restored)");
+        return;
+      }
+
       const fullState = this.saveAllStates();
       Logger.debug(
         "TabManager saving state synchronously:",

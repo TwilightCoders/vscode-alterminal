@@ -100,6 +100,7 @@ export class TerminalController {
           progress.report({ increment: 0, message: "Disposing terminals..." });
 
           // Kill all PTY processes
+          Logger.debug("🔄 Refresh: Disposing PTY processes...");
           this.ptyManager.dispose();
 
           progress.report({ increment: 50, message: "Disposing webview..." });
@@ -109,12 +110,16 @@ export class TerminalController {
           // Reset webview HTML to force complete reload
           const view = getWebviewView();
           if (view) {
+            Logger.debug("🔄 Refresh: Resetting webview HTML...");
             const timeNow = new Date().getTime();
             view.webview.html = TemplateUtils.getHtmlTemplate(
               this.extensionUri,
               view.webview,
               timeNow,
             );
+            Logger.debug("🔄 Refresh: HTML reset complete, waiting for webviewReady...");
+          } else {
+            Logger.warn("🔄 Refresh: No webview view available!");
           }
 
           progress.report({ increment: 100, message: "Complete!" });

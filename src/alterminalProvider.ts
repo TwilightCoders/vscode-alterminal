@@ -69,7 +69,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     // Initialize managers
     this.stateManager = new StateManager(context);
     this.configurationWatcher = new ConfigurationWatcher(context);
-    this.notificationManager = new NotificationManager();
+    this.notificationManager = new NotificationManager(
+      () => this._view?.webview,
+      () => this.openTerminal(),
+    );
     this.commandLauncher = new CommandLauncher(
       this._commandManager,
       (command: string) => this.createNewTabWithCommand(command),
@@ -155,6 +158,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
     // Delegate to lifecycle manager (it will handle marking restore as triggered)
     await this.webviewLifecycleManager.handleWebviewReady(this._view.webview);
+
+    // Notify serializer that initial restore is complete
+    if (this._serializer) {
+      this._serializer.markInitialRestoreComplete();
+    }
   }
 
   /**
