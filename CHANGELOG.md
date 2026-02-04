@@ -2,6 +2,25 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.15]
+
+### Architecture
+
+- **Webview Refactoring - Manager Extraction**: Further decomposed `tabManager.ts` into focused manager classes:
+  - **LayoutManager** (201 lines): Responsive layout detection, window event handling, tab bar orientation switching
+  - **TabUIManager** (559 lines): Tab bar UI rendering, interactions, drag-drop reordering, dropdown menus
+  - **MessageHandler** (397 lines): Message routing from extension host to appropriate callbacks
+  - **KeyboardManager** (164 lines): Keyboard shortcut handling and passthrough
+- **Benefits**: Reduced tabManager.ts from 1811 → 1203 lines (-34%), improved separation of concerns, easier testing and maintenance
+
+### Bug Fixes
+
+- **Fixed Panel Reopen Issues**: Panel close/reopen now properly preserves terminal state without recreating PTYs:
+  - Terminal buffer content fully preserved across panel visibility changes
+  - No duplicate initialization messages on panel reopen
+  - Tab titles render correctly without template placeholder artifacts
+- **Fixed Tab Title Rendering on Restore**: Skip `formatTabTitle` request during state restoration to use saved labels directly, preventing double-formatting and template placeholder issues
+
 ## [0.2.14]
 
 ### Bug Fixes
