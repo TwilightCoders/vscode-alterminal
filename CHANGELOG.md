@@ -2,6 +2,30 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.16]
+
+### Performance Improvements
+
+- **Removed MutationObserver Overhead**: Eliminated document.body MutationObserver that was causing performance storms during heavy terminal output. ResizeObserver already handles container size changes properly.
+- **Memory Leak Fixes**:
+  - Fixed visibilitychange event listener not being cleaned up on terminal disposal
+  - Added proper ResizeObserver cleanup in dispose()
+- **Optimized Process Name Monitoring**: Converted from constant 1-second polling to hybrid event-driven approach:
+  - Checks process name on data events (when commands execute)
+  - Reduced fallback polling from 1s → 5s interval
+  - ~80% reduction in polling overhead
+- **Eliminated ResizeObserver Duplication**: Only observe terminal container (not parent), preventing duplicate observers
+- **Cached DOM Queries**: Container reference cached to avoid repeated `getElementById()` calls on every keypress
+- **Debounced Terminal Activation**: Consolidated cascading fit() calls during terminal activation into single debounced call
+
+### Expected User Impact
+
+- Significantly reduced lag during heavy terminal output (like Claude responses)
+- Image drops now complete successfully during active sessions
+- Lower CPU usage with multiple terminals
+- Eliminated memory leaks during long sessions
+- Smoother keyboard interactions
+
 ## [0.2.15]
 
 ### Architecture
