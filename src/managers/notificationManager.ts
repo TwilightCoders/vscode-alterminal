@@ -12,6 +12,11 @@ import { Logger } from "../utils/logger";
  * - Dependency Inversion: Depends on vscode window abstraction
  */
 export class NotificationManager {
+  constructor(
+    private readonly getWebview: () => vscode.Webview | undefined,
+    private readonly openTerminal: () => Promise<void>,
+  ) {}
+
   /**
    * Show performance report to user
    */
@@ -26,53 +31,40 @@ export class NotificationManager {
    */
   public async playBellSound(tabId: number, tabLabel: string): Promise<void> {
     try {
-      // Try platform-specific bell first
-      const platform = process.platform;
-      let bellCommand: string | undefined;
-
-      if (platform === "darwin") {
-        // macOS: Use afplay with system beep sound
-        bellCommand = 'afplay /System/Library/Sounds/Tink.aiff';
-      } else if (platform === "linux") {
-        // Linux: Try paplay (PulseAudio) or aplay (ALSA)
-        bellCommand = 'paplay /usr/share/sounds/freedesktop/stereo/bell.oga || aplay /usr/share/sounds/freedesktop/stereo/bell.wav';
-      } else if (platform === "win32") {
-        // Windows: Use PowerShell to play system beep
-        bellCommand = 'powershell -c "[console]::beep(800,200)"';
-      }
-
-      if (bellCommand) {
-        const { exec } = require('child_process');
-        exec(bellCommand, (error: Error | null) => {
-          if (error) {
-            Logger.debug(`Bell sound failed on ${platform}, error:`, error.message);
-            // Fallback to visual notification
-            this.showBellNotification(tabId, tabLabel);
+      // Show clickable notification with action to go to the tab
+      vscode.window
+        .showInformationMessage(
+          `Terminal Bell: ${tabLabel || `Tab ${tabId}`}`,
+          "Go to Terminal",
+        )
+        .then((selection) => {
+          if (selection === "Go to Terminal") {
+            // Focus the Alterminal view and switch to the specific tab
+            this.openTerminal().then(() => {
+              // Send message to switch to the specific tab
+              const webview = this.getWebview();
+              if (webview) {
+                webview.postMessage({
+                  command: "switchToTab",
+                  tabId: tabId,
+                });
+              }
+            });
           }
         });
-      } else {
-        // Unknown platform, show visual notification
-        this.showBellNotification(tabId, tabLabel);
-      }
+
+      // Also try to focus the VS Code window (OS-level attention getting)
+      vscode.commands
+        .executeCommand("workbench.action.focusActiveEditorGroup")
+        .then(
+          () => {},
+          () => {
+            // Fallback if focus command fails
+          },
+        );
     } catch (error) {
       Logger.error("Failed to play bell sound:", error);
-      // Fallback to visual notification
-      this.showBellNotification(tabId, tabLabel);
     }
-  }
-
-  /**
-   * Show visual bell notification
-   */
-  private showBellNotification(tabId: number, tabLabel: string): void {
-    vscode.window.showInformationMessage(
-      `🔔 Terminal "${tabLabel}" has output`,
-      "Show Terminal"
-    ).then(selection => {
-      if (selection === "Show Terminal") {
-        vscode.commands.executeCommand("alterminal.focus");
-      }
-    });
   }
 
   /**
