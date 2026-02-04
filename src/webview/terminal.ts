@@ -93,6 +93,7 @@ export class TerminalInstance {
   _ptyStarted?: boolean;
   _visibilityInstalled?: boolean;
   _resizeObserver?: ResizeObserver;
+  _visibilityHandler?: () => void;
 
   constructor(
     id: number,
@@ -709,7 +710,6 @@ export class TerminalInstance {
           // this.terminal.refresh(0, this.terminal.rows - 1);
         }
         requestAnimationFrame(() => {
-          this.fit();
           this.focus();
           try {
             performance.mark(`t${this.id}-active`);
@@ -719,8 +719,15 @@ export class TerminalInstance {
           } catch (e) {
             // Performance timing is non-critical, ignore failures
           }
-          // Simple refit after activation
-          setTimeout(() => this.fit(), 50);
+          // Debounce fit to avoid cascading calls during activation
+          Debouncer.debounce(
+            `term-activate-fit-${this.id}`,
+            50,
+            () => {
+              this.fit();
+            },
+            { maxWait: 100 },
+          );
         });
       });
     }
@@ -941,6 +948,18 @@ export class TerminalInstance {
       // Dispose event handlers
       this.disposeEventHandlers();
 
+      // Clean up visibility change listener
+      if (this._visibilityHandler) {
+        document.removeEventListener("visibilitychange", this._visibilityHandler);
+        this._visibilityHandler = undefined;
+      }
+
+      // Clean up resize observer
+      if (this._resizeObserver) {
+        this._resizeObserver.disconnect();
+        this._resizeObserver = undefined;
+      }
+
       // No per-instance debounce timers to clear (shared Debouncer manages its own entries)
 
       // Dispose terminal
@@ -968,37 +987,23 @@ export class TerminalInstance {
   _installVisibilityHandlers() {
     if (this._visibilityInstalled) return;
     this._visibilityInstalled = true;
-    const container = document.getElementById("container");
-    if (container && "ResizeObserver" in window) {
+
+    // Only observe the terminal container itself (parent changes cascade down)
+    if (this.terminalContainer && "ResizeObserver" in window) {
       const ro = new ResizeObserver(() => {
-        if (this.isActive) {
+        if (this.isActive && this.terminalContainer) {
           try {
             this.fit();
           } catch (e) {
             Logger.warn(`Fit failed for terminal ${this.id}:`, e);
           }
-          // If width/height just became non-zero, force redraw sequence
-          if (
-            this.terminalContainer &&
-            this.terminalContainer.offsetWidth > 0 &&
-            this.terminalContainer.offsetHeight > 0
-          ) {
-            this.fit();
-          }
         }
       });
-      ro.observe(container);
-      // Also observe the terminal container directly for more accurate size changes
-      if (this.terminalContainer) {
-        try {
-          ro.observe(this.terminalContainer);
-        } catch (e) {
-          Logger.warn(`Failed to observe terminal container for ${this.id}:`, e);
-        }
-      }
+      ro.observe(this.terminalContainer);
       this._resizeObserver = ro;
     }
-    document.addEventListener("visibilitychange", () => {
+    // Store handler for cleanup
+    this._visibilityHandler = () => {
       if (!document.hidden && this.isActive) {
         requestAnimationFrame(() => {
           if (this.terminal) {
@@ -1007,7 +1012,8 @@ export class TerminalInstance {
           }
         });
       }
-    });
+    };
+    document.addEventListener("visibilitychange", this._visibilityHandler);
     // WebGL context loss fallback
     const attachWebglHandlers = () => {
       const cvs = this.terminalContainer?.querySelectorAll("canvas") || [];

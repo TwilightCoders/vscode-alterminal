@@ -48,6 +48,7 @@ export interface TabUIManagerCallbacks {
 export class TabUIManager {
   private _callbacks: TabUIManagerCallbacks;
   private _windowBlurHandler: (() => void) | null = null;
+  private _container: HTMLElement | null = null;
 
   constructor(callbacks: TabUIManagerCallbacks) {
     this._callbacks = callbacks;
@@ -149,20 +150,21 @@ export class TabUIManager {
    */
   private initializeEventListeners(): void {
     // Track CMD/Ctrl key for link cursor styling
-    const container = document.getElementById("container");
+    // Cache container reference to avoid repeated DOM queries on every keypress
+    this._container = document.getElementById("container");
     document.addEventListener("keydown", (e) => {
       if (e.metaKey || e.ctrlKey) {
-        container?.classList.add("cmd-mode");
+        this._container?.classList.add("cmd-mode");
       }
     });
     document.addEventListener("keyup", (e) => {
       if (!e.metaKey && !e.ctrlKey) {
-        container?.classList.remove("cmd-mode");
+        this._container?.classList.remove("cmd-mode");
       }
     });
     // Also handle focus loss (e.g., CMD+Tab away)
     this._windowBlurHandler = () => {
-      container?.classList.remove("cmd-mode");
+      this._container?.classList.remove("cmd-mode");
     };
     window.addEventListener("blur", this._windowBlurHandler);
 

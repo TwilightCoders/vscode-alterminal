@@ -44,6 +44,7 @@ export class PtyManager {
   private _currentProcessNames = new Map<number, string>();
   private _terminalTypes = new Map<number, string>();
   private _webviewView?: vscode.WebviewView;
+  private _activeTabId?: number;
 
   private _scrollback: number = 1000;
 
@@ -222,6 +223,9 @@ export class PtyManager {
           data: data,
           tabId: tabId,
         });
+        // Check for process changes on data events (event-driven approach)
+        // Process name changes typically happen when commands execute (which generate data)
+        this._checkProcessChange(tabId);
       });
 
       ptyProcess.onExit(() => {
@@ -345,7 +349,29 @@ export class PtyManager {
   }
 
   /**
-   * Start monitoring the current process name for a tab
+   * Check for process name changes and notify webview
+   * Called on data events (event-driven) and via fallback polling
+   */
+  private _checkProcessChange(tabId: number): void {
+    const ptyProcess = this._ptyProcesses.get(tabId);
+    if (!ptyProcess) return;
+
+    const currentProcess = ptyProcess.process || "shell";
+    const previousProcess = this._currentProcessNames.get(tabId);
+
+    if (currentProcess !== previousProcess) {
+      this._currentProcessNames.set(tabId, currentProcess);
+      this._webviewView?.webview.postMessage({
+        command: "processChange",
+        processName: currentProcess,
+        tabId: tabId,
+      });
+    }
+  }
+
+  /**
+   * Start monitoring process name changes
+   * Uses event-driven approach (checks on data events) + minimal fallback polling
    */
   private _startProcessMonitoring(tabId: number): void {
     const ptyProcess = this._ptyProcesses.get(tabId);
@@ -355,20 +381,11 @@ export class PtyManager {
     const initialProcess = ptyProcess.process || "shell";
     this._currentProcessNames.set(tabId, initialProcess);
 
-    // Poll for process changes every 1 second
+    // Fallback polling at 5 second interval (5x less frequent than before)
+    // Most process changes are caught via onData events, this is just for edge cases
     const timer = setInterval(() => {
-      const currentProcess = ptyProcess.process || "shell";
-      const previousProcess = this._currentProcessNames.get(tabId);
-
-      if (currentProcess !== previousProcess) {
-        this._currentProcessNames.set(tabId, currentProcess);
-        this._webviewView?.webview.postMessage({
-          command: "processChange",
-          processName: currentProcess,
-          tabId: tabId,
-        });
-      }
-    }, 1000);
+      this._checkProcessChange(tabId);
+    }, 5000);
 
     this._processMonitorTimers.set(tabId, timer);
   }
