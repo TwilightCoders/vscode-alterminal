@@ -81,7 +81,6 @@ export class TerminalInstance {
   _simpleHistory: boolean;
   _didInit: boolean;
   _pendingPtyStart: boolean;
-  _mutationObserver: MutationObserver | null;
   _lastWriteTs?: number;
   _openedResolve?: (value: any) => void;
 
@@ -135,7 +134,6 @@ export class TerminalInstance {
     // Providers
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, String(id));
     this.linkProviderDisposable = null;
-    this._mutationObserver = null;
 
     // Simplified history flags
     this._simpleHistory = true;
@@ -943,12 +941,6 @@ export class TerminalInstance {
       // Dispose event handlers
       this.disposeEventHandlers();
 
-      // Disconnect mutation observer
-      if (this._mutationObserver) {
-        this._mutationObserver.disconnect();
-        this._mutationObserver = null;
-      }
-
       // No per-instance debounce timers to clear (shared Debouncer manages its own entries)
 
       // Dispose terminal
@@ -1043,28 +1035,8 @@ export class TerminalInstance {
       requestAnimationFrame(poll);
     }
 
-    // Mutation observer to detect panel moves or DOM reparenting
-    try {
-      const observer = new MutationObserver(() => {
-        if (!this.isActive) return;
-        if (!this.terminalContainer) return;
-        if (
-          this.terminalContainer.offsetWidth === 0 ||
-          this.terminalContainer.offsetHeight === 0
-        )
-          return;
-        // Simple refit on body changes
-        this.fit();
-      });
-      observer.observe(document.body, {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-      this._mutationObserver = observer;
-    } catch (e) {
-      Logger.debug("MutationObserver unavailable:", e);
-    }
+    // ResizeObserver handles container size changes - MutationObserver removed
+    // to eliminate performance overhead from observing entire document.body
   }
 
   /**
