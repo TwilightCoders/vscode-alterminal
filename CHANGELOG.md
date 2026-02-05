@@ -2,6 +2,12 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.21]
+
+### Bug Fixes
+
+- **Fixed missing node-pty binaries**: Re-packaged with all platform binaries (v0.2.20 was broken)
+
 ## [0.2.20]
 
 ### Bug Fixes
