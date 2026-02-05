@@ -34,6 +34,8 @@ export class LayoutManager {
   private _resizeObserver: ResizeObserver | null = null;
   private _windowResizeHandler: (() => void) | null = null;
   private _windowFocusHandler: (() => void) | null = null;
+  private _windowBlurHandler: (() => void) | null = null;
+  private _documentVisibilityHandler: (() => void) | null = null;
   private _windowBeforeUnloadHandler: (() => void) | null = null;
   private _layoutPreference: string = "auto";
 
@@ -77,13 +79,57 @@ export class LayoutManager {
 
     // Window focus handler - refit terminal when window regains focus
     this._windowFocusHandler = () => {
+      Logger.info("🔍 [FOCUS DEBUG] Window gained focus");
       const activeTerminal = this._callbacks.getActiveTerminal();
       if (activeTerminal) {
         activeTerminal.fit();
         activeTerminal.focus();
+        Logger.info("🔍 [FOCUS DEBUG] Refocused active terminal");
       }
     };
     window.addEventListener("focus", this._windowFocusHandler);
+
+    // Window blur handler - track when window loses focus
+    this._windowBlurHandler = () => {
+      Logger.info("🔍 [FOCUS DEBUG] Window lost focus (blur event)");
+
+      // Log which element has focus now
+      const activeElement = document.activeElement;
+      if (activeElement) {
+        Logger.info(`🔍 [FOCUS DEBUG] Active element after blur: ${activeElement.tagName} ${activeElement.className || ''} ${activeElement.id || ''}`);
+      } else {
+        Logger.info("🔍 [FOCUS DEBUG] No active element after blur");
+      }
+    };
+    window.addEventListener("blur", this._windowBlurHandler);
+
+    // Document visibility handler - track when tab becomes hidden/visible
+    this._documentVisibilityHandler = () => {
+      if (document.hidden) {
+        Logger.info("🔍 [FOCUS DEBUG] Document became hidden (switched away from tab)");
+      } else {
+        Logger.info("🔍 [FOCUS DEBUG] Document became visible (switched back to tab)");
+
+        // When becoming visible again (e.g., switching back from another workspace),
+        // we need to refresh the terminal display to prevent blank screen
+        requestAnimationFrame(() => {
+          const activeTerminal = this._callbacks.getActiveTerminal();
+          if (activeTerminal && activeTerminal.terminal) {
+            Logger.debug("🔄 Refreshing terminal after visibility change");
+
+            // Refresh the terminal display (redraw all rows)
+            activeTerminal.terminal.refresh(0, activeTerminal.terminal.rows - 1);
+
+            // Refit to ensure proper sizing
+            activeTerminal.fit();
+
+            // Focus the terminal
+            activeTerminal.focus();
+          }
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", this._documentVisibilityHandler);
 
     // Before unload - save state
     this._windowBeforeUnloadHandler = () => {
@@ -191,6 +237,16 @@ export class LayoutManager {
     if (this._windowFocusHandler) {
       window.removeEventListener("focus", this._windowFocusHandler);
       this._windowFocusHandler = null;
+    }
+
+    if (this._windowBlurHandler) {
+      window.removeEventListener("blur", this._windowBlurHandler);
+      this._windowBlurHandler = null;
+    }
+
+    if (this._documentVisibilityHandler) {
+      document.removeEventListener("visibilitychange", this._documentVisibilityHandler);
+      this._documentVisibilityHandler = null;
     }
 
     if (this._windowBeforeUnloadHandler) {

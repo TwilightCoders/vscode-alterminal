@@ -20,6 +20,8 @@
  * - Extensible for future input handling needs (shortcuts, modes, etc.)
  */
 
+import { Logger } from "./logger.js";
+
 export class InputHandler {
   public terminal: any;
   public tabId: any;
@@ -124,6 +126,11 @@ export class InputHandler {
     if (this.isMeaningfulInput(data)) {
       if (this.terminalInstance && typeof this.terminalInstance.markUserInteraction === 'function') {
         this.terminalInstance.markUserInteraction();
+      }
+
+      // Log Enter key presses specifically for focus debugging
+      if (data.includes('\r') || data.includes('\n')) {
+        Logger.info("🔍 [FOCUS DEBUG] Enter key pressed, sending to PTY");
       }
     }
 

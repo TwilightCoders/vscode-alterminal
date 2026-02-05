@@ -161,7 +161,10 @@ export class WebViewLifecycleManager {
    */
   private setupVisibilityHandler(webviewView: vscode.WebviewView): void {
     webviewView.onDidChangeVisibility(() => {
-      if (!webviewView.visible) {
+      if (webviewView.visible) {
+        Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became visible");
+      } else {
+        Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became hidden");
         // Webview hidden - mark as not initialized so next show triggers restore
         this._webviewInitialized = false;
       }

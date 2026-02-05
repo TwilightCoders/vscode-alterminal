@@ -2,6 +2,13 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.22]
+
+### Bug Fixes
+
+- **Fixed blank terminal after workspace switch**: Terminal now properly refreshes and redraws when switching between VS Code workspaces, preventing blank display until typing
+- **Added focus debugging**: Comprehensive logging to track webview focus changes for troubleshooting focus-related issues
+
 ## [0.2.21]
 
 ### Bug Fixes

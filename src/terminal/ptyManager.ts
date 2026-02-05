@@ -52,8 +52,43 @@ export class PtyManager {
   private _outputBuffer = new Map<number, string[]>();
   private _maxBufferSize = 10000; // Maximum lines to buffer per terminal
 
+  // Regex patterns for escape sequences that can cause focus stealing or VS Code interference
+  // OSC 633 is VS Code's shell integration protocol
+  // OSC 7 is current working directory (can trigger VS Code behavior)
+  // OSC 1337 is iTerm2 protocol (sometimes used by tools)
+  private static readonly VSCODE_OSC_PATTERN = /\x1b\]633;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+  private static readonly CWD_OSC_PATTERN = /\x1b\]7;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+  private static readonly ITERM_OSC_PATTERN = /\x1b\]1337;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+  
+  // DEC private mode: Focus reporting (?1004h enables, ?1004l disables)
+  // When enabled, terminal sends focus in/out events that VS Code may intercept
+  private static readonly FOCUS_REPORTING_PATTERN = /\x1b\[\?1004[hl]/g;
+
   constructor() {
     // No callbacks needed - will use webview directly
+  }
+
+  /**
+   * Filter out escape sequences that can cause VS Code to steal focus
+   * These include VS Code shell integration sequences and focus reporting mode
+   */
+  private _filterVSCodeSequences(data: string): string {
+    let filtered = data;
+    
+    // Remove VS Code shell integration sequences (OSC 633)
+    filtered = filtered.replace(PtyManager.VSCODE_OSC_PATTERN, '');
+    
+    // Remove current working directory sequences (OSC 7)
+    filtered = filtered.replace(PtyManager.CWD_OSC_PATTERN, '');
+    
+    // Remove iTerm2 sequences (OSC 1337)
+    filtered = filtered.replace(PtyManager.ITERM_OSC_PATTERN, '');
+    
+    // Remove focus reporting mode enable/disable sequences
+    // This prevents VS Code from intercepting focus events meant for the webview terminal
+    filtered = filtered.replace(PtyManager.FOCUS_REPORTING_PATTERN, '');
+    
+    return filtered;
   }
 
   public setScrollback(scrollback: number) {
@@ -267,21 +302,32 @@ export class PtyManager {
           ...process.env,
           TERM: TERMINAL_DEFAULTS.TERM_TYPE,
           COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
-          TERM_PROGRAM: "vscode",
+          // Use "alterminal" instead of "vscode" to prevent CLI tools (like Claude Code)
+          // from sending VS Code shell integration sequences (OSC 633) that may cause
+          // VS Code to focus its built-in Terminal panel instead of Alterminal
+          TERM_PROGRAM: "alterminal",
           TERM_PROGRAM_VERSION: vscode.version,
-          VSCODE_PID: process.pid.toString(),
+          // Don't expose VSCODE_PID - this can also trigger VS Code integrations
           PATH: process.env.PATH || "",
           SHELL: userShell,
         } as { [key: string]: string },
       });
 
       ptyProcess.onData((data) => {
+        // Filter out VS Code-specific escape sequences that can cause focus stealing
+        const filteredData = this._filterVSCodeSequences(data);
+        
+        // Skip if all data was filtered out
+        if (!filteredData) {
+          return;
+        }
+        
         // Check if webview is visible
         if (this._webviewView?.visible) {
           // Webview is visible - send data directly
           this._webviewView.webview.postMessage({
             command: "data",
-            data: data,
+            data: filteredData,
             tabId: tabId,
           });
         } else {
@@ -291,7 +337,7 @@ export class PtyManager {
           }
 
           const buffer = this._outputBuffer.get(tabId)!;
-          buffer.push(data);
+          buffer.push(filteredData);
 
           // Trim buffer if it gets too large (keep last N entries)
           if (buffer.length > this._maxBufferSize) {
