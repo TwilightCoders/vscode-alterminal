@@ -2,6 +2,24 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.17]
+
+### Bug Fixes - CRITICAL for Windows Users
+
+- **Fixed Windows Shell Initialization**: Terminals now properly initialize on Windows with full PATH and environment variables
+  - Root cause: Was using `cmd.exe` with empty args, which doesn't load user's PATH properly
+  - Solution: Now uses PowerShell by default on Windows (properly loads environment from registry)
+  - Fallback hierarchy: VS Code config → PowerShell Core (pwsh) → Windows PowerShell → cmd.exe
+  - Added proper shell argument handling for PowerShell vs cmd.exe
+- **Fixed "Command Not Found" Errors on Windows**: Commands like `git`, `npm`, `python` etc. now work properly
+- **Fixed Empty Terminal on First Launch**: Terminals now load correctly on Windows fresh installs
+
+### Impact
+
+- Windows users will no longer experience "command not found" for standard commands
+- Terminals will properly initialize on first launch
+- Better shell environment inheritance on Windows
+
 ## [0.2.16]
 
 ### Performance Improvements
