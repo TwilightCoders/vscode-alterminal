@@ -113,6 +113,19 @@ export class TabManager {
     this._layoutManager.setupResponsiveLayout();
     this._layoutManager.setupWindowEventHandlers();
 
+    // Set up visibility change handler to save state immediately when hidden
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Page is hidden - save state immediately (non-debounced)
+        Logger.debug("📤 Page becoming hidden - forcing immediate state save");
+        try {
+          this.saveToLocalState();
+        } catch (e) {
+          Logger.error("Failed to save state on visibility change:", e);
+        }
+      }
+    });
+
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
     // The extension will respond with restoreState or initializeEmpty
