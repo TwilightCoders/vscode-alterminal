@@ -2,6 +2,14 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.18]
+
+### Bug Fixes - CRITICAL for Remote-SSH/WSL Users
+
+- **Fixed Extension Activation on Remote-SSH/WSL**: Now includes node-pty binaries for all platforms (linux-x64, linux-arm64, win32-x64, darwin-arm64) in the extension package
+- **Root cause**: Extension was only packaged with macOS binaries, causing activation failures when connecting to Linux servers via Remote-SSH or using WSL
+- **Impact**: Remote-SSH and WSL users will no longer see "@lydell/node-pty binary not found" errors
+
 ## [0.2.17]
 
 ### Bug Fixes - CRITICAL for Windows Users
