@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -371,10 +371,6 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.1.0",
-    "@lydell/node-pty-linux-x64": "^1.1.0",
-    "@lydell/node-pty-linux-arm64": "^1.1.0",
-    "@lydell/node-pty-win32-x64": "^1.1.0",
-    "@lydell/node-pty-darwin-arm64": "^1.1.0",
     "@vscode/codicons": "^0.0.44",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
@@ -385,10 +381,10 @@
     "xterm-link-provider": "^1.3.1"
   },
   "optionalDependencies": {
-    "@lydell/node-pty-darwin-arm64": "^1.2.0-beta.10",
-    "@lydell/node-pty-linux-arm64": "^1.2.0-beta.10",
-    "@lydell/node-pty-linux-x64": "^1.2.0-beta.10",
+    "@lydell/node-pty-darwin-arm64": "^1.1.0",
+    "@lydell/node-pty-linux-arm64": "^1.1.0",
+    "@lydell/node-pty-linux-x64": "^1.1.0",
     "@lydell/node-pty-win32-ia32": "npm:null@*",
-    "@lydell/node-pty-win32-x64": "^1.2.0-beta.10"
+    "@lydell/node-pty-win32-x64": "^1.1.0"
   }
 }

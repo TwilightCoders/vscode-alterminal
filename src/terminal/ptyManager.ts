@@ -48,6 +48,10 @@ export class PtyManager {
 
   private _scrollback: number = 1000;
 
+  // Buffer for PTY output when webview is hidden
+  private _outputBuffer = new Map<number, string[]>();
+  private _maxBufferSize = 10000; // Maximum lines to buffer per terminal
+
   constructor() {
     // No callbacks needed - will use webview directly
   }
@@ -58,6 +62,47 @@ export class PtyManager {
 
   public setWebviewView(webviewView: vscode.WebviewView) {
     this._webviewView = webviewView;
+
+    // Set up visibility handler to manage output buffering
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        // Webview became visible - replay buffered output
+        this._replayBufferedOutput();
+      }
+    });
+  }
+
+  /**
+   * Replay buffered output when webview becomes visible
+   */
+  private _replayBufferedOutput() {
+    if (!this._webviewView?.visible) {
+      return;
+    }
+
+    let totalReplayed = 0;
+    for (const [tabId, buffer] of this._outputBuffer.entries()) {
+      if (buffer.length > 0) {
+        Logger.debug(`📤 Replaying ${buffer.length} buffered messages for tab ${tabId}`);
+
+        // Send all buffered data at once (joined)
+        const combinedData = buffer.join('');
+        this._webviewView.webview.postMessage({
+          command: "data",
+          data: combinedData,
+          tabId: tabId,
+        });
+
+        totalReplayed += buffer.length;
+      }
+    }
+
+    // Clear all buffers after replay
+    this._outputBuffer.clear();
+
+    if (totalReplayed > 0) {
+      Logger.info(`✅ Replayed ${totalReplayed} buffered messages`);
+    }
   }
 
   /**
@@ -231,11 +276,31 @@ export class PtyManager {
       });
 
       ptyProcess.onData((data) => {
-        this._webviewView?.webview.postMessage({
-          command: "data",
-          data: data,
-          tabId: tabId,
-        });
+        // Check if webview is visible
+        if (this._webviewView?.visible) {
+          // Webview is visible - send data directly
+          this._webviewView.webview.postMessage({
+            command: "data",
+            data: data,
+            tabId: tabId,
+          });
+        } else {
+          // Webview is hidden - buffer the output
+          if (!this._outputBuffer.has(tabId)) {
+            this._outputBuffer.set(tabId, []);
+          }
+
+          const buffer = this._outputBuffer.get(tabId)!;
+          buffer.push(data);
+
+          // Trim buffer if it gets too large (keep last N entries)
+          if (buffer.length > this._maxBufferSize) {
+            const excess = buffer.length - this._maxBufferSize;
+            buffer.splice(0, excess);
+            Logger.warn(`⚠️ Output buffer for tab ${tabId} exceeded max size, trimmed ${excess} oldest entries`);
+          }
+        }
+
         // Check for process changes on data events (event-driven approach)
         // Process name changes typically happen when commands execute (which generate data)
         this._checkProcessChange(tabId);
@@ -287,6 +352,9 @@ export class PtyManager {
     // Clean up state
     this._currentProcessNames.delete(tabId);
     this._terminalTypes.delete(tabId);
+
+    // Clear output buffer for this tab
+    this._outputBuffer.delete(tabId);
   }
 
   public async sendFileData(

@@ -2,6 +2,14 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.19]
+
+### Bug Fixes
+
+- **Fixed terminal output loss when switching tabs**: PTY output is now buffered when the panel is not visible
+- **Automatic buffer replay**: When switching back to Alterminal, all buffered output is sent to the terminal
+- **Impact**: No more lost output when switching between Alterminal and other panel tabs (Terminal, Debug Console, etc.)
+
 ## [0.2.18]
 
 ### Bug Fixes - CRITICAL for Remote-SSH/WSL Users
