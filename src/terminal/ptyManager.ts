@@ -148,12 +148,13 @@ export class PtyManager {
       this._terminalTypes.set(tabId, terminalType);
 
       // Determine what command/shell to spawn based on terminal type
-      const userShell =
-        process.platform === "win32"
-          ? "cmd.exe"
-          : process.env.SHELL || "/bin/bash";
+      const userShell = this._getDefaultShell();
       let command: string;
       let args: string[];
+
+      const isWindowsPowerShell = process.platform === "win32" &&
+        (userShell.toLowerCase().includes("powershell") || userShell.toLowerCase().includes("pwsh"));
+      const isWindowsCmd = process.platform === "win32" && !isWindowsPowerShell;
 
       switch (terminalType) {
         case "command":
@@ -161,23 +162,33 @@ export class PtyManager {
           // This ensures PATH and other shell variables are available
           if (launchCommand) {
             command = userShell;
-            if (process.platform === "win32") {
+            if (isWindowsPowerShell) {
+              args = ["-NoLogo", "-Command", launchCommand];
+            } else if (isWindowsCmd) {
               args = ["/c", launchCommand];
             } else {
-              // Use login shell to load PATH, then execute command interactively
+              // Unix: Use login shell to load PATH, then execute command interactively
               args = ["-l", "-i", "-c", launchCommand];
             }
           } else {
             // Default to shell if no command specified
             command = userShell;
-            args = process.platform === "win32" ? [] : ["-l", "-i"];
+            if (isWindowsPowerShell) {
+              args = ["-NoLogo"];
+            } else if (isWindowsCmd) {
+              args = [];
+            } else {
+              args = ["-l", "-i"];
+            }
           }
           break;
 
         case "shell":
           // Always plain shell (no auto command)
           command = userShell;
-          if (process.platform === "win32") {
+          if (isWindowsPowerShell) {
+            args = ["-NoLogo"];
+          } else if (isWindowsCmd) {
             args = [];
           } else {
             args = ["-l", "-i"];
@@ -188,7 +199,9 @@ export class PtyManager {
         default:
           // Default to plain shell
           command = userShell;
-          if (process.platform === "win32") {
+          if (isWindowsPowerShell) {
+            args = ["-NoLogo"];
+          } else if (isWindowsCmd) {
             args = [];
           } else {
             args = ["-l", "-i"];
@@ -388,5 +401,53 @@ export class PtyManager {
     }, 5000);
 
     this._processMonitorTimers.set(tabId, timer);
+  }
+
+  /**
+   * Get the default shell for the current platform
+   * Windows: Prefer PowerShell (loads user environment properly) or use VS Code's configured shell
+   * Unix: Use $SHELL or fallback to bash
+   */
+  private _getDefaultShell(): string {
+    if (process.platform === "win32") {
+      // Check VS Code's terminal.integrated.shell.windows setting first
+      const vscodeShell = vscode.workspace.getConfiguration("terminal.integrated.shell").get<string>("windows");
+      if (vscodeShell) {
+        return vscodeShell;
+      }
+
+      // Check for PowerShell (Core) first, then Windows PowerShell, fallback to cmd.exe
+      // PowerShell properly loads the user's PATH from the registry
+      const comspec = process.env.COMSPEC; // Usually C:\Windows\System32\cmd.exe
+
+      // Try to find PowerShell
+      if (process.env.PWSH_PATH) {
+        return process.env.PWSH_PATH;
+      }
+
+      // Look for pwsh (PowerShell Core) or powershell (Windows PowerShell)
+      try {
+        const { execSync } = require('child_process');
+        try {
+          execSync('pwsh.exe -v', { stdio: 'ignore' });
+          return 'pwsh.exe';
+        } catch {
+          try {
+            execSync('powershell.exe -v', { stdio: 'ignore' });
+            return 'powershell.exe';
+          } catch {
+            // Fall back to cmd.exe
+          }
+        }
+      } catch {
+        // If execSync fails, continue to fallback
+      }
+
+      // Fallback to cmd.exe
+      return comspec || "cmd.exe";
+    }
+
+    // Unix/Mac: use configured shell or default to bash
+    return process.env.SHELL || "/bin/bash";
   }
 }
