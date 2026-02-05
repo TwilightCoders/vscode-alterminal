@@ -353,7 +353,8 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && node scripts/verify-binaries.js",
+    "verify-binaries": "node scripts/verify-binaries.js",
     "compile": "node ./node_modules/typescript/lib/tsc.js -p ./ && node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
     "compile:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./ && NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
     "compile:tests": "node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.tests.json",
