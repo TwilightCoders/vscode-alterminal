@@ -50,6 +50,11 @@ export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.window.registerWebviewViewProvider(
     AlterminalProvider.viewType,
     provider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
+    }
   );
 
   context.subscriptions.push(disposable);

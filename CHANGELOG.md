@@ -2,6 +2,13 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.20]
+
+### Bug Fixes
+
+- **Fixed tab disappearing when switching between panel views**: Added `retainContextWhenHidden` option to webview provider registration
+- **Impact**: Alterminal tab now stays visible in the tab bar regardless of which other panel tabs are active
+
 ## [0.2.19]
 
 ### Bug Fixes
