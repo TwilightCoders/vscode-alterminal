@@ -45,6 +45,7 @@ export class PtyManager {
   private _terminalTypes = new Map<number, string>();
   private _webviewView?: vscode.WebviewView;
   private _activeTabId?: number;
+  private _visibilityDisposable?: { dispose(): void };
 
   private _scrollback: number = 1000;
 
@@ -96,10 +97,16 @@ export class PtyManager {
   }
 
   public setWebviewView(webviewView: vscode.WebviewView) {
+    // Clean up previous visibility subscription
+    if (this._visibilityDisposable) {
+      this._visibilityDisposable.dispose();
+      this._visibilityDisposable = undefined;
+    }
+
     this._webviewView = webviewView;
 
     // Set up visibility handler to manage output buffering
-    webviewView.onDidChangeVisibility(() => {
+    this._visibilityDisposable = webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         // Webview became visible - replay buffered output
         this._replayBufferedOutput();
@@ -372,8 +379,9 @@ export class PtyManager {
   }
 
   public sendFilePath(filePath: string, tabId: number): void {
-    // Escape single quotes for shell safety
-    const escapedPath = filePath.replace(/'/g, "\\'");
+    // Shell-escape by wrapping in single quotes and escaping embedded single quotes
+    // This safely handles spaces, semicolons, backticks, $, etc.
+    const escapedPath = filePath.replace(/'/g, "'\\''");
     this._ptyProcesses.get(tabId)?.write(`'${escapedPath}' `);
   }
 
@@ -446,6 +454,15 @@ export class PtyManager {
     for (const tabId of tabIds) {
       this._cleanupProcess(tabId);
     }
+
+    // Clean up visibility subscription
+    if (this._visibilityDisposable) {
+      this._visibilityDisposable.dispose();
+      this._visibilityDisposable = undefined;
+    }
+
+    // Release webview reference
+    this._webviewView = undefined;
   }
 
   /**

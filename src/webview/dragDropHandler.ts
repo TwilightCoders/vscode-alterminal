@@ -26,6 +26,10 @@ export class DragDropHandler {
   private target: HTMLElement | null = null;
   private overlay: HTMLElement | null = null;
   private dragDepth = 0;
+  private _dragEnterHandler: ((e: DragEvent) => void) | null = null;
+  private _dragOverHandler: ((e: DragEvent) => void) | null = null;
+  private _dragLeaveHandler: ((e: DragEvent) => void) | null = null;
+  private _dropHandler: ((e: DragEvent) => void) | null = null;
 
   constructor(vscode: any, tabManager: any) {
     this.vscode = vscode;
@@ -58,10 +62,14 @@ export class DragDropHandler {
    * Set up all drag and drop event listeners
    */
   setupEventListeners(): void {
-    this.target.addEventListener("dragenter", (e) => this.handleDragEnter(e));
-    this.target.addEventListener("dragover", (e) => this.handleDragOver(e));
-    this.target.addEventListener("dragleave", (e) => this.handleDragLeave(e));
-    this.target.addEventListener("drop", (e) => this.handleDrop(e));
+    this._dragEnterHandler = (e) => this.handleDragEnter(e);
+    this._dragOverHandler = (e) => this.handleDragOver(e);
+    this._dragLeaveHandler = (e) => this.handleDragLeave(e);
+    this._dropHandler = (e) => this.handleDrop(e);
+    this.target.addEventListener("dragenter", this._dragEnterHandler);
+    this.target.addEventListener("dragover", this._dragOverHandler);
+    this.target.addEventListener("dragleave", this._dragLeaveHandler);
+    this.target.addEventListener("drop", this._dropHandler);
   }
 
   /**
@@ -200,8 +208,22 @@ export class DragDropHandler {
    */
   dispose(): void {
     if (this.target && this.initialized) {
-      // Remove event listeners would go here if we tracked them
-      // For now, just reset state
+      if (this._dragEnterHandler) {
+        this.target.removeEventListener("dragenter", this._dragEnterHandler);
+        this._dragEnterHandler = null;
+      }
+      if (this._dragOverHandler) {
+        this.target.removeEventListener("dragover", this._dragOverHandler);
+        this._dragOverHandler = null;
+      }
+      if (this._dragLeaveHandler) {
+        this.target.removeEventListener("dragleave", this._dragLeaveHandler);
+        this._dragLeaveHandler = null;
+      }
+      if (this._dropHandler) {
+        this.target.removeEventListener("drop", this._dropHandler);
+        this._dropHandler = null;
+      }
       this.target.style.backgroundColor = "";
       this.initialized = false;
     }

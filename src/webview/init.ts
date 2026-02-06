@@ -93,58 +93,51 @@ function initializeAll(): void {
     isCtrlPressed: false,
   };
 
-  // Add global keyboard listeners for CMD/Ctrl key detection
-  document.addEventListener("keydown", (event) => {
+  // Named handlers for CMD/Ctrl key detection (stored for cleanup)
+  function handleKeyDown(event: KeyboardEvent): void {
     const isMac = navigator.platform.indexOf("Mac") > -1;
-      const wasCmdPressed = window.linkModeState.isCmdPressed;
-      const wasCtrlPressed = window.linkModeState.isCtrlPressed;
+    const wasCmdPressed = window.linkModeState.isCmdPressed;
+    const wasCtrlPressed = window.linkModeState.isCtrlPressed;
 
-      if (isMac && event.metaKey) {
-        window.linkModeState.isCmdPressed = true;
-      } else if (!isMac && event.ctrlKey) {
-        window.linkModeState.isCtrlPressed = true;
+    if (isMac && event.metaKey) {
+      window.linkModeState.isCmdPressed = true;
+    } else if (!isMac && event.ctrlKey) {
+      window.linkModeState.isCtrlPressed = true;
+    }
+
+    const cmdStateChanged =
+      wasCmdPressed !== window.linkModeState.isCmdPressed ||
+      wasCtrlPressed !== window.linkModeState.isCtrlPressed;
+    if (cmdStateChanged) {
+      if (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed) {
+        document.body.classList.add('cmd-mode');
       }
+    }
+  }
 
-      // If modifier key state changed, update UI and refresh link providers
-      const cmdStateChanged =
-        wasCmdPressed !== window.linkModeState.isCmdPressed ||
-        wasCtrlPressed !== window.linkModeState.isCtrlPressed;
-      if (cmdStateChanged) {
-        // Add cmd-mode class to enable pointer cursor on links
-        if (window.linkModeState.isCmdPressed || window.linkModeState.isCtrlPressed) {
-          document.body.classList.add('cmd-mode');
-        }
-        if (window.tabManager) {
-          window.tabManager.refreshLinkProviders();
-        }
+  function handleKeyUp(event: KeyboardEvent): void {
+    const isMac = navigator.platform.indexOf("Mac") > -1;
+    const wasCmdPressed = window.linkModeState.isCmdPressed;
+    const wasCtrlPressed = window.linkModeState.isCtrlPressed;
+
+    if (isMac && !event.metaKey) {
+      window.linkModeState.isCmdPressed = false;
+    } else if (!isMac && !event.ctrlKey) {
+      window.linkModeState.isCtrlPressed = false;
+    }
+
+    const cmdStateChanged =
+      wasCmdPressed !== window.linkModeState.isCmdPressed ||
+      wasCtrlPressed !== window.linkModeState.isCtrlPressed;
+    if (cmdStateChanged) {
+      if (!window.linkModeState.isCmdPressed && !window.linkModeState.isCtrlPressed) {
+        document.body.classList.remove('cmd-mode');
       }
-    });
+    }
+  }
 
-    document.addEventListener("keyup", (event) => {
-      const isMac = navigator.platform.indexOf("Mac") > -1;
-      const wasCmdPressed = window.linkModeState.isCmdPressed;
-      const wasCtrlPressed = window.linkModeState.isCtrlPressed;
-
-      if (isMac && !event.metaKey) {
-        window.linkModeState.isCmdPressed = false;
-      } else if (!isMac && !event.ctrlKey) {
-        window.linkModeState.isCtrlPressed = false;
-      }
-
-      // If modifier key state changed, update UI and refresh link providers
-      const cmdStateChanged =
-        wasCmdPressed !== window.linkModeState.isCmdPressed ||
-        wasCtrlPressed !== window.linkModeState.isCtrlPressed;
-      if (cmdStateChanged) {
-        // Remove cmd-mode class to restore text cursor
-        if (!window.linkModeState.isCmdPressed && !window.linkModeState.isCtrlPressed) {
-          document.body.classList.remove('cmd-mode');
-        }
-        if (window.tabManager) {
-          window.tabManager.refreshLinkProviders();
-        }
-      }
-    });
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("keyup", handleKeyUp);
 
     // TabManager is ready - extension will send commands to create terminals
 

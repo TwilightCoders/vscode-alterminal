@@ -94,6 +94,7 @@ export class TerminalInstance {
   _visibilityInstalled?: boolean;
   _resizeObserver?: ResizeObserver;
   _visibilityHandler?: () => void;
+  _webglContextLostHandlers?: Array<{ canvas: HTMLCanvasElement; handler: (e: Event) => void }>;
 
   constructor(
     id: number,
@@ -253,98 +254,35 @@ export class TerminalInstance {
   }
 
   /**
-   * Set up file path link detection using native xterm.js API
+   * Set up file path link detection using xterm-link-provider library
    */
   setupFilePathLinks() {
-    // Use native xterm.js link provider API for better compatibility
-    const provider = {
-      // Prevent xterm.js from trying to open links itself (causes sandbox errors)
-      willLinkActivate: () => false,
-      provideLinks: (y, callback) => {
-        try {
-          // y parameter is 1-based, convert to 0-based buffer line like WebLinksAddon does
-          const bufferLine = y - 1;
-          const line = this.terminal.buffer.active.getLine(bufferLine);
-          if (!line) {
-            callback(undefined);
-            return;
-          }
+    if (!this.terminal || !window.LinkProvider) return;
 
-          const lineText = line.translateToString(true);
-          const links = [];
+    // Regex for file paths, directories, URLs, and git references
+    // Uses a capture group around the entire match (matchIndex=1)
+    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]+)/;
 
-          // Regex for file paths, directories, URLs, and git references
-          // Matches:
-          // 1. HTTP(S) URLs
-          // 2. Absolute/relative paths with special prefixes (~/, ./, ../, /)
-          // 3. Path-like patterns (e.g., origin/master, src/file.ts, word/word)
-          const regex = /https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]+/g;
-          let match;
-
-          while ((match = regex.exec(lineText)) !== null) {
-            const matchText = match[0];
-            const startX = match.index;
-            const endX = match.index + matchText.length;
-
-            // Detect if this is a URL
-            const isUrl = matchText.startsWith('http://') || matchText.startsWith('https://');
-
-            // Use WebLinksAddon's exact coordinate format:
-            // start: x+1, y+1 (1-based)
-            // end: x (0-based, exclusive), y+1 (1-based)
-            const range = {
-              start: {
-                x: startX + 1,
-                y: y  // use original y parameter (already 1-based)
-              },
-              end: {
-                x: endX,
-                y: y
-              }
-            };
-
-            links.push({
-              range,
-              text: matchText,
-              activate: (event, text) => {
-                // Prevent default behavior to avoid sandbox errors
-                if (event && event.preventDefault) {
-                  event.preventDefault();
-                }
-
-                // Only activate if modifier key is pressed
-                if (!event.metaKey && !event.ctrlKey) {
-                  return;
-                }
-
-                if (isUrl) {
-                  this.vscode.postMessage({
-                    command: "openUrl",
-                    url: text,
-                  });
-                } else {
-                  this.vscode.postMessage({
-                    command: "openFile",
-                    filePath: text,
-                    terminalId: this.id,
-                  });
-                }
-              }
-            });
-          }
-
-          callback(links.length ? links : undefined);
-        } catch (error) {
-          console.error("🔗 Error in provideLinks:", error);
-          callback(undefined);
-        }
+    const handler = (event: MouseEvent, uri: string) => {
+      if (event && event.preventDefault) {
+        event.preventDefault();
+      }
+      if (!event.metaKey && !event.ctrlKey) {
+        return;
+      }
+      const isUrl = uri.startsWith('http://') || uri.startsWith('https://');
+      if (isUrl) {
+        this.vscode.postMessage({ command: "openUrl", url: uri });
+      } else {
+        this.vscode.postMessage({ command: "openFile", filePath: uri, terminalId: this.id });
       }
     };
 
     try {
+      const provider = new window.LinkProvider(this.terminal, linkRegex, handler);
       this.linkProviderDisposable = this.terminal.registerLinkProvider(provider);
     } catch (error) {
-      console.error("🔗 Failed to register link provider:", error);
+      console.error("Failed to register link provider:", error);
     }
   }
 
@@ -954,6 +892,14 @@ export class TerminalInstance {
         this._visibilityHandler = undefined;
       }
 
+      // Clean up WebGL context-loss handlers
+      if (this._webglContextLostHandlers) {
+        for (const { canvas, handler } of this._webglContextLostHandlers) {
+          canvas.removeEventListener("webglcontextlost", handler);
+        }
+        this._webglContextLostHandlers = undefined;
+      }
+
       // Clean up resize observer
       if (this._resizeObserver) {
         this._resizeObserver.disconnect();
@@ -1015,19 +961,18 @@ export class TerminalInstance {
     };
     document.addEventListener("visibilitychange", this._visibilityHandler);
     // WebGL context loss fallback
+    this._webglContextLostHandlers = [];
     const attachWebglHandlers = () => {
       const cvs = this.terminalContainer?.querySelectorAll("canvas") || [];
       if (!cvs.length) return false;
       cvs.forEach((cv) => {
-        cv.addEventListener(
-          "webglcontextlost",
-          (e) => {
-            e.preventDefault();
-            Logger.warn("WebGL context lost at canvas level");
-            this.showWebGLError();
-          },
-          { passive: false },
-        );
+        const handler = (e: Event) => {
+          e.preventDefault();
+          Logger.warn("WebGL context lost at canvas level");
+          this.showWebGLError();
+        };
+        cv.addEventListener("webglcontextlost", handler, { passive: false });
+        this._webglContextLostHandlers!.push({ canvas: cv, handler });
       });
       return true;
     };

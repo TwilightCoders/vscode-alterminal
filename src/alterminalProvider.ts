@@ -3,15 +3,14 @@ import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
 import { TabTitleProvider } from "./providers/tabTitleProvider";
+import { TemplateUtils } from "./utils/templateUtils";
 import { StateManager } from "./managers/stateManager";
 import { ConfigurationWatcher } from "./managers/configurationWatcher";
-import { NotificationManager } from "./managers/notificationManager";
 import { CommandLauncher } from "./managers/commandLauncher";
 import { FileOperationHandler } from "./managers/fileOperationHandler";
 import { TabContextMenuHandler } from "./managers/tabContextMenuHandler";
 import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
 import { MessageDispatcher } from "./managers/messageDispatcher";
-import { TerminalController } from "./managers/terminalController";
 
 /**
  * AlterminalProvider
@@ -36,13 +35,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   // Managers
   private stateManager: StateManager;
   private configurationWatcher: ConfigurationWatcher;
-  private notificationManager: NotificationManager;
   private commandLauncher: CommandLauncher;
   private fileOperationHandler: FileOperationHandler;
   private tabContextMenuHandler: TabContextMenuHandler;
   private webviewLifecycleManager: WebViewLifecycleManager;
   private messageDispatcher: MessageDispatcher;
-  private terminalController: TerminalController;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -69,10 +66,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     // Initialize managers
     this.stateManager = new StateManager(context);
     this.configurationWatcher = new ConfigurationWatcher(context);
-    this.notificationManager = new NotificationManager(
-      () => this._view?.webview,
-      () => this.openTerminal(),
-    );
     this.commandLauncher = new CommandLauncher(
       this._commandManager,
       (command: string) => this.createNewTabWithCommand(command),
@@ -82,11 +75,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this._commandManager,
       () => this._view?.webview,
     );
-    this.terminalController = new TerminalController(
-      () => this._view?.webview,
-      this._ptyManager,
-      this._extensionUri,
-    );
 
     // MessageDispatcher needs to be created after other managers
     this.messageDispatcher = new MessageDispatcher(
@@ -95,7 +83,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this.fileOperationHandler,
       this.tabContextMenuHandler,
       this.stateManager,
-      this.notificationManager,
+      () => this._view?.webview,
+      () => this.openTerminal(),
       (msg: any) => this._handleFormatTabTitle(msg),
       () => this._handleWebviewReady(),
       this._serializer ? (msg: any) => this._serializer.handleMessage(msg) : undefined,
@@ -216,42 +205,79 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Request performance report from terminals
    */
   public async requestPerformanceReport(): Promise<void> {
-    await this.terminalController.requestPerformanceReport();
+    this._view?.webview.postMessage({ command: "collectPerformance" });
   }
 
   /**
    * Refresh/restart all terminals
    */
   public async refresh(): Promise<void> {
-    await this.terminalController.refresh(() => this._view);
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Restarting Alterminal...",
+        cancellable: false,
+      },
+      async (progress) => {
+        try {
+          progress.report({ increment: 0, message: "Disposing terminals..." });
+          this._ptyManager.dispose();
+
+          progress.report({ increment: 50, message: "Disposing webview..." });
+          progress.report({ increment: 75, message: "Reinitializing..." });
+
+          if (this._view) {
+            const timeNow = new Date().getTime();
+            this._view.webview.html = TemplateUtils.getHtmlTemplate(
+              this._extensionUri,
+              this._view.webview,
+              timeNow,
+            );
+          }
+
+          progress.report({ increment: 100, message: "Complete!" });
+          vscode.window.showInformationMessage("Alterminal restarted successfully!");
+        } catch (error) {
+          Logger.error("Error during refresh:", error);
+          vscode.window.showErrorMessage(`Failed to restart Alterminal: ${error}`);
+        }
+      },
+    );
   }
 
   /**
    * Trigger terminal resize
    */
   public triggerResize(): void {
-    this.terminalController.triggerResize();
+    this._view?.webview.postMessage({ command: "triggerResize" });
   }
 
   /**
    * Create a new terminal tab
    */
   public createNewTab(type?: string): void {
-    this.terminalController.createNewTab(type);
+    this._view?.webview.postMessage({
+      command: "createNewTab",
+      terminalType: type,
+    });
   }
 
   /**
    * Create a new terminal tab with a command
    */
   public createNewTabWithCommand(cmd: string): void {
-    this.terminalController.createNewTabWithCommand(cmd);
+    this._view?.webview.postMessage({
+      command: "createNewTab",
+      terminalType: "command",
+      launchCommand: cmd,
+    });
   }
 
   /**
    * Focus the terminal view
    */
   public async openTerminal(): Promise<void> {
-    await this.terminalController.openTerminal();
+    await vscode.commands.executeCommand("alterminalView.focus");
   }
 
   /**
@@ -265,7 +291,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Set debug filter for developer mode
    */
   public setDebugFilter(filter: string[] | null): void {
-    this.terminalController.setDebugFilter(filter);
+    const webview = this._view?.webview;
+    if (webview) {
+      webview.postMessage({ command: "setDebugFilter", filter });
+      Logger.info(`Debug filter ${filter ? "set" : "cleared"}:`, filter);
+    }
   }
 
   /**

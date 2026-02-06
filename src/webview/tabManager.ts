@@ -68,6 +68,7 @@ export class TabManager {
   private _keyboardManager: KeyboardManager;
   private _tabUIManager: TabUIManager;
   private _layoutManager: LayoutManager;
+  private _visibilityHandler: (() => void) | null = null;
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -114,7 +115,7 @@ export class TabManager {
     this._layoutManager.setupWindowEventHandlers();
 
     // Set up visibility change handler to save state immediately when hidden
-    document.addEventListener('visibilitychange', () => {
+    this._visibilityHandler = () => {
       if (document.hidden) {
         // Page is hidden - save state immediately (non-debounced)
         Logger.debug("📤 Page becoming hidden - forcing immediate state save");
@@ -124,7 +125,8 @@ export class TabManager {
           Logger.error("Failed to save state on visibility change:", e);
         }
       }
-    });
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
 
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
@@ -1170,21 +1172,15 @@ export class TabManager {
   }
 
   /**
-   * Refresh link providers for all terminals when CMD key state changes
-   */
-  refreshLinkProviders() {
-    for (const terminal of this.terminals.values()) {
-      if (terminal.setupFilePathLinks) {
-        terminal.setupFilePathLinks();
-      } else {
-      }
-    }
-  }
-
-  /**
    * Dispose of all terminals and cleanup
    */
   dispose() {
+    // Remove visibility change handler
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+
     // Dispose layout manager (handles window event cleanup)
     if (this._layoutManager) {
       this._layoutManager.dispose();

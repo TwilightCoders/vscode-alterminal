@@ -4,18 +4,19 @@ import { CommandLauncher } from "./commandLauncher";
 import { FileOperationHandler } from "./fileOperationHandler";
 import { TabContextMenuHandler } from "./tabContextMenuHandler";
 import { StateManager } from "./stateManager";
-import { NotificationManager } from "./notificationManager";
 import { Logger } from "../utils/logger";
+
+export interface PerformanceData {
+  count: number;
+  avgInit: number;
+  avgOpenToActive: number;
+  samples: any[];
+}
 
 /**
  * MessageDispatcher
  *
  * Responsibility: Route messages from webview to appropriate handlers
- *
- * SOLID Principles:
- * - Single Responsibility: Only routes messages, doesn't handle them
- * - Open/Closed: Can add new routes without changing existing
- * - Dependency Inversion: Depends on handler abstractions
  */
 export class MessageDispatcher {
   constructor(
@@ -24,7 +25,8 @@ export class MessageDispatcher {
     private readonly fileOperationHandler: FileOperationHandler,
     private readonly tabContextMenuHandler: TabContextMenuHandler,
     private readonly stateManager: StateManager,
-    private readonly notificationManager: NotificationManager,
+    private readonly getWebview: () => vscode.Webview | undefined,
+    private readonly openTerminal: () => Promise<void>,
     private readonly onFormatTabTitle: (msg: any) => void,
     private readonly onWebviewReady: () => void,
     private readonly serializerHandleMessage?: (msg: any) => void,
@@ -61,17 +63,15 @@ export class MessageDispatcher {
         }
       },
       webviewReady: () => {
-        Logger.debug("📨 Received webviewReady message");
+        Logger.debug("Received webviewReady message");
         this.onWebviewReady();
       },
       switchTab: () => {}, // No-op - handled in webview
-      playBellSound: (msg: any) =>
-        this.notificationManager.playBellSound(msg.tabId, msg.tabLabel),
+      playBellSound: (msg: any) => this._handleBellSound(msg.tabId, msg.tabLabel),
       setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
       setDeveloperMode: () => {}, // Handled in webview
-      performanceReport: (msg: any) =>
-        this.notificationManager.showPerformanceReport(msg.data),
+      performanceReport: (msg: any) => this._handlePerformanceReport(msg.data),
       saveCommand: (msg: any) =>
         this.commandLauncher.handleSaveCommand(
           msg.tabId,
@@ -115,5 +115,43 @@ export class MessageDispatcher {
       undefined,
       [],
     );
+  }
+
+  private _handlePerformanceReport(data: PerformanceData): void {
+    const message = `Terminal Performance: ${data.count} samples, avg init: ${data.avgInit.toFixed(0)}ms, avg activation: ${data.avgOpenToActive.toFixed(0)}ms`;
+    vscode.window.showInformationMessage(message);
+    Logger.info("Performance Report:", data);
+  }
+
+  private async _handleBellSound(tabId: number, tabLabel: string): Promise<void> {
+    try {
+      vscode.window
+        .showInformationMessage(
+          `Terminal Bell: ${tabLabel || `Tab ${tabId}`}`,
+          "Go to Terminal",
+        )
+        .then((selection) => {
+          if (selection === "Go to Terminal") {
+            this.openTerminal().then(() => {
+              const webview = this.getWebview();
+              if (webview) {
+                webview.postMessage({
+                  command: "switchToTab",
+                  tabId: tabId,
+                });
+              }
+            });
+          }
+        });
+
+      vscode.commands
+        .executeCommand("workbench.action.focusActiveEditorGroup")
+        .then(
+          () => {},
+          () => {},
+        );
+    } catch (error) {
+      Logger.error("Failed to play bell sound:", error);
+    }
   }
 }
