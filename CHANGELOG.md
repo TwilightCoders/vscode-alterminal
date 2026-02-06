@@ -2,6 +2,12 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.23]
+
+### Bug Fixes
+
+- **Fixed missing platform binaries**: Added all platform-specific node-pty binaries to .vscodeignore to ensure they're included in published package (fixes "Cannot find module '@lydell/node-pty'" error on all platforms)
+
 ## [0.2.22]
 
 ### Bug Fixes

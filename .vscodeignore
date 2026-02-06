@@ -12,4 +12,9 @@ vsc-extension-quickstart.md
 **/*.ts
 vendor/**
 !node_modules/@lydell/node-pty/**
+!node_modules/@lydell/node-pty-darwin-arm64/**
+!node_modules/@lydell/node-pty-darwin-x64/**
+!node_modules/@lydell/node-pty-linux-arm64/**
+!node_modules/@lydell/node-pty-linux-x64/**
+!node_modules/@lydell/node-pty-win32-x64/**
 !node_modules/@xterm/**
