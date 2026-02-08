@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -326,7 +326,7 @@
         "alterminal.savedCommands": {
           "type": "array",
           "default": [],
-          "description": "Saved terminal commands for quick launching",
+          "markdownDescription": "Saved terminal commands for quick launching. Commands support template variables that expand at launch time:\n\n| Token | Value |\n|-------|-------|\n| `{workspace}` | Workspace folder name |\n| `{workspacePath}` | Full workspace folder path |\n| `{user}` | OS username |\n| `{platform}` | `process.platform` (darwin, linux, win32) |\n| `{env.VAR}` | Environment variable `VAR` |\n\nSupports conditionals: `{workspace:default}`, `{workspace?then:else}`. Unknown tokens are left as-is.",
           "items": {
             "type": "object",
             "properties": {

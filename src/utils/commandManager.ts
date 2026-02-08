@@ -20,7 +20,9 @@
  */
 
 import * as vscode from "vscode";
+import * as os from "os";
 import { LIMITS } from "../constants";
+import { TemplateEngine } from "./templateEngine";
 
 interface SavedCommand {
   command: string;
@@ -166,6 +168,12 @@ export class CommandManager {
 
     // Default: use first word + "..."
     const firstWord = cmd.split(" ")[0];
+    // If command contains template tokens, include them in the label for visibility
+    if (/\{[a-zA-Z]/.test(cmd)) {
+      const tokenMatch = cmd.match(/\{(\w+)/);
+      const hint = tokenMatch ? tokenMatch[1] : "template";
+      return `${firstWord}: {${hint}}`;
+    }
     return cmd.length > 20 ? `${firstWord}...` : cmd;
   }
 
@@ -195,6 +203,30 @@ export class CommandManager {
   }
 
   /**
+   * Expand template variables in a command string.
+   * Supports {workspace}, {workspacePath}, {user}, {platform}, {env.VAR}.
+   */
+  expandCommand(command: string): string {
+    return TemplateEngine.render(command, (key) => {
+      if (key.startsWith("env.")) {
+        return process.env[key.slice(4)] || null;
+      }
+      switch (key) {
+        case "workspace":
+          return vscode.workspace.workspaceFolders?.[0]?.name || null;
+        case "workspacePath":
+          return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || null;
+        case "user":
+          return os.userInfo().username;
+        case "platform":
+          return process.platform;
+        default:
+          return null;
+      }
+    });
+  }
+
+  /**
    * Remove a saved command
    */
   async removeSavedCommand(command: string) {
@@ -209,8 +241,8 @@ export class CommandManager {
    */
   async showSaveCommandDialog() {
     const command = await this.vscode.window.showInputBox({
-      prompt: "Enter the command to save",
-      placeHolder: "e.g., npm run dev, python server.py, etc.",
+      prompt: "Enter the command to save. Use {workspace}, {user}, {platform}, or {env.VAR} for dynamic values.",
+      placeHolder: "e.g., tmux new -s {workspace}, npm run dev, etc.",
       validateInput: (value) => {
         return value.trim() ? null : "Command cannot be empty";
       },

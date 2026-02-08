@@ -78,7 +78,6 @@ export class TerminalInstance {
   hasUserInteraction: boolean;
   _isDirty: boolean;
   _cachedSerializedState: string | null;
-  _simpleHistory: boolean;
   _didInit: boolean;
   _pendingPtyStart: boolean;
   _lastWriteTs?: number;
@@ -137,8 +136,6 @@ export class TerminalInstance {
     this.lifecycleManager = new TerminalLifecycleManager(this, vscode, String(id));
     this.linkProviderDisposable = null;
 
-    // Simplified history flags
-    this._simpleHistory = true;
     this._didInit = false;
     // If autoStartPty is false we defer spawning until restoration completes.
     // If true we spawn when the terminal is first marked opened.
@@ -560,56 +557,6 @@ export class TerminalInstance {
       Logger.info(`🔄 Terminal ${this.id} reset to clean state`);
     } catch (error) {
       Logger.error(`Failed to reset terminal ${this.id}:`, error);
-    }
-  }
-
-  /**
-   * Reset only colors and text attributes
-   */
-  resetColors() {
-    if (!this.terminal) return;
-    try {
-      this.terminal.write('\x1b[0m'); // Reset all attributes (colors, bold, etc.)
-      Logger.info(`🎨 Terminal ${this.id} colors reset`);
-    } catch (error) {
-      Logger.error(`Failed to reset colors for terminal ${this.id}:`, error);
-    }
-  }
-
-  /**
-   * Reset mouse tracking modes
-   */
-  resetMouse() {
-    if (!this.terminal) return;
-    try {
-      const mouseSequence = 
-        '\x1b[?1000l' +       // Disable mouse tracking
-        '\x1b[?1002l' +       // Disable button event mouse tracking
-        '\x1b[?1003l' +       // Disable any motion mouse tracking
-        '\x1b[?1006l';        // Disable SGR mouse mode
-      this.terminal.write(mouseSequence);
-      Logger.info(`🖱️ Terminal ${this.id} mouse tracking reset`);
-    } catch (error) {
-      Logger.error(`Failed to reset mouse for terminal ${this.id}:`, error);
-    }
-  }
-
-  /**
-   * Reset screen and buffer modes
-   */
-  resetScreen() {
-    if (!this.terminal) return;
-    try {
-      const screenSequence = 
-        '\x1b[?47l' +         // Exit alternate screen (if in it)
-        '\x1b[?1049l' +       // Exit alternate screen buffer
-        '\x1b[2J' +           // Clear entire screen
-        '\x1b[H';             // Move cursor to home position
-      this.terminal.write(screenSequence);
-      setTimeout(() => this.fit(), 50);
-      Logger.info(`📺 Terminal ${this.id} screen and buffer reset`);
-    } catch (error) {
-      Logger.error(`Failed to reset screen for terminal ${this.id}:`, error);
     }
   }
 

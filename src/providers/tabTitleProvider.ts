@@ -27,6 +27,7 @@
 
 import * as vscode from "vscode";
 import { Logger } from "../utils/logger";
+import { TemplateEngine } from "../utils/templateEngine";
 import * as path from "path";
 
 export interface TabContext {
@@ -62,7 +63,10 @@ export class TabTitleProvider {
    */
   render(template: string, context: TabContext): string {
     try {
-      const result = this.parseTemplate(template, context);
+      const result = TemplateEngine.render(template, (key) => {
+        const token = this.tokens.get(key);
+        return token?.getValue(context) ?? null;
+      });
       return this.truncateIfNeeded(result);
     } catch (error) {
       Logger.error("Template rendering error:", error);
@@ -71,55 +75,6 @@ export class TabTitleProvider {
         ? `${context.baseTabName} • ${context.processName}`
         : context.baseTabName;
     }
-  }
-  /**
-   * Parse template by resolving innermost {..} first using a simple regex loop.
-   * This keeps the implementation small while supporting nested tokens like {p? • {p}}.
-   */
-  private parseTemplate(template: string, context: TabContext): string {
-    const tokenRe = /\{([^{}]+)\}/g;
-    let prev = "";
-    let out = template;
-    let guard = 0;
-    while (out !== prev && guard++ < 50) {
-      prev = out;
-      out = out.replace(tokenRe, (_m, content) => this.resolveToken(content, context));
-    }
-    return out;
-  }
-
-  // Resolve a single token content (no outer braces) supporting ?, : and simple tokens
-  private resolveToken(content: string, ctx: TabContext): string {
-    // key is up to first '?' or ':'
-    const q = content.indexOf('?');
-    const c = content.indexOf(':');
-    const cutIdx = Math.min(q === -1 ? Infinity : q, c === -1 ? Infinity : c);
-    const key = cutIdx === Infinity ? content : content.slice(0, cutIdx);
-    const rest = cutIdx === Infinity ? '' : content.slice(cutIdx);
-
-    const token = this.tokens.get(key);
-    const val = token?.getValue(ctx) || null;
-
-    if (rest.startsWith('?')) {
-      const body = rest.slice(1);
-      const delim = body.indexOf(':');
-      const thenText = delim === -1 ? body : body.slice(0, delim);
-      const elseText = delim === -1 ? '' : body.slice(delim + 1);
-      // then/else segments may still contain tokens; rely on outer loop for further resolution
-      return val ? thenText : elseText;
-    }
-
-    if (rest.startsWith(':')) {
-      const defText = rest.slice(1);
-      return val || defText;
-    }
-
-    // For known tokens, return value or empty string (for use in conditionals)
-    // For unknown tokens, return placeholder so user can see the error
-    if (token) {
-      return val || '';
-    }
-    return `{${content}}`; // Unknown token - show placeholder
   }
 
   /**

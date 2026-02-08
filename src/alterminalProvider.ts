@@ -266,10 +266,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Create a new terminal tab with a command
    */
   public createNewTabWithCommand(cmd: string): void {
+    const expanded = this._commandManager.expandCommand(cmd);
     this._view?.webview.postMessage({
       command: "createNewTab",
       terminalType: "command",
-      launchCommand: cmd,
+      launchCommand: expanded,
     });
   }
 
@@ -331,26 +332,48 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         saved: boolean;
       }>();
       qp.title = "Launch Command";
-      qp.placeholder = "Type a command to run or select a saved one";
+      qp.placeholder = "Type a command or use variables: {workspace}, {user}, {env.VAR}";
       qp.matchOnDescription = true;
+      qp.matchOnDetail = true;
+
+      // Separator + help item shown at the bottom of every list
+      const helpSeparator = { label: "Template Variables", kind: vscode.QuickPickItemKind.Separator } as any;
+      const helpItem = {
+        label: "$(symbol-variable) {workspace}  {workspacePath}  {user}  {platform}  {env.VAR}",
+        description: "",
+        detail: "Use these in commands to adapt per-workspace. Supports {key:default} and {key?then:else}.",
+        launchCommand: "",
+        saved: false,
+        alwaysShow: true,
+      };
+
       const buildItems = (value: string) => {
-        const items = saved.map((c) => ({
-          label: c.label,
-          description: c.command,
-          detail: `Used ${c.count} • Last ${new Date(c.lastUsed).toLocaleDateString()}`,
-          launchCommand: c.command,
-          saved: true,
-        }));
+        const items: any[] = saved.map((c) => {
+          const expanded = this._commandManager.expandCommand(c.command);
+          const preview = expanded !== c.command ? `\u2192 ${expanded}` : undefined;
+          return {
+            label: c.label,
+            description: c.command,
+            detail: preview
+              ? `${preview}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
+              : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`,
+            launchCommand: c.command,
+            saved: true,
+          };
+        });
         const trimmed = value.trim();
         if (trimmed && !saved.some((c) => c.command === trimmed)) {
+          const expanded = this._commandManager.expandCommand(trimmed);
+          const preview = expanded !== trimmed ? `\u2192 ${expanded}` : undefined;
           items.unshift({
             label: `Run: ${trimmed}`,
             description: "(new command)",
-            detail: "Press Enter to launch (not yet saved)",
+            detail: preview || "Press Enter to launch (not yet saved)",
             launchCommand: trimmed,
             saved: false,
           });
         }
+        items.push(helpSeparator, helpItem);
         return items;
       };
       qp.items = buildItems("");
@@ -363,8 +386,13 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           const value = qp.value.trim();
           const sel = qp.selectedItems[0];
 
+          // Ignore selection of the help item
+          if (sel === helpItem && !value) {
+            return;
+          }
+
           // Use what they typed if they typed anything, otherwise use selection
-          const commandToRun = value || (sel ? sel.launchCommand : "");
+          const commandToRun = value || (sel && sel !== helpItem ? sel.launchCommand : "");
 
           if (!commandToRun) {
             return;

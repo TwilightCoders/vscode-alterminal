@@ -60,7 +60,6 @@ export class TabManager {
   public nextTabId: number;
   public isInitialized: boolean;
   private _savedCommandsSet: Set<string>;
-  private _historyBannerInjected: boolean;
   private _historyBannerShownEver: boolean;
   private _alwaysShowTabs: boolean;
   private _initTimeoutId: ReturnType<typeof setTimeout> | null;
@@ -86,7 +85,6 @@ export class TabManager {
     // Track saved commands to set context flag even if list arrives before tabs created
     this._savedCommandsSet = new Set();
     // Cold/warm restore tracking (minimal)
-    this._historyBannerInjected = false; // guards single injection of History Restored banner for this restore cycle
     this._historyBannerShownEver = false; // persisted (via vscode.setState) across webview instances to avoid re-showing banner
 
     // Configuration settings

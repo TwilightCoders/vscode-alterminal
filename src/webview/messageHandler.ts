@@ -74,8 +74,6 @@ export class MessageHandler {
     const message = event.data;
 
     try {
-      const currentState = this.callbacks.saveAllStates();
-      
       switch (message.command) {
         case "formatTabTitleResponse":
           this.handleFormatTabTitleResponse(message);
@@ -120,7 +118,7 @@ export class MessageHandler {
           break;
 
         case "requestState":
-          this.handleRequestState(currentState);
+          this.handleRequestState(this.callbacks.saveAllStates());
           break;
 
         case "processChange":
@@ -190,7 +188,6 @@ export class MessageHandler {
           break;
       }
 
-      this.callbacks.saveToLocalState();
     } catch (error) {
       Logger.error("Message handling error:", error);
     }
