@@ -287,7 +287,7 @@
         "alterminal.tabTitle.template": {
           "type": "string",
           "default": "{base}{p? • {p}}",
-          "description": "Template for tab titles using tokens like {n} (name), {base} (base name), {p} (process), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
+          "description": "Template for tab titles using tokens like {n} (name), {base} (base name), {p} (process), {title} (OSC terminal title), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
         },
         "alterminal.tabTitle.maxLength": {
           "type": "number",

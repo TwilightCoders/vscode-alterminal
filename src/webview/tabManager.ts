@@ -1126,12 +1126,21 @@ export class TabManager {
     }
   }
 
+  /**
+   * Handle OSC title changes (programs setting title via escape sequences)
+   */
+  handleOscTitleChange(tabId: number, title: string): void {
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) return;
+    this.requestFormattedTitle(tabId, { oscTitle: title });
+  }
+
   // Title generation is delegated to the extension formatter
 
   /**
    * Request a formatted tab title from the extension using the configured template
    */
-  requestFormattedTitle(tabId: number, opts: { processName?: string } = {}): void {
+  requestFormattedTitle(tabId: number, opts: { processName?: string; oscTitle?: string } = {}): void {
     try {
       const terminal = this.terminals.get(tabId);
       if (!terminal) return;
@@ -1144,6 +1153,7 @@ export class TabManager {
         tabName: terminal.label,
         baseTabName,
         processName: opts.processName,
+        oscTitle: opts.oscTitle ?? terminal.oscTitle,
         fullCommand: terminal.launchCommand || undefined,
       });
     } catch (e) {

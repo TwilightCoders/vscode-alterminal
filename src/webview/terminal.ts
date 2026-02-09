@@ -73,8 +73,10 @@ export class TerminalInstance {
   resizeDisposable: any;
   bellDisposable: any;
   renderDisposable: any;
+  titleChangeDisposable: any;
 
   // State tracking
+  oscTitle: string | null;
   hasUserInteraction: boolean;
   _isDirty: boolean;
   _cachedSerializedState: string | null;
@@ -125,6 +127,9 @@ export class TerminalInstance {
 
     // Icon for this terminal (can be customized)
     this.icon = null;
+
+    // OSC title reported by the running program (via \x1b]0;title\x07 or \x1b]2;title\x07)
+    this.oscTitle = null;
 
     // Terminal and addons (created in _createTerminal)
     this.terminal = null;
@@ -324,6 +329,17 @@ export class TerminalInstance {
         }
       }
     });
+
+    // Set up OSC title change handler (fired by \x1b]0;title\x07 or \x1b]2;title\x07)
+    if (typeof this.terminal.onTitleChange === "function") {
+      this.titleChangeDisposable = this.terminal.onTitleChange((title: string) => {
+        this.oscTitle = title || null;
+        this._isDirty = true;
+        if (window.tabManager?.handleOscTitleChange) {
+          window.tabManager.handleOscTitleChange(this.id, title);
+        }
+      });
+    }
 
     // Set up buffer change detection using onData event
     if (typeof this.terminal.onData === "function") {
@@ -687,6 +703,7 @@ export class TerminalInstance {
       buffer: shouldSaveBuffer ? this.serialize() || "" : "",
       launchCommand: this.launchCommand,
       hasUserInteraction: this.hasUserInteraction,
+      oscTitle: this.oscTitle,
     };
   }
 
@@ -706,6 +723,9 @@ export class TerminalInstance {
 
     // Restore interaction flag
     this.hasUserInteraction = state.hasUserInteraction || false;
+
+    // Restore OSC title if available
+    this.oscTitle = state.oscTitle || null;
 
     // Restore terminal modes through modeProvider
     // Restore launch command and derive terminal type
@@ -735,6 +755,7 @@ export class TerminalInstance {
     this.dataDisposable = this.disposeEventHandler(this.dataDisposable);
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
+    this.titleChangeDisposable = this.disposeEventHandler(this.titleChangeDisposable);
     this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
 
     // Dispose link providers

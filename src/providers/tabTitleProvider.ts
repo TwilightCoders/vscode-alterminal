@@ -37,6 +37,7 @@ export interface TabContext {
   processName?: string;
   processId?: number;
   fullCommand?: string;
+  oscTitle?: string;
   workingDirectory?: string;
   lastExitCode?: number;
   timestamp: Date;
@@ -182,6 +183,13 @@ export class TabTitleProvider {
       getValue: (ctx) => ctx.fullCommand || null,
       description: "Full command line",
       example: "npm run dev",
+    });
+
+    this.tokens.set("title", {
+      key: "title",
+      getValue: (ctx) => ctx.oscTitle || null,
+      description: "Terminal-reported title (via OSC escape sequence)",
+      example: "user@host:~/project, vim file.txt",
     });
 
     // Tab tokens

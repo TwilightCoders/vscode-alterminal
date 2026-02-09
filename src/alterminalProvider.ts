@@ -168,6 +168,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         processName: msg.processName,
         processId: msg.processId,
         fullCommand: msg.fullCommand,
+        oscTitle: msg.oscTitle,
         workingDirectory: msg.workingDirectory,
         lastExitCode: msg.lastExitCode,
         timestamp: new Date(),
