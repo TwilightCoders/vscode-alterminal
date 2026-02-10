@@ -89,6 +89,14 @@ export class MessageDispatcher {
           msg.tabId,
           msg.buffer,
         ),
+      clipboardCopy: (msg: any) =>
+        vscode.env.clipboard.writeText(msg.text),
+      clipboardPaste: async (msg: any) => {
+        const text = await vscode.env.clipboard.readText();
+        if (text) {
+          this.ptyManager.writeToPty(text, msg.tabId);
+        }
+      },
     };
 
     webviewView.webview.onDidReceiveMessage(

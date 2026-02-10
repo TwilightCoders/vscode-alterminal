@@ -83,6 +83,22 @@ export class InputHandler {
         }
       }
 
+      // Clipboard: Copy
+      if (key === 'c' && (isMac ? event.metaKey : (event.ctrlKey && this.terminal.hasSelection()))) {
+        if (this.terminal.hasSelection()) {
+          const text = this.terminal.getSelection();
+          this.vscode.postMessage({ command: "clipboardCopy", text });
+          this.terminal.clearSelection();
+        }
+        return false;
+      }
+
+      // Clipboard: Paste
+      if (key === 'v' && (isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey) {
+        this.vscode.postMessage({ command: "clipboardPaste", tabId: this.tabId });
+        return false;
+      }
+
       // Pass through common VS Code shortcuts
       if (cmdOrCtrl && event.shiftKey) {
         // Cmd/Ctrl+Shift combinations (command palette, etc.)
