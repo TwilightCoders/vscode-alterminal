@@ -2,6 +2,46 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.26]
+
+### New Features
+
+- **Clipboard Support**: Copy/paste now works reliably in all contexts including remote/VNC, routed through `vscode.env.clipboard` instead of browser APIs
+- **Per-Tab Title Templates**: Each tab stores its own title template. Double-click a tab to edit its raw template (e.g. `{base}{p? • {p}}`). The global setting is the default for new tabs; per-tab overrides persist across sessions
+- **User Variable Tokens**: Programs can set variables via OSC 1337 SetUserVar, accessible in title templates as `{$varname}`
+
+### Bug Fixes
+
+- **Fixed Template Engine**: Rewrote template engine to use balanced-brace parsing instead of iterative regex. Nested tokens like `{p? • {p}}` now render correctly instead of showing raw template text
+- **Fixed Bell Notifications**: Bell icon now only triggers on actual BEL characters (`\x07`), not on any terminal output. Previously, any substantial output on an inactive tab would show the bell
+- **Tightened Link Detection**: Bare relative paths no longer match trailing slashes (which caused xterm-link-provider to miscalculate link regions and bleed underlines across lines)
+
+## [0.2.25]
+
+### New Features
+
+- **Command Template Variables**: Saved commands now support `{workspace}`, `{workspacePath}`, `{user}`, `{platform}`, `{env.VAR}` so a single saved command adapts per-workspace at launch time
+- **Per-Terminal CWD Tracking**: Parse OSC 7 escape sequences to track working directory per terminal. Terminals reopen in the correct directory on restore
+- **CWD Title Tokens**: `{cwd}` and `{path}` tokens now work in tab title templates. Added `{cwdN}` syntax for last N path components (e.g. `{cwd2}` for `parent/leaf`)
+- **OSC Title Token**: `{title}` token exposes the terminal-reported title (via OSC 0/2 escape sequences). Opt-in via templates like `{base}{title? - {title}}`
+
+### Code Quality
+
+- Extracted shared `TemplateEngine` from `TabTitleProvider` for reuse across tab titles and command templates
+- Removed dead code: unused terminal methods, wasteful save-on-every-message, stale fields
+
+## [0.2.24]
+
+### Architecture
+
+- **Fixed Event Listener Leaks**: Properly track and dispose event handlers in dragDropHandler, tabManager, init, terminal, and ptyManager
+- **Modernized Link Detection**: Updated xterm-link-provider 1.3.1 to 2.0.0, replacing ~90 lines of manual coordinate math with LinkProvider
+- **Flattened Manager Wrappers**: Inlined TerminalController and NotificationManager into their parent classes, removing unnecessary indirection
+
+### Bug Fixes
+
+- Fixed shell escaping in `sendFilePath` (POSIX quote escaping)
+
 ## [0.2.23]
 
 ### Bug Fixes
