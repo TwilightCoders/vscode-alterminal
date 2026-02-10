@@ -70,6 +70,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this._commandManager,
       (command: string) => this.createNewTabWithCommand(command),
     );
+    this._ptyManager.setCommandExpander((cmd) => this._commandManager.expandCommand(cmd));
     this.fileOperationHandler = new FileOperationHandler(this._ptyManager);
     this.tabContextMenuHandler = new TabContextMenuHandler(
       this._commandManager,
@@ -269,11 +270,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Create a new terminal tab with a command
    */
   public createNewTabWithCommand(cmd: string): void {
-    const expanded = this._commandManager.expandCommand(cmd);
     this._view?.webview.postMessage({
       command: "createNewTab",
       terminalType: "command",
-      launchCommand: expanded,
+      launchCommand: cmd,
     });
   }
 

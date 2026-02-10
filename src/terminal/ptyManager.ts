@@ -50,6 +50,7 @@ export class PtyManager {
   private _visibilityDisposable?: { dispose(): void };
 
   private _scrollback: number = 1000;
+  private _expandCommand: ((cmd: string) => string) | null = null;
 
   // Buffer for PTY output when webview is hidden
   private _outputBuffer = new Map<number, string[]>();
@@ -175,6 +176,10 @@ export class PtyManager {
       cwd,
       tabId,
     });
+  }
+
+  public setCommandExpander(fn: (cmd: string) => string) {
+    this._expandCommand = fn;
   }
 
   public setScrollback(scrollback: number) {
@@ -330,19 +335,23 @@ export class PtyManager {
         (userShell.toLowerCase().includes("powershell") || userShell.toLowerCase().includes("pwsh"));
       const isWindowsCmd = process.platform === "win32" && !isWindowsPowerShell;
 
+      // Expand template variables ({workspace}, {env.VAR}, etc.) at launch time
+      const expandedCommand = launchCommand && this._expandCommand
+        ? this._expandCommand(launchCommand) : launchCommand;
+
       switch (terminalType) {
         case "command":
           // Use shell with -c to execute command with full environment
           // This ensures PATH and other shell variables are available
-          if (launchCommand) {
+          if (expandedCommand) {
             command = userShell;
             if (isWindowsPowerShell) {
-              args = ["-NoLogo", "-Command", launchCommand];
+              args = ["-NoLogo", "-Command", expandedCommand];
             } else if (isWindowsCmd) {
-              args = ["/c", launchCommand];
+              args = ["/c", expandedCommand];
             } else {
               // Unix: Use login shell to load PATH, then execute command interactively
-              args = ["-l", "-i", "-c", launchCommand];
+              args = ["-l", "-i", "-c", expandedCommand];
             }
           } else {
             // Default to shell if no command specified
@@ -390,24 +399,30 @@ export class PtyManager {
         process.env.USERPROFILE ||
         process.cwd();
 
+      // Build clean environment: strip VSCODE_* and ELECTRON_* vars that can
+      // cause VS Code's built-in terminal to steal focus or trigger shell
+      // integration scripts in child processes
+      const cleanEnv: { [key: string]: string } = {};
+      for (const [key, value] of Object.entries(process.env)) {
+        if (value === undefined) continue;
+        if (key.startsWith("VSCODE_") || key.startsWith("ELECTRON_")) continue;
+        cleanEnv[key] = value;
+      }
+
       const ptyProcess = pty.spawn(command, args, {
         name: TERMINAL_DEFAULTS.TERM_TYPE,
         cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
         rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
         cwd: resolvedCwd,
         env: {
-          ...process.env,
+          ...cleanEnv,
           TERM: TERMINAL_DEFAULTS.TERM_TYPE,
           COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
-          // Use "alterminal" instead of "vscode" to prevent CLI tools (like Claude Code)
-          // from sending VS Code shell integration sequences (OSC 633) that may cause
-          // VS Code to focus its built-in Terminal panel instead of Alterminal
           TERM_PROGRAM: "alterminal",
           TERM_PROGRAM_VERSION: vscode.version,
-          // Don't expose VSCODE_PID - this can also trigger VS Code integrations
           PATH: process.env.PATH || "",
           SHELL: userShell,
-        } as { [key: string]: string },
+        },
       });
 
       ptyProcess.onData((data) => {
