@@ -65,6 +65,14 @@ export class TabTitleProvider {
   render(template: string, context: TabContext): string {
     try {
       const result = TemplateEngine.render(template, (key) => {
+        // Handle parameterized path depth: {cwdN} for last N path components
+        const cwdMatch = key.match(/^cwd(\d+)$/);
+        if (cwdMatch) {
+          if (!context.workingDirectory) return null;
+          const depth = parseInt(cwdMatch[1], 10);
+          return this.getPathTail(context.workingDirectory, depth);
+        }
+
         const token = this.tokens.get(key);
         return token?.getValue(context) ?? null;
       });
@@ -120,7 +128,7 @@ export class TabTitleProvider {
       const tokenContent = match[1];
       const baseToken = tokenContent.split("?")[0].split(":")[0];
 
-      if (!this.tokens.has(baseToken)) {
+      if (!this.tokens.has(baseToken) && !/^cwd\d+$/.test(baseToken)) {
         errors.push(`Unknown token: {${baseToken}}`);
       }
     }
@@ -129,6 +137,16 @@ export class TabTitleProvider {
       valid: errors.length === 0,
       errors,
     };
+  }
+
+  /**
+   * Get the last N components of a path
+   * e.g. getPathTail("/Users/volte/projects/app", 2) → "projects/app"
+   */
+  private getPathTail(fullPath: string, depth: number): string {
+    const parts = fullPath.split(path.sep).filter(Boolean);
+    if (depth >= parts.length) return fullPath;
+    return parts.slice(-depth).join(path.sep);
   }
 
   // Truncate result if it exceeds max length
@@ -221,7 +239,7 @@ export class TabTitleProvider {
         if (!ctx.workingDirectory) return null;
         return path.basename(ctx.workingDirectory);
       },
-      description: "Current working directory basename",
+      description: "Current working directory basename (use {cwdN} for last N path components, e.g. {cwd2})",
       example: "my-project",
     });
 

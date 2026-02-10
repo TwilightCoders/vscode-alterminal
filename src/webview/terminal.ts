@@ -76,6 +76,7 @@ export class TerminalInstance {
   titleChangeDisposable: any;
 
   // State tracking
+  cwd: string | null;
   oscTitle: string | null;
   hasUserInteraction: boolean;
   _isDirty: boolean;
@@ -127,6 +128,9 @@ export class TerminalInstance {
 
     // Icon for this terminal (can be customized)
     this.icon = null;
+
+    // Per-terminal working directory tracked via OSC 7
+    this.cwd = null;
 
     // OSC title reported by the running program (via \x1b]0;title\x07 or \x1b]2;title\x07)
     this.oscTitle = null;
@@ -703,6 +707,7 @@ export class TerminalInstance {
       buffer: shouldSaveBuffer ? this.serialize() || "" : "",
       launchCommand: this.launchCommand,
       hasUserInteraction: this.hasUserInteraction,
+      cwd: this.cwd,
       oscTitle: this.oscTitle,
     };
   }
@@ -723,6 +728,9 @@ export class TerminalInstance {
 
     // Restore interaction flag
     this.hasUserInteraction = state.hasUserInteraction || false;
+
+    // Restore working directory if available
+    this.cwd = state.cwd || null;
 
     // Restore OSC title if available
     this.oscTitle = state.oscTitle || null;
@@ -805,6 +813,7 @@ export class TerminalInstance {
       tabId: this.id,
       terminalType: this.terminalType,
       launchCommand: this.launchCommand,
+      cwd: this.cwd || undefined,
       cols: cols,
       rows: rows,
     });

@@ -168,6 +168,7 @@ export class TabManager {
       updateSaveButtonVisibility: (cmd, saved) => this.updateSaveButtonVisibility(cmd, saved),
       resetActiveTerminal: () => this.resetActiveTerminal(),
       handleProcessChange: (name, tabId) => this.handleProcessChange(name, tabId),
+      handleCwdChange: (cwd, tabId) => this.handleCwdChange(cwd, tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
       getSavedCommandsSet: () => this._savedCommandsSet,
       setSavedCommandsSet: (set) => { this._savedCommandsSet = set; },
@@ -1127,6 +1128,19 @@ export class TabManager {
   }
 
   /**
+   * Handle working directory changes from OSC 7
+   */
+  handleCwdChange(cwd: string, tabId: number): void {
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) return;
+
+    terminal.cwd = cwd;
+    terminal._isDirty = true;
+    this.requestFormattedTitle(tabId);
+    this.scheduleSaveState("cwdChange");
+  }
+
+  /**
    * Handle OSC title changes (programs setting title via escape sequences)
    */
   handleOscTitleChange(tabId: number, title: string): void {
@@ -1140,7 +1154,7 @@ export class TabManager {
   /**
    * Request a formatted tab title from the extension using the configured template
    */
-  requestFormattedTitle(tabId: number, opts: { processName?: string; oscTitle?: string } = {}): void {
+  requestFormattedTitle(tabId: number, opts: { processName?: string; oscTitle?: string; workingDirectory?: string } = {}): void {
     try {
       const terminal = this.terminals.get(tabId);
       if (!terminal) return;
@@ -1155,6 +1169,7 @@ export class TabManager {
         processName: opts.processName,
         oscTitle: opts.oscTitle ?? terminal.oscTitle,
         fullCommand: terminal.launchCommand || undefined,
+        workingDirectory: opts.workingDirectory ?? terminal.cwd ?? undefined,
       });
     } catch (e) {
       try {

@@ -43,6 +43,7 @@ export class PtyManager {
   private _processMonitorTimers = new Map<number, NodeJS.Timeout>();
   private _currentProcessNames = new Map<number, string>();
   private _terminalTypes = new Map<number, string>();
+  private _currentWorkingDirs = new Map<number, string>();
   private _webviewView?: vscode.WebviewView;
   private _activeTabId?: number;
   private _visibilityDisposable?: { dispose(): void };
@@ -90,6 +91,41 @@ export class PtyManager {
     filtered = filtered.replace(PtyManager.FOCUS_REPORTING_PATTERN, '');
     
     return filtered;
+  }
+
+  /**
+   * Extract the most recent working directory from OSC 7 sequences in data
+   * OSC 7 format: \x1b]7;file://hostname/path\x07
+   */
+  private _extractCwdFromOsc7(data: string): string | null {
+    const matches = data.matchAll(PtyManager.CWD_OSC_PATTERN);
+    let lastMatch: string | null = null;
+    for (const m of matches) {
+      lastMatch = m[0];
+    }
+    if (!lastMatch) return null;
+
+    // Extract the URL from the OSC 7 sequence (between "7;" and the terminator)
+    const urlStart = lastMatch.indexOf('7;') + 2;
+    const urlStr = lastMatch.slice(urlStart).replace(/(\x07|\x1b\\)$/, '');
+    try {
+      const url = new URL(urlStr);
+      return decodeURIComponent(url.pathname);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Handle working directory change detected from OSC 7
+   */
+  private _handleCwdChange(tabId: number, cwd: string): void {
+    this._currentWorkingDirs.set(tabId, cwd);
+    this._webviewView?.webview.postMessage({
+      command: "cwdChange",
+      cwd,
+      tabId,
+    });
   }
 
   public setScrollback(scrollback: number) {
@@ -161,6 +197,7 @@ export class PtyManager {
           message.launchCommand,
           message.cols,
           message.rows,
+          message.cwd,
         );
         break;
       case "disposePty":
@@ -228,6 +265,7 @@ export class PtyManager {
     launchCommand?: string,
     cols?: number,
     rows?: number,
+    cwd?: string,
   ): void {
     // Only create new PTY process if one doesn't exist for this tab
     if (!this._ptyProcesses.has(tabId)) {
@@ -301,6 +339,7 @@ export class PtyManager {
         cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
         rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
         cwd:
+          cwd ||
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
           process.env.HOME ||
           process.env.USERPROFILE ||
@@ -321,6 +360,12 @@ export class PtyManager {
       });
 
       ptyProcess.onData((data) => {
+        // Extract working directory from OSC 7 before filtering strips it
+        const cwd = this._extractCwdFromOsc7(data);
+        if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+          this._handleCwdChange(tabId, cwd);
+        }
+
         // Filter out VS Code-specific escape sequences that can cause focus stealing
         const filteredData = this._filterVSCodeSequences(data);
         
@@ -406,6 +451,7 @@ export class PtyManager {
     // Clean up state
     this._currentProcessNames.delete(tabId);
     this._terminalTypes.delete(tabId);
+    this._currentWorkingDirs.delete(tabId);
 
     // Clear output buffer for this tab
     this._outputBuffer.delete(tabId);

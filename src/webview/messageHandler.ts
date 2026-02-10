@@ -36,6 +36,7 @@ export interface MessageHandlerCallbacks {
   updateSaveButtonVisibility: (command: any, isSaved: any) => void;
   resetActiveTerminal: () => void;
   handleProcessChange: (processName: string, tabId: number) => void;
+  handleCwdChange: (cwd: string, tabId: number) => void;
   scheduleSaveState: (reason: string) => void;
   
   // Internal state
@@ -123,6 +124,10 @@ export class MessageHandler {
 
         case "processChange":
           this.callbacks.handleProcessChange(message.processName, message.tabId);
+          break;
+
+        case "cwdChange":
+          this.callbacks.handleCwdChange(message.cwd, message.tabId);
           break;
 
         case "createNewTab":
