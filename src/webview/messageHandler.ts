@@ -37,6 +37,7 @@ export interface MessageHandlerCallbacks {
   resetActiveTerminal: () => void;
   handleProcessChange: (processName: string, tabId: number) => void;
   handleCwdChange: (cwd: string, tabId: number) => void;
+  handleUserVarChange: (vars: Record<string, string>, tabId: number) => void;
   scheduleSaveState: (reason: string) => void;
   
   // Internal state
@@ -128,6 +129,10 @@ export class MessageHandler {
 
         case "cwdChange":
           this.callbacks.handleCwdChange(message.cwd, message.tabId);
+          break;
+
+        case "userVarChange":
+          this.callbacks.handleUserVarChange(message.vars, message.tabId);
           break;
 
         case "createNewTab":

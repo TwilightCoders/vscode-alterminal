@@ -44,6 +44,7 @@ export class PtyManager {
   private _currentProcessNames = new Map<number, string>();
   private _terminalTypes = new Map<number, string>();
   private _currentWorkingDirs = new Map<number, string>();
+  private _userVars = new Map<number, Map<string, string>>();
   private _webviewView?: vscode.WebviewView;
   private _activeTabId?: number;
   private _visibilityDisposable?: { dispose(): void };
@@ -62,6 +63,9 @@ export class PtyManager {
   private static readonly CWD_OSC_PATTERN = /\x1b\]7;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
   private static readonly ITERM_OSC_PATTERN = /\x1b\]1337;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
   
+  // iTerm2 SetUserVar: \x1b]1337;SetUserVar=name=base64value\x07
+  private static readonly USER_VAR_PATTERN = /\x1b\]1337;SetUserVar=([A-Za-z0-9_]+)=([A-Za-z0-9+/=]*?)(?:\x07|\x1b\\)/g;
+
   // DEC private mode: Focus reporting (?1004h enables, ?1004l disables)
   // When enabled, terminal sends focus in/out events that VS Code may intercept
   private static readonly FOCUS_REPORTING_PATTERN = /\x1b\[\?1004[hl]/g;
@@ -113,6 +117,51 @@ export class PtyManager {
       return decodeURIComponent(url.pathname);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Extract SetUserVar key-value pairs from OSC 1337 sequences in data
+   */
+  private _extractUserVars(data: string): Map<string, string> | null {
+    let result: Map<string, string> | null = null;
+    PtyManager.USER_VAR_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = PtyManager.USER_VAR_PATTERN.exec(data)) !== null) {
+      const key = match[1];
+      const base64Value = match[2];
+      try {
+        const value = Buffer.from(base64Value, "base64").toString("utf-8");
+        if (!result) result = new Map();
+        result.set(key, value);
+      } catch {
+        // Skip invalid base64
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Handle user variable changes from SetUserVar
+   */
+  private _handleUserVarChange(tabId: number, vars: Map<string, string>): void {
+    if (!this._userVars.has(tabId)) {
+      this._userVars.set(tabId, new Map());
+    }
+    const stored = this._userVars.get(tabId)!;
+    const changed: Record<string, string> = {};
+    for (const [key, value] of vars) {
+      if (stored.get(key) !== value) {
+        stored.set(key, value);
+        changed[key] = value;
+      }
+    }
+    if (Object.keys(changed).length > 0) {
+      this._webviewView?.webview.postMessage({
+        command: "userVarChange",
+        vars: changed,
+        tabId,
+      });
     }
   }
 
@@ -334,16 +383,18 @@ export class PtyManager {
           break;
       }
 
+      const resolvedCwd =
+        cwd ||
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+        process.env.HOME ||
+        process.env.USERPROFILE ||
+        process.cwd();
+
       const ptyProcess = pty.spawn(command, args, {
         name: TERMINAL_DEFAULTS.TERM_TYPE,
         cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
         rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
-        cwd:
-          cwd ||
-          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
-          process.env.HOME ||
-          process.env.USERPROFILE ||
-          process.cwd(),
+        cwd: resolvedCwd,
         env: {
           ...process.env,
           TERM: TERMINAL_DEFAULTS.TERM_TYPE,
@@ -364,6 +415,12 @@ export class PtyManager {
         const cwd = this._extractCwdFromOsc7(data);
         if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
           this._handleCwdChange(tabId, cwd);
+        }
+
+        // Extract user variables from OSC 1337 SetUserVar before filtering strips them
+        const userVars = this._extractUserVars(data);
+        if (userVars) {
+          this._handleUserVarChange(tabId, userVars);
         }
 
         // Filter out VS Code-specific escape sequences that can cause focus stealing
@@ -410,6 +467,11 @@ export class PtyManager {
 
       this._ptyProcesses.set(tabId, ptyProcess);
 
+      // Seed initial working directory so cwd is never empty
+      if (resolvedCwd) {
+        this._handleCwdChange(tabId, resolvedCwd);
+      }
+
       // Start monitoring the process name for this tab
       this._startProcessMonitoring(tabId);
     }
@@ -452,6 +514,7 @@ export class PtyManager {
     this._currentProcessNames.delete(tabId);
     this._terminalTypes.delete(tabId);
     this._currentWorkingDirs.delete(tabId);
+    this._userVars.delete(tabId);
 
     // Clear output buffer for this tab
     this._outputBuffer.delete(tabId);

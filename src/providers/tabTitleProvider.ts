@@ -41,6 +41,7 @@ export interface TabContext {
   workingDirectory?: string;
   lastExitCode?: number;
   timestamp: Date;
+  userVars?: Record<string, string>;
 }
 
 export interface TemplateToken {
@@ -65,6 +66,12 @@ export class TabTitleProvider {
   render(template: string, context: TabContext): string {
     try {
       const result = TemplateEngine.render(template, (key) => {
+        // Handle user variables: {$key} looks up key in context.userVars
+        if (key.startsWith("$")) {
+          const varName = key.slice(1);
+          return context.userVars?.[varName] ?? null;
+        }
+
         // Handle parameterized path depth: {cwdN} for last N path components
         const cwdMatch = key.match(/^cwd(\d+)$/);
         if (cwdMatch) {
@@ -128,7 +135,7 @@ export class TabTitleProvider {
       const tokenContent = match[1];
       const baseToken = tokenContent.split("?")[0].split(":")[0];
 
-      if (!this.tokens.has(baseToken) && !/^cwd\d+$/.test(baseToken)) {
+      if (!this.tokens.has(baseToken) && !/^cwd\d+$/.test(baseToken) && !baseToken.startsWith("$")) {
         errors.push(`Unknown token: {${baseToken}}`);
       }
     }
