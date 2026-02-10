@@ -256,11 +256,13 @@ export class TabTitleManager {
     }
 
     const currentLabel = this.labelElement.textContent;
+    // Show the raw template for editing (fall back to rendered label)
+    const rawTemplate = this.terminal?.titleTemplate || currentLabel;
 
     // Create input element
     const input = document.createElement("input");
     input.type = "text";
-    input.value = currentLabel;
+    input.value = rawTemplate;
     input.className = "tab-rename-input";
     input.style.cssText = `
             background: var(--vscode-input-background, #3c3c3c);
@@ -285,16 +287,19 @@ export class TabTitleManager {
 
     // Event handlers
     const saveRename = () => {
-      const newLabel = input.value.trim();
-      if (newLabel && newLabel !== currentLabel) {
-        this.updateLabel(newLabel);
-        this.baseLabel = newLabel; // Update base label too
+      const newTemplate = input.value.trim();
+      if (newTemplate && newTemplate !== rawTemplate) {
+        // Store the raw template on the terminal
+        if (this.terminal) {
+          this.terminal.titleTemplate = newTemplate;
+          this.terminal._isDirty = true;
+        }
       }
-      this.endTitleEdit(input, currentLabel);
+      this.endTitleEdit(input);
     };
 
     const cancelRename = () => {
-      this.endTitleEdit(input, currentLabel);
+      this.endTitleEdit(input);
     };
 
     input.addEventListener("blur", saveRename);
@@ -317,7 +322,7 @@ export class TabTitleManager {
   /**
    * End inline title editing
    */
-  endTitleEdit(inputElement, originalLabel) {
+  endTitleEdit(inputElement) {
     // Remove input element
     if (inputElement.parentNode) {
       inputElement.parentNode.removeChild(inputElement);
@@ -330,7 +335,7 @@ export class TabTitleManager {
 
     this.clearState(this.STATES.EDITING);
 
-    // Notify parent for state saving
+    // Notify parent for re-rendering and state saving
     if (this.onTitleChanged) {
       this.onTitleChanged(this.tabId);
     }

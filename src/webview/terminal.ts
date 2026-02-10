@@ -78,6 +78,8 @@ export class TerminalInstance {
   // State tracking
   cwd: string | null;
   oscTitle: string | null;
+  userVars: Record<string, string> | null;
+  titleTemplate: string | null;
   hasUserInteraction: boolean;
   _isDirty: boolean;
   _cachedSerializedState: string | null;
@@ -90,7 +92,7 @@ export class TerminalInstance {
   isActive: boolean;
   whenOpened: Promise<any>;
   terminalContainer: HTMLElement | null;
-  onBellReceived?: () => void;
+  onBellReceived?: (tabId: number) => void;
   _openedResolved?: boolean;
   _ptyStarted?: boolean;
   _visibilityInstalled?: boolean;
@@ -134,6 +136,12 @@ export class TerminalInstance {
 
     // OSC title reported by the running program (via \x1b]0;title\x07 or \x1b]2;title\x07)
     this.oscTitle = null;
+
+    // User-defined variables set via OSC 1337 SetUserVar
+    this.userVars = null;
+
+    // Per-tab title template (null = use global default from settings)
+    this.titleTemplate = null;
 
     // Terminal and addons (created in _createTerminal)
     this.terminal = null;
@@ -265,9 +273,14 @@ export class TerminalInstance {
   setupFilePathLinks() {
     if (!this.terminal || !window.LinkProvider) return;
 
-    // Regex for file paths, directories, URLs, and git references
-    // Uses a capture group around the entire match (matchIndex=1)
-    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]+)/;
+    // Regex for file paths, directories, and URLs
+    // Three alternatives:
+    //   1. URLs: https://...
+    //   2. Absolute/explicit relative paths: /foo, ~/foo, ./foo, ../foo
+    //   3. Bare relative paths: src/index.ts, commands/project
+    // All path alternatives end with a non-slash character to prevent
+    // xterm-link-provider from miscalculating link regions at line edges.
+    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-\.])/;
 
     const handler = (event: MouseEvent, uri: string) => {
       if (event && event.preventDefault) {
@@ -326,11 +339,8 @@ export class TerminalInstance {
     this.bellDisposable = this.terminal.onBell(() => {
       const timestamp = new Date().toISOString();
       // Only show indicator if tab is not currently active
-      if (!this.isActive) {
-        // Show bell notification on inactive tabs
-        if (this.onBellReceived) {
-          (this.onBellReceived as any)(this.id);
-        }
+      if (!this.isActive && this.onBellReceived) {
+        this.onBellReceived(this.id);
       }
     });
 
@@ -709,6 +719,8 @@ export class TerminalInstance {
       hasUserInteraction: this.hasUserInteraction,
       cwd: this.cwd,
       oscTitle: this.oscTitle,
+      userVars: this.userVars,
+      titleTemplate: this.titleTemplate,
     };
   }
 
@@ -734,6 +746,12 @@ export class TerminalInstance {
 
     // Restore OSC title if available
     this.oscTitle = state.oscTitle || null;
+
+    // Restore user variables if available
+    this.userVars = state.userVars || null;
+
+    // Restore per-tab title template
+    this.titleTemplate = state.titleTemplate || null;
 
     // Restore terminal modes through modeProvider
     // Restore launch command and derive terminal type

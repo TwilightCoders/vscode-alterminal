@@ -38,7 +38,8 @@ export interface TabUIManagerCallbacks {
   
   // State management
   scheduleSaveState: (reason: string) => void;
-  
+  requestFormattedTitle: (tabId: number) => void;
+
   // Terminal access
   getTerminal: (tabId: number) => any;
   getSavedCommandsSet: () => Set<string>;
@@ -114,6 +115,7 @@ export class TabUIManager {
 
     // Set up callback for title changes (saves state after rename)
     tabTitleManager.setTitleChangeCallback((tabId) => {
+      this._callbacks.requestFormattedTitle(tabId);
       this._callbacks.scheduleSaveState("titleChange");
     });
 

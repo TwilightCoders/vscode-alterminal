@@ -159,7 +159,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    */
   private _handleFormatTabTitle(msg: any): void {
     try {
-      const template = this._tabTitleProvider.getTemplate();
+      // Use per-tab template if provided, otherwise fall back to global setting
+      const template = msg.template || this._tabTitleProvider.getTemplate();
 
       const title = this._tabTitleProvider.render(template, {
         tabId: msg.tabId,
@@ -172,6 +173,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         workingDirectory: msg.workingDirectory,
         lastExitCode: msg.lastExitCode,
         timestamp: new Date(),
+        userVars: msg.userVars,
       });
 
       this._view?.webview.postMessage({

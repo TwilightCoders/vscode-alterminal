@@ -169,6 +169,7 @@ export class TabManager {
       resetActiveTerminal: () => this.resetActiveTerminal(),
       handleProcessChange: (name, tabId) => this.handleProcessChange(name, tabId),
       handleCwdChange: (cwd, tabId) => this.handleCwdChange(cwd, tabId),
+      handleUserVarChange: (vars, tabId) => this.handleUserVarChange(vars, tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
       getSavedCommandsSet: () => this._savedCommandsSet,
       setSavedCommandsSet: (set) => { this._savedCommandsSet = set; },
@@ -191,6 +192,7 @@ export class TabManager {
       saveCommand: (tabId) => this.saveCommand(tabId),
       openTabSettings: (tabId) => this.openTabSettings(tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
+      requestFormattedTitle: (tabId) => this.requestFormattedTitle(tabId),
       getTerminal: (tabId) => this.terminals.get(tabId),
       getSavedCommandsSet: () => this._savedCommandsSet,
       getTitleManagers: () => this.titleManagers,
@@ -337,6 +339,11 @@ export class TabManager {
 
     // Store the terminal
     this.terminals.set(tabId, terminal);
+
+    // Wire bell notifications to tab UI
+    terminal.onBellReceived = (id: number) => {
+      this._tabUIManager.showNotification(id);
+    };
 
     // Create tab DOM element
     this._tabUIManager.createTabElement(tabId, label, this.vscode);
@@ -542,16 +549,6 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (terminal) {
       terminal.write(data);
-
-      // Show notification if writing to an inactive tab and data has visible content
-      if (tabId !== this.activeTabId && data && data.trim().length > 0) {
-        // Only show notification for "significant" output (not just control sequences)
-        // Filter out pure ANSI escape sequences and very short outputs
-        const visibleContent = data.replace(/\x1b\[[0-9;]*m/g, "").trim();
-        if (visibleContent.length > 5) {
-          this._tabUIManager.showNotification(tabId);
-        }
-      }
     }
   }
 
@@ -910,6 +907,12 @@ export class TabManager {
 
       // Store terminal (Map preserves insertion order)
       this.terminals.set(terminalData.id, terminal);
+
+      // Wire bell notifications to tab UI
+      terminal.onBellReceived = (id: number) => {
+        this._tabUIManager.showNotification(id);
+      };
+
       Logger.debug(
         "Stored terminal",
         terminalData.id,
@@ -917,14 +920,16 @@ export class TabManager {
         this.terminals.size,
       );
 
-      // Create tab element using the saved label directly (already rendered)
-      // Don't re-render through template - just use what was saved
-      // Future updates (process changes, etc.) will trigger normal template rendering
+      // Create tab element with saved label as initial display
       const labelForTab = terminalData.label || "Terminal";
       this._tabUIManager.createTabElement(terminalData.id, labelForTab, this.vscode);
 
-      // Don't request formatted title on restore - use the saved label as-is
-      // The normal update flow will handle future changes when process name changes, etc.
+      // Re-render the template with current context
+      try {
+        this.requestFormattedTitle(terminalData.id);
+      } catch (e) {
+        Logger.warn("Failed to render title on restore:", e);
+      }
 
       // PTY process creation is now handled by the Terminal instance itself
     }
@@ -1102,26 +1107,11 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (!terminal) return;
 
-    // Debug: log what we're getting
     Logger.debug(`Process change for tab ${tabId}: "${processName}"`);
 
-    // Ensure baseLabel is clean and doesn't contain process names
-    if (!terminal.baseLabel || terminal.baseLabel.includes(" •")) {
-      terminal.baseLabel = (terminal.baseLabel || terminal.label).split(" •")[0] || "Terminal";
-      Logger.debug(`Terminal ${tabId}: Clean baseLabel set to "${terminal.baseLabel}"`);
-    }
-
-    // If no process name (back to shell), reset the label to just the base
-    if (!processName || processName.trim() === "") {
-      terminal.label = terminal.baseLabel;
-      terminal._isDirty = true; // Mark dirty when label resets
-      this.updateTabLabel(tabId, terminal.baseLabel);
-      return; // Skip template formatting for empty process
-    }
-
-  // Ask extension to apply full template formatting (single source of truth)
+    // Always re-render the tab's template with the new context
     try {
-      this.requestFormattedTitle(tabId, { processName });
+      this.requestFormattedTitle(tabId, { processName: processName || undefined });
     } catch (e) {
       Logger.warn("Operation failed:", e);
     }
@@ -1138,6 +1128,22 @@ export class TabManager {
     terminal._isDirty = true;
     this.requestFormattedTitle(tabId);
     this.scheduleSaveState("cwdChange");
+  }
+
+  /**
+   * Handle user variable changes from OSC 1337 SetUserVar
+   */
+  handleUserVarChange(vars: Record<string, string>, tabId: number): void {
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) return;
+
+    if (!terminal.userVars) {
+      terminal.userVars = {};
+    }
+    Object.assign(terminal.userVars, vars);
+    terminal._isDirty = true;
+    this.requestFormattedTitle(tabId);
+    this.scheduleSaveState("userVarChange");
   }
 
   /**
@@ -1159,17 +1165,18 @@ export class TabManager {
       const terminal = this.terminals.get(tabId);
       if (!terminal) return;
 
-      // Ensure we always use clean baseLabel for title formatting
       const baseTabName = terminal.baseLabel || "Terminal";
       this.vscode.postMessage({
         command: "formatTabTitle",
         tabId,
         tabName: terminal.label,
         baseTabName,
+        template: terminal.titleTemplate || undefined,
         processName: opts.processName,
         oscTitle: opts.oscTitle ?? terminal.oscTitle,
         fullCommand: terminal.launchCommand || undefined,
         workingDirectory: opts.workingDirectory ?? terminal.cwd ?? undefined,
+        userVars: terminal.userVars ?? undefined,
       });
     } catch (e) {
       try {
