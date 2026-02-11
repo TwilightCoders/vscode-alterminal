@@ -16,9 +16,10 @@ import * as vscode from "vscode";
 import { Logger } from "../utils/logger";
 
 export interface SerializedTerminal {
+  uuid: string;
   id: number;
   label: string;
-  buffer: string; // New simplified name
+  buffer: string; // Serialized terminal content (stored separately in workspaceState)
   modes?: number; // Terminal modes bitmask
   command?: string; // Launch command
   terminalType?: string;
@@ -262,6 +263,7 @@ export class WebviewViewSerializer {
   private serializeTerminalContent(terminal: any): SerializedTerminal {
     const terminalState = terminal.getState ? terminal.getState() : null;
     return {
+      uuid: terminal.uuid || terminalState?.uuid || crypto.randomUUID(),
       id: terminal.id,
       label: terminal.label,
       buffer: terminal.serialize() || "",

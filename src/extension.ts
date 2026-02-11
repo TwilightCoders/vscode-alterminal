@@ -80,10 +80,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "alterminal.clearWorkspaceState",
       async () => {
-        await context.workspaceState.update(
-          "alterminal.state",
-          undefined,
-        );
+        // Clear all alterminal keys (metadata + buffer keys)
+        const allKeys = context.workspaceState.keys();
+        for (const key of allKeys) {
+          if (key.startsWith("alterminal.")) {
+            await context.workspaceState.update(key, undefined);
+          }
+        }
         vscode.window.showInformationMessage(
           "Alterminal workspace state cleared",
         );
@@ -119,37 +122,56 @@ export function activate(context: vscode.ExtensionContext) {
       );
     }),
     vscode.commands.registerCommand("alterminal.debugState", async () => {
-      const savedState = context.workspaceState.get("alterminal.state") as any;
+      const metadata = provider.getStateManager().getMetadata();
 
       let content: string;
-      let extension: string;
-      if (!savedState) {
-        content = "No saved workspace state found";
-        extension = ".txt";
+      if (!metadata) {
+        content = "// No saved workspace state found";
       } else {
-        // Clone and strip buffers
-        const stateWithoutBuffers = {
-          ...savedState,
-          terminals: savedState.terminals?.map((t: any) => ({
-            ...t,
-            buffer: t.buffer ? "<omitted - use 'Show Buffer' on tab>" : undefined,
-          })),
+        // Strip any lingering buffer fields (pre-migration state)
+        const clean = {
+          ...metadata,
+          terminals: metadata.terminals?.map((t: any) => {
+            const { buffer, ...meta } = t;
+            return meta;
+          }),
         };
-        content = JSON.stringify(stateWithoutBuffers, null, 2);
-        extension = ".json";
+        content = JSON.stringify(clean, null, 2);
       }
 
-      // Write to temporary file
+      // Write to temporary file and open it
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const tempFile = path.join(os.tmpdir(), `alterminal-state-${timestamp}${extension}`);
+      const tempFile = path.join(os.tmpdir(), `alterminal-state-${timestamp}.json`);
       fs.writeFileSync(tempFile, content, "utf8");
 
-      // Open the file
       const doc = await vscode.workspace.openTextDocument(tempFile);
-      await vscode.window.showTextDocument(doc, {
-        preview: false,
-        viewColumn: vscode.ViewColumn.Active,
+      await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Active });
+
+      // Watch for saves — apply edits back live (like git rebase -i)
+      const watcher = vscode.workspace.onDidSaveTextDocument((savedDoc) => {
+        if (savedDoc.uri.fsPath !== tempFile) return;
+        try {
+          const edited = JSON.parse(savedDoc.getText());
+          if (!edited?.terminals?.length) {
+            vscode.window.showWarningMessage("Alterminal: Invalid state — must have at least one terminal.");
+            return;
+          }
+          provider.applyEditedMetadata(edited);
+          vscode.window.showInformationMessage("Alterminal: State applied.");
+        } catch (e: any) {
+          vscode.window.showErrorMessage(`Alterminal: Failed to parse — ${e.message}`);
+        }
       });
+
+      // Clean up when the document is closed
+      const closeWatcher = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
+        if (closedDoc.uri.fsPath !== tempFile) return;
+        watcher.dispose();
+        closeWatcher.dispose();
+        try { fs.unlinkSync(tempFile); } catch {}
+      });
+
+      context.subscriptions.push(watcher, closeWatcher);
     }),
     vscode.commands.registerCommand("alterminal.setDebugFilter", async () => {
       const filterOptions = [

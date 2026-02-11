@@ -416,6 +416,18 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (!terminal) return;
 
+    // Notify extension to clean up buffer storage for this terminal's UUID
+    if (terminal.uuid) {
+      try {
+        this.vscode.postMessage({
+          command: "bufferDelete",
+          uuid: terminal.uuid,
+        });
+      } catch (e) {
+        Logger.warn("Failed to send buffer delete message:", e);
+      }
+    }
+
     // Dispose terminal (handles both frontend and backend cleanup)
     terminal.dispose();
 
@@ -845,7 +857,7 @@ export class TabManager {
         this.terminalTheme,
         this.getThemeColor,
         terminalData.terminalType || "default",
-        { autoStartPty: false }, // delay PTY spawn until after restored content is written
+        { autoStartPty: false, uuid: terminalData.uuid }, // delay PTY spawn until after restored content is written
       );
       Logger.warn("🔄 TerminalInstance created from restore:", terminal);
 
@@ -1025,12 +1037,35 @@ export class TabManager {
           prior.historyBannerShownOnce || this._historyBannerShownEver || false,
       });
 
-      // OPTIONALLY also send to extension for backup (non-critical, async)
+      // Send split messages to extension for persistent storage (non-critical, async)
       try {
+        // Build metadata (no buffers) for clean, inspectable storage
+        const metadata = {
+          terminals: fullState.terminals.map((t: any) => {
+            const { buffer, ...meta } = t;
+            return meta;
+          }),
+          activeTabId: fullState.activeTabId,
+          timestamp: fullState.timestamp,
+        };
         this.vscode.postMessage({
-          command: "stateUpdate",
-          state: fullState,
+          command: "metadataUpdate",
+          state: metadata,
         });
+
+        // Send dirty buffers keyed by UUID
+        const buffers: Record<string, string> = {};
+        for (const t of fullState.terminals) {
+          if (t.uuid && t.buffer) {
+            buffers[t.uuid] = t.buffer;
+          }
+        }
+        if (Object.keys(buffers).length > 0) {
+          this.vscode.postMessage({
+            command: "bufferUpdate",
+            buffers,
+          });
+        }
       } catch (msgError) {
         // Don't fail if async message fails during shutdown
         Logger.warn(

@@ -50,7 +50,17 @@ export class MessageDispatcher {
         this.fileOperationHandler.handleOpenFile(msg.filePath, msg.terminalId),
       openUrl: (msg: any) =>
         this.fileOperationHandler.handleOpenUrl(msg.url),
+      metadataUpdate: (msg: any) => {
+        this.stateManager.saveMetadata(msg.state);
+      },
+      bufferUpdate: (msg: any) => {
+        this.stateManager.saveBuffers(msg.buffers);
+      },
+      bufferDelete: (msg: any) => {
+        this.stateManager.deleteBuffer(msg.uuid);
+      },
       stateUpdate: (msg: any) => {
+        // Legacy fallback: full state with buffers embedded
         this.stateManager.saveState(msg.state);
         if (this.serializerHandleMessage) {
           this.serializerHandleMessage(msg);

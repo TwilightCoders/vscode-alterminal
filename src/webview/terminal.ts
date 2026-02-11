@@ -17,6 +17,7 @@ declare const globalThis: any;
 interface TerminalOptions {
   autoStartPty?: boolean;
   launchCommand?: string | null;
+  uuid?: string;
 }
 
 /**
@@ -44,6 +45,7 @@ interface TerminalOptions {
 
 export class TerminalInstance {
   // Core properties
+  uuid: string;
   id: number;
   label: string;
   baseLabel: string;
@@ -109,7 +111,8 @@ export class TerminalInstance {
     terminalType: string = "default",
     options: TerminalOptions = {},
   ) {
-    const { autoStartPty = true, launchCommand = null } = options;
+    const { autoStartPty = true, launchCommand = null, uuid } = options;
+    this.uuid = uuid || crypto.randomUUID();
     this.launchCommand = launchCommand;
     this.id = id;
     this.label = label;
@@ -710,6 +713,7 @@ export class TerminalInstance {
     const shouldSaveBuffer = this.hasUserInteraction && !this.launchCommand;
 
     return {
+      uuid: this.uuid,
       id: this.id,
       label: this.label,
       baseLabel: this.baseLabel,
@@ -729,6 +733,11 @@ export class TerminalInstance {
    */
   restoreFromState(state) {
     if (!state) return;
+
+    // Restore UUID if available, keep constructor-generated one if missing (migration)
+    if (state.uuid) {
+      this.uuid = state.uuid;
+    }
 
     this.label = state.label || this.label;
 

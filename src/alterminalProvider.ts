@@ -431,6 +431,24 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Apply edited metadata and push state live to the webview.
+   * Used by debugState command after the user saves the temp file.
+   */
+  public applyEditedMetadata(metadata: any): void {
+    this.stateManager.saveMetadata(metadata);
+    if (this._view) {
+      this.stateManager.pushStateToWebview(this._view.webview);
+    }
+  }
+
+  /**
+   * Get the state manager (for read-only access from commands).
+   */
+  public getStateManager(): StateManager {
+    return this.stateManager;
+  }
+
+  /**
    * Get singleton instance
    */
   public static getInstance(): AlterminalProvider | undefined {
