@@ -36,6 +36,7 @@
 import * as vscode from "vscode";
 import * as pty from "@lydell/node-pty";
 import { Logger } from "../utils/logger";
+import { Debouncer } from "../utils/debouncer";
 import { TERMINAL_DEFAULTS } from "../constants";
 
 export class PtyManager {
@@ -426,26 +427,34 @@ export class PtyManager {
       });
 
       ptyProcess.onData((data) => {
-        // Extract working directory from OSC 7 before filtering strips it
-        const cwd = this._extractCwdFromOsc7(data);
-        if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
-          this._handleCwdChange(tabId, cwd);
-        }
+        // Fast path: if data contains no ESC character, skip all escape
+        // sequence extraction and filtering.  This covers the vast majority
+        // of plain-text output (individual character echoes, command output
+        // lines, etc.) and avoids 5+ regex operations per chunk.
+        const hasEsc = data.indexOf('\x1b') !== -1;
 
-        // Extract user variables from OSC 1337 SetUserVar before filtering strips them
-        const userVars = this._extractUserVars(data);
-        if (userVars) {
-          this._handleUserVarChange(tabId, userVars);
+        if (hasEsc) {
+          // Extract working directory from OSC 7 before filtering strips it
+          const cwd = this._extractCwdFromOsc7(data);
+          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+            this._handleCwdChange(tabId, cwd);
+          }
+
+          // Extract user variables from OSC 1337 SetUserVar before filtering strips them
+          const userVars = this._extractUserVars(data);
+          if (userVars) {
+            this._handleUserVarChange(tabId, userVars);
+          }
         }
 
         // Filter out VS Code-specific escape sequences that can cause focus stealing
-        const filteredData = this._filterVSCodeSequences(data);
-        
+        const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
+
         // Skip if all data was filtered out
         if (!filteredData) {
           return;
         }
-        
+
         // Check if webview is visible
         if (this._webviewView?.visible) {
           // Webview is visible - send data directly
@@ -471,9 +480,14 @@ export class PtyManager {
           }
         }
 
-        // Check for process changes on data events (event-driven approach)
-        // Process name changes typically happen when commands execute (which generate data)
-        this._checkProcessChange(tabId);
+        // Check for process changes on data events, throttled to avoid
+        // repeated syscalls (ptyProcess.process reads the foreground process
+        // name via the OS on every invocation).
+        Debouncer.debounce(
+          `process-check-${tabId}`, 500,
+          () => this._checkProcessChange(tabId),
+          { leading: true, maxWait: 500 },
+        );
       });
 
       ptyProcess.onExit(() => {
@@ -530,6 +544,7 @@ export class PtyManager {
     this._terminalTypes.delete(tabId);
     this._currentWorkingDirs.delete(tabId);
     this._userVars.delete(tabId);
+    Debouncer.cancel(`process-check-${tabId}`);
 
     // Clear output buffer for this tab
     this._outputBuffer.delete(tabId);

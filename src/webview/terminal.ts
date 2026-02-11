@@ -71,7 +71,6 @@ export class TerminalInstance {
   linkMatcherIds?: number[];
 
   // Event disposables
-  dataDisposable: any;
   resizeDisposable: any;
   bellDisposable: any;
   renderDisposable: any;
@@ -87,7 +86,6 @@ export class TerminalInstance {
   _cachedSerializedState: string | null;
   _didInit: boolean;
   _pendingPtyStart: boolean;
-  _lastWriteTs?: number;
   _openedResolve?: (value: any) => void;
 
   // Lifecycle
@@ -321,8 +319,8 @@ export class TerminalInstance {
       this.id,
       (msg) => this.vscode.postMessage(msg),
       () => {
-        if (window.tabManager && window.tabManager.saveToLocalState) {
-          window.tabManager.saveToLocalState();
+        if (window.tabManager && window.tabManager.scheduleSaveState) {
+          window.tabManager.scheduleSaveState("inputData");
         }
       },
       this, // Pass TerminalInstance reference for interaction tracking
@@ -355,34 +353,6 @@ export class TerminalInstance {
         if (window.tabManager?.handleOscTitleChange) {
           window.tabManager.handleOscTitleChange(this.id, title);
         }
-      });
-    }
-
-    // Set up buffer change detection using onData event
-    if (typeof this.terminal.onData === "function") {
-      this.dataDisposable = this.terminal.onData(() => {
-        this._isDirty = true; // Mark dirty on user input
-        // Debounce buffer saves to avoid excessive saving during rapid terminal output
-        Debouncer.debounce(
-          `term-save-${this.id}`,
-          DEBOUNCE_TIMINGS.TERMINAL_DATA,
-          () => {
-            if (window.tabManager?.scheduleSaveState) {
-              try {
-                window.tabManager.scheduleSaveState("terminalData");
-              } catch (e) {
-                Logger.warn(`Failed to schedule state save for terminal ${this.id}:`, e);
-              }
-            } else if (window.tabManager?.saveToLocalState) {
-              try {
-                window.tabManager.saveToLocalState();
-              } catch (e) {
-                Logger.warn(`Failed to save state for terminal ${this.id}:`, e);
-              }
-            }
-          },
-          { maxWait: DEBOUNCE_TIMINGS.TERMINAL_DATA_MAX_WAIT },
-        );
       });
     }
 
@@ -465,8 +435,7 @@ export class TerminalInstance {
     try {
       // Write data directly to terminal - xterm.js 6.0.0 handles all sequences natively
       this.terminal.write(data);
-      this._lastWriteTs = Date.now();
-      this._isDirty = true; // Mark dirty on write
+      this._isDirty = true;
       Debouncer.debounce(
         `term-save-${this.id}`,
         DEBOUNCE_TIMINGS.TERMINAL_WRITE,
@@ -787,7 +756,7 @@ export class TerminalInstance {
   disposeEventHandlers() {
     // Dispose all event handler disposables
     this.inputHandler = this.disposeEventHandler(this.inputHandler);
-    this.dataDisposable = this.disposeEventHandler(this.dataDisposable);
+    Debouncer.cancel(`term-save-${this.id}`);
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
     this.titleChangeDisposable = this.disposeEventHandler(this.titleChangeDisposable);

@@ -20,8 +20,6 @@
  * - Extensible for future input handling needs (shortcuts, modes, etc.)
  */
 
-import { Logger } from "./logger.js";
-
 export class InputHandler {
   public terminal: any;
   public tabId: any;
@@ -93,9 +91,13 @@ export class InputHandler {
         return false;
       }
 
-      // Clipboard: Paste
+      // Clipboard: Paste — suppress the key event but do NOT send our own
+      // clipboardPaste message.  The browser paste event fires independently
+      // and xterm handles it natively.  Sending an additional clipboardPaste
+      // message caused double-paste because both paths wrote to the PTY.
+      // Returning false prevents Ctrl+V from sending ^V (literal-next) to
+      // the terminal on Linux/Windows.
       if (key === 'v' && (isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey) {
-        this.vscode.postMessage({ command: "clipboardPaste", tabId: this.tabId });
         return false;
       }
 
@@ -110,23 +112,28 @@ export class InputHandler {
         return true; // Terminal handles for shell history
       }
 
-      // Terminal navigation keys
-      switch (key) {
-        case "Home":
-          this.terminal.scrollToTop();
-          return false;
+      // Terminal navigation keys — only intercept for xterm scrollback
+      // when on the normal screen. When an alternate-screen program is
+      // running (tmux, vim, less, etc.) pass them through to the PTY.
+      const isAltScreen = this.terminal.buffer?.active?.type === "alternate";
+      if (!isAltScreen) {
+        switch (key) {
+          case "Home":
+            this.terminal.scrollToTop();
+            return false;
 
-        case "End":
-          this.terminal.scrollToBottom();
-          return false;
+          case "End":
+            this.terminal.scrollToBottom();
+            return false;
 
-        case "PageUp":
-          this.terminal.scrollPages(-1);
-          return false;
+          case "PageUp":
+            this.terminal.scrollPages(-1);
+            return false;
 
-        case "PageDown":
-          this.terminal.scrollPages(1);
-          return false;
+          case "PageDown":
+            this.terminal.scrollPages(1);
+            return false;
+        }
       }
     }
 
@@ -139,22 +146,20 @@ export class InputHandler {
    */
   handleInputData(data: string): void {
     // Check if this input represents meaningful user interaction
-    if (this.isMeaningfulInput(data)) {
+    const meaningful = this.isMeaningfulInput(data);
+    if (meaningful) {
       if (this.terminalInstance && typeof this.terminalInstance.markUserInteraction === 'function') {
         this.terminalInstance.markUserInteraction();
-      }
-
-      // Log Enter key presses specifically for focus debugging
-      if (data.includes('\r') || data.includes('\n')) {
-        Logger.info("🔍 [FOCUS DEBUG] Enter key pressed, sending to PTY");
       }
     }
 
     // Send user input to PTY process
     this.sendDataToPty(data);
 
-    // Save state after input
-    if (this.saveState) {
+    // Only save state after meaningful input (Enter, Ctrl+C, etc.)
+    // Regular typing just needs to reach the PTY — no need to serialize
+    // all terminals and push state to the extension on every keystroke.
+    if (meaningful && this.saveState) {
       this.saveState();
     }
   }

@@ -111,6 +111,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           config.scrollback,
         );
       }
+      // Reload saved commands so manual settings.json edits take effect
+      this._commandManager.loadSavedCommands();
     });
 
     // Start watching configuration
