@@ -311,8 +311,6 @@ export class MessageHandler {
   }
 
   private handleData(message: any): void {
-    this.callbacks.ensureInitialized();
-
     if (message.tabId) {
       this.callbacks.writeToTerminal(message.tabId, message.data);
     } else {

@@ -107,20 +107,25 @@ export class MessageDispatcher {
           this.ptyManager.writeToPty(text, msg.tabId);
         }
       },
+      // PTY input — hottest message, handled inline for direct dispatch
+      data: (msg: any) => {
+        const d = typeof msg.data === "string" ? msg.data : "";
+        this.ptyManager.writeToPty(d, msg.tabId);
+      },
     };
 
     webviewView.webview.onDidReceiveMessage(
       (message) => {
         try {
-          // First, check if provider can handle the message directly
-          const providerHandler =
+          // Direct O(1) lookup for both provider and hot-path messages
+          const handler =
             providerHandlers[message.command as keyof typeof providerHandlers];
-          if (providerHandler) {
-            providerHandler(message);
+          if (handler) {
+            handler(message);
             return;
           }
 
-          // Delegate to appropriate manager based on message type
+          // Delegate remaining PTY commands
           if (this.ptyManager?.canHandle(message.command)) {
             this.ptyManager.handleMessage(message);
           } else {

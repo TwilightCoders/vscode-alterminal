@@ -2,7 +2,7 @@ import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
-import { TERMINAL_DEFAULTS, DEBOUNCE_TIMINGS } from "../constants.js";
+import { TERMINAL_DEFAULTS } from "../constants.js";
 
 // Type declarations for xterm.js and addons (loaded dynamically in webview)
 declare const window: Window & {
@@ -433,24 +433,8 @@ export class TerminalInstance {
   write(data) {
     if (!this.terminal) return;
     try {
-      // Write data directly to terminal - xterm.js 6.0.0 handles all sequences natively
       this.terminal.write(data);
       this._isDirty = true;
-      Debouncer.debounce(
-        `term-save-${this.id}`,
-        DEBOUNCE_TIMINGS.TERMINAL_WRITE,
-        () => {
-          try {
-            if (window.tabManager?.scheduleSaveState)
-              window.tabManager.scheduleSaveState("terminalWrite");
-            else if (window.tabManager?.saveToLocalState)
-              window.tabManager.saveToLocalState();
-          } catch (e) {
-            Logger.warn(`Failed to save state after write for terminal ${this.id}:`, e);
-          }
-        },
-        { maxWait: DEBOUNCE_TIMINGS.TERMINAL_WRITE_MAX_WAIT },
-      );
     } catch (error) {
       Logger.error(`Failed to write to terminal ${this.id}:`, error);
     }
@@ -756,7 +740,6 @@ export class TerminalInstance {
   disposeEventHandlers() {
     // Dispose all event handler disposables
     this.inputHandler = this.disposeEventHandler(this.inputHandler);
-    Debouncer.cancel(`term-save-${this.id}`);
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
     this.titleChangeDisposable = this.disposeEventHandler(this.titleChangeDisposable);

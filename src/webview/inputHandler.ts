@@ -28,6 +28,10 @@ export class InputHandler {
   public terminalInstance: any;
   public disposables: any[] = [];
 
+  // Cache platform detection once (avoid navigator.platform on every keydown)
+  private static readonly _isMac =
+    typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
   constructor(
     terminal: any,
     tabId: any,
@@ -70,7 +74,7 @@ export class InputHandler {
   handleKeyEvent(event: KeyboardEvent): boolean {
     if (event.type === "keydown") {
       const key = event.key;
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isMac = InputHandler._isMac;
       const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
 
       // Pass through function keys (F1-F12) to VS Code

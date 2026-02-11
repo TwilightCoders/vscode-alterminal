@@ -68,6 +68,7 @@ export class TabManager {
   private _tabUIManager: TabUIManager;
   private _layoutManager: LayoutManager;
   private _visibilityHandler: (() => void) | null = null;
+  private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -124,6 +125,16 @@ export class TabManager {
       }
     };
     document.addEventListener('visibilitychange', this._visibilityHandler);
+
+    // Periodic dirty-check: persist terminal buffers that changed since last save.
+    // This replaces per-write() Debouncer calls — instead of churning browser
+    // timers on every PTY echo, we just check every 5 seconds whether any
+    // terminal's _isDirty flag is set.
+    this._dirtySaveTimer = setInterval(() => {
+      if (this._hasDirtyTerminals()) {
+        this.scheduleSaveState("dirtyCheck");
+      }
+    }, 5000);
 
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
@@ -1071,6 +1082,16 @@ export class TabManager {
   /**
    * Debounced global state save with maxWait safeguard so constant activity still persists.
    */
+  /**
+   * Check if any terminal has unsaved buffer changes.
+   */
+  private _hasDirtyTerminals(): boolean {
+    for (const [, terminal] of this.terminals) {
+      if (terminal._isDirty) return true;
+    }
+    return false;
+  }
+
   scheduleSaveState(reason = "unspecified") {
     try {
       Debouncer.debounce(
@@ -1234,6 +1255,12 @@ export class TabManager {
     if (this._visibilityHandler) {
       document.removeEventListener('visibilitychange', this._visibilityHandler);
       this._visibilityHandler = null;
+    }
+
+    // Stop dirty-check timer
+    if (this._dirtySaveTimer) {
+      clearInterval(this._dirtySaveTimer);
+      this._dirtySaveTimer = null;
     }
 
     // Dispose layout manager (handles window event cleanup)

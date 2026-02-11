@@ -278,18 +278,13 @@ export class PtyManager {
   /**
    * Check if this manager can handle a specific message command
    */
+  private static readonly _ptyCommands = new Set([
+    "createPty", "disposePty", "data", "resize",
+    "sendFilePath", "sendFileData", "newTab", "closeTab",
+  ]);
+
   public canHandle(command: string): boolean {
-    const ptyCommands = [
-      "createPty",
-      "disposePty",
-      "data",
-      "resize",
-      "sendFilePath",
-      "sendFileData",
-      "newTab",
-      "closeTab",
-    ];
-    return ptyCommands.includes(command);
+    return PtyManager._ptyCommands.has(command);
   }
 
   public createPtyProcess(
