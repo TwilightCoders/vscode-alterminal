@@ -57,20 +57,17 @@ export class PtyManager {
   private _outputBuffer = new Map<number, string[]>();
   private _maxBufferSize = 10000; // Maximum lines to buffer per terminal
 
-  // Regex patterns for escape sequences that can cause focus stealing or VS Code interference
-  // OSC 633 is VS Code's shell integration protocol
-  // OSC 7 is current working directory (can trigger VS Code behavior)
-  // OSC 1337 is iTerm2 protocol (sometimes used by tools)
-  private static readonly VSCODE_OSC_PATTERN = /\x1b\]633;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
-  private static readonly CWD_OSC_PATTERN = /\x1b\]7;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
-  private static readonly ITERM_OSC_PATTERN = /\x1b\]1337;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
-  
+  // Combined pattern for escape sequences to filter out in a single pass:
+  // - OSC 633: VS Code shell integration protocol
+  // - OSC 7: Current working directory (can trigger VS Code behavior)
+  // - OSC 1337: iTerm2 protocol (sometimes used by tools)
+  // - DEC private mode ?1004: Focus reporting (in/out events VS Code may intercept)
+  private static readonly FILTER_PATTERN = /\x1b(?:\](?:633|7|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
+
+  // Extraction patterns (separate from filter because we need capture groups)
+  private static readonly CWD_OSC_PATTERN = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
   // iTerm2 SetUserVar: \x1b]1337;SetUserVar=name=base64value\x07
   private static readonly USER_VAR_PATTERN = /\x1b\]1337;SetUserVar=([A-Za-z0-9_]+)=([A-Za-z0-9+/=]*?)(?:\x07|\x1b\\)/g;
-
-  // DEC private mode: Focus reporting (?1004h enables, ?1004l disables)
-  // When enabled, terminal sends focus in/out events that VS Code may intercept
-  private static readonly FOCUS_REPORTING_PATTERN = /\x1b\[\?1004[hl]/g;
 
   constructor() {
     // No callbacks needed - will use webview directly
@@ -81,22 +78,7 @@ export class PtyManager {
    * These include VS Code shell integration sequences and focus reporting mode
    */
   private _filterVSCodeSequences(data: string): string {
-    let filtered = data;
-    
-    // Remove VS Code shell integration sequences (OSC 633)
-    filtered = filtered.replace(PtyManager.VSCODE_OSC_PATTERN, '');
-    
-    // Remove current working directory sequences (OSC 7)
-    filtered = filtered.replace(PtyManager.CWD_OSC_PATTERN, '');
-    
-    // Remove iTerm2 sequences (OSC 1337)
-    filtered = filtered.replace(PtyManager.ITERM_OSC_PATTERN, '');
-    
-    // Remove focus reporting mode enable/disable sequences
-    // This prevents VS Code from intercepting focus events meant for the webview terminal
-    filtered = filtered.replace(PtyManager.FOCUS_REPORTING_PATTERN, '');
-    
-    return filtered;
+    return data.replace(PtyManager.FILTER_PATTERN, '');
   }
 
   /**
@@ -104,19 +86,15 @@ export class PtyManager {
    * OSC 7 format: \x1b]7;file://hostname/path\x07
    */
   private _extractCwdFromOsc7(data: string): string | null {
-    const matches = data.matchAll(PtyManager.CWD_OSC_PATTERN);
-    let lastMatch: string | null = null;
-    for (const m of matches) {
-      lastMatch = m[0];
+    PtyManager.CWD_OSC_PATTERN.lastIndex = 0;
+    let lastUrl: string | null = null;
+    let m: RegExpExecArray | null;
+    while ((m = PtyManager.CWD_OSC_PATTERN.exec(data)) !== null) {
+      lastUrl = m[1]; // capture group has the URL directly
     }
-    if (!lastMatch) return null;
-
-    // Extract the URL from the OSC 7 sequence (between "7;" and the terminator)
-    const urlStart = lastMatch.indexOf('7;') + 2;
-    const urlStr = lastMatch.slice(urlStart).replace(/(\x07|\x1b\\)$/, '');
+    if (!lastUrl) return null;
     try {
-      const url = new URL(urlStr);
-      return decodeURIComponent(url.pathname);
+      return decodeURIComponent(new URL(lastUrl).pathname);
     } catch {
       return null;
     }

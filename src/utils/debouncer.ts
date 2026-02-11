@@ -20,6 +20,17 @@ interface Entry {
 export class Debouncer {
   private static _entries = new Map<string, Entry>();
 
+  private static _invoke(entry: Entry) {
+    entry.timer = null;
+    if (entry.maxTimer) {
+      clearTimeout(entry.maxTimer as any);
+      entry.maxTimer = null;
+    }
+    entry.lastInvoke = Date.now();
+    entry.leadingInvoked = false;
+    return entry.fn(...entry.lastArgs);
+  }
+
   static debounce<T extends (...args: any[]) => any>(
     key: string,
     wait: number,
@@ -36,26 +47,20 @@ export class Debouncer {
         lastInvoke: 0,
         lastCall: 0,
         fn,
-        opts: { trailing: true, ...opts },
-        lastArgs: [],
+        opts: {
+          leading: opts.leading ?? false,
+          trailing: opts.trailing ?? true,
+          maxWait: opts.maxWait,
+        },
+        lastArgs: args,
         leadingInvoked: false,
       };
       this._entries.set(key, entry);
     } else {
       entry.fn = fn;
-      entry.opts = { trailing: true, ...entry.opts, ...opts };
+      entry.lastArgs = args;
     }
-    entry.lastArgs = args;
     entry.lastCall = now;
-
-    const invoke = () => {
-      entry!.timer = null;
-      entry!.maxTimer && clearTimeout(entry!.maxTimer);
-      entry!.maxTimer = null;
-      entry!.lastInvoke = Date.now();
-      entry!.leadingInvoked = false;
-      return entry!.fn(...entry!.lastArgs);
-    };
 
     if (entry.opts.leading && !entry.leadingInvoked) {
       entry.leadingInvoked = true;
@@ -64,17 +69,18 @@ export class Debouncer {
     }
 
     if (entry.timer) clearTimeout(entry.timer as any);
+    const e = entry;
     entry.timer = setTimeout(() => {
-      if (entry!.opts.trailing !== false) invoke();
+      if (e.opts.trailing !== false) this._invoke(e);
     }, wait);
 
     if (entry.opts.maxWait && !entry.maxTimer) {
       entry.maxTimer = setTimeout(() => {
-        if (entry!.timer) {
-          clearTimeout(entry!.timer as any);
-          entry!.timer = null;
+        if (e.timer) {
+          clearTimeout(e.timer as any);
+          e.timer = null;
         }
-        invoke();
+        this._invoke(e);
       }, entry.opts.maxWait);
     }
   }
@@ -82,6 +88,7 @@ export class Debouncer {
   static flush(key: string) {
     const entry = this._entries.get(key);
     if (!entry) return;
+    const hadPending = entry.timer !== null || entry.maxTimer !== null;
     if (entry.timer) {
       clearTimeout(entry.timer as any);
       entry.timer = null;
@@ -90,8 +97,10 @@ export class Debouncer {
       clearTimeout(entry.maxTimer as any);
       entry.maxTimer = null;
     }
-    entry.fn(...entry.lastArgs);
-    entry.lastInvoke = Date.now();
+    if (hadPending) {
+      entry.fn(...entry.lastArgs);
+      entry.lastInvoke = Date.now();
+    }
     entry.leadingInvoked = false;
   }
 

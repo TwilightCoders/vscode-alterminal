@@ -112,15 +112,14 @@ export class TabManager {
     this._layoutManager.setupResponsiveLayout();
     this._layoutManager.setupWindowEventHandlers();
 
-    // Set up visibility change handler to save state immediately when hidden
+    // Set up visibility change handler to flush any pending save when hidden
     this._visibilityHandler = () => {
       if (document.hidden) {
-        // Page is hidden - save state immediately (non-debounced)
-        Logger.debug("📤 Page becoming hidden - forcing immediate state save");
+        Logger.debug("📤 Page becoming hidden - flushing pending state save");
         try {
-          this.saveToLocalState();
+          Debouncer.flush("global-state-save");
         } catch (e) {
-          Logger.error("Failed to save state on visibility change:", e);
+          Logger.error("Failed to flush state on visibility change:", e);
         }
       }
     };
@@ -734,27 +733,18 @@ export class TabManager {
       const terminal = this.terminals.get(id);
       if (!terminal) continue;
 
-      // Get the complete terminal state (handles content serialization logic internally)
+      // getState() calls serialize() internally for eligible terminals.
+      // For empty results, fall back to previously persisted buffer content.
       const terminalData = terminal.getState();
 
-      // For default terminals (no launch command), handle content preservation and trimming
-      if (!terminal.launchCommand) {
-        let serialized = terminal.serialize();
-        // Fallback preservation: if serialization suppressed / empty but we had prior content, keep it
-        if (
-          (serialized == null || serialized.length === 0) &&
-          priorContentById.has(id)
-        ) {
-          const preserved = priorContentById.get(id);
-          if (preserved && preserved.length > 0) {
-            Logger.debug(
-              `🛟 Preserving prior snapshot for terminal ${id} (len=${preserved.length}) due to empty serialize()`,
-            );
-            serialized = preserved;
-          }
+      if (!terminal.launchCommand && !terminalData.buffer && priorContentById.has(id)) {
+        const preserved = priorContentById.get(id);
+        if (preserved && preserved.length > 0) {
+          Logger.debug(
+            `🛟 Preserving prior snapshot for terminal ${id} (len=${preserved.length}) due to empty serialize()`,
+          );
+          terminalData.buffer = preserved;
         }
-        // Use new property name but support old names for backward compatibility
-        terminalData.buffer = serialized || "";
       }
 
       // Get icon from title manager
