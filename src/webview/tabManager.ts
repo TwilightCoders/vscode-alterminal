@@ -69,6 +69,7 @@ export class TabManager {
   private _layoutManager: LayoutManager;
   private _visibilityHandler: (() => void) | null = null;
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
+  private _pendingTitleOpts = new Map<number, Record<string, any>>();
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -1173,7 +1174,6 @@ export class TabManager {
     terminal.cwd = cwd;
     terminal._isDirty = true;
     this.requestFormattedTitle(tabId);
-    this.scheduleSaveState("cwdChange");
   }
 
   /**
@@ -1189,7 +1189,6 @@ export class TabManager {
     Object.assign(terminal.userVars, vars);
     terminal._isDirty = true;
     this.requestFormattedTitle(tabId);
-    this.scheduleSaveState("userVarChange");
   }
 
   /**
@@ -1207,28 +1206,46 @@ export class TabManager {
    * Request a formatted tab title from the extension using the configured template
    */
   requestFormattedTitle(tabId: number, opts: { processName?: string; oscTitle?: string; workingDirectory?: string } = {}): void {
-    try {
-      const terminal = this.terminals.get(tabId);
-      if (!terminal) return;
-
-      const baseTabName = terminal.baseLabel || "Terminal";
-      this.vscode.postMessage({
-        command: "formatTabTitle",
-        tabId,
-        tabName: terminal.label,
-        baseTabName,
-        template: terminal.titleTemplate || undefined,
-        processName: opts.processName,
-        oscTitle: opts.oscTitle ?? terminal.oscTitle,
-        fullCommand: terminal.launchCommand || undefined,
-        workingDirectory: opts.workingDirectory ?? terminal.cwd ?? undefined,
-        userVars: terminal.userVars ?? undefined,
-      });
-    } catch (e) {
-      try {
-        Logger.warn("Failed to request formatted title", e);
-      } catch {}
+    // Merge opts into pending state so rapid-fire calls (process change +
+    // CWD change + title change arriving within ms of each other on a
+    // single shell prompt) collapse into one IPC round-trip.
+    const pending = this._pendingTitleOpts.get(tabId);
+    if (pending) {
+      Object.assign(pending, opts);
+    } else {
+      this._pendingTitleOpts.set(tabId, { ...opts });
     }
+
+    Debouncer.debounce(
+      `title-fmt-${tabId}`,
+      50,
+      () => {
+        try {
+          const terminal = this.terminals.get(tabId);
+          if (!terminal) return;
+          const merged = this._pendingTitleOpts.get(tabId) || {};
+          this._pendingTitleOpts.delete(tabId);
+
+          const baseTabName = terminal.baseLabel || "Terminal";
+          this.vscode.postMessage({
+            command: "formatTabTitle",
+            tabId,
+            tabName: terminal.label,
+            baseTabName,
+            template: terminal.titleTemplate || undefined,
+            processName: merged.processName,
+            oscTitle: merged.oscTitle ?? terminal.oscTitle,
+            fullCommand: terminal.launchCommand || undefined,
+            workingDirectory: merged.workingDirectory ?? terminal.cwd ?? undefined,
+            userVars: terminal.userVars ?? undefined,
+          });
+        } catch (e) {
+          try {
+            Logger.warn("Failed to request formatted title", e);
+          } catch {}
+        }
+      },
+    );
   }
 
   /**
