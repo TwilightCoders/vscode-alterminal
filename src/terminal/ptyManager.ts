@@ -406,20 +406,6 @@ export class PtyManager {
         // lines, etc.) and avoids 5+ regex operations per chunk.
         const hasEsc = data.indexOf('\x1b') !== -1;
 
-        if (hasEsc) {
-          // Extract working directory from OSC 7 before filtering strips it
-          const cwd = this._extractCwdFromOsc7(data);
-          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
-            this._handleCwdChange(tabId, cwd);
-          }
-
-          // Extract user variables from OSC 1337 SetUserVar before filtering strips them
-          const userVars = this._extractUserVars(data);
-          if (userVars) {
-            this._handleUserVarChange(tabId, userVars);
-          }
-        }
-
         // Filter out VS Code-specific escape sequences that can cause focus stealing
         const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
 
@@ -428,9 +414,9 @@ export class PtyManager {
           return;
         }
 
-        // Check if webview is visible
+        // Forward data to webview FIRST — minimize latency on the hot path.
+        // Metadata extraction (CWD, user vars, process check) runs after.
         if (this._webviewView?.visible) {
-          // Webview is visible - send data directly
           this._webviewView.webview.postMessage({
             command: "data",
             data: filteredData,
@@ -450,6 +436,19 @@ export class PtyManager {
             const excess = buffer.length - this._maxBufferSize;
             buffer.splice(0, excess);
             Logger.warn(`⚠️ Output buffer for tab ${tabId} exceeded max size, trimmed ${excess} oldest entries`);
+          }
+        }
+
+        // Extract metadata AFTER forwarding data to keep the hot path fast
+        if (hasEsc) {
+          const cwd = this._extractCwdFromOsc7(data);
+          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+            this._handleCwdChange(tabId, cwd);
+          }
+
+          const userVars = this._extractUserVars(data);
+          if (userVars) {
+            this._handleUserVarChange(tabId, userVars);
           }
         }
 

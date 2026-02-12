@@ -338,7 +338,6 @@ export class TerminalInstance {
 
     // Set up bell handler - listen for terminal bell events
     this.bellDisposable = this.terminal.onBell(() => {
-      const timestamp = new Date().toISOString();
       // Only show indicator if tab is not currently active
       if (!this.isActive && this.onBellReceived) {
         this.onBellReceived(this.id);
@@ -346,13 +345,17 @@ export class TerminalInstance {
     });
 
     // Set up OSC title change handler (fired by \x1b]0;title\x07 or \x1b]2;title\x07)
+    // Deferred via queueMicrotask to avoid blocking the synchronous
+    // terminal.write() → render path (onTitleChange fires mid-write).
     if (typeof this.terminal.onTitleChange === "function") {
       this.titleChangeDisposable = this.terminal.onTitleChange((title: string) => {
         this.oscTitle = title || null;
         this._isDirty = true;
-        if (window.tabManager?.handleOscTitleChange) {
-          window.tabManager.handleOscTitleChange(this.id, title);
-        }
+        queueMicrotask(() => {
+          if (window.tabManager?.handleOscTitleChange) {
+            window.tabManager.handleOscTitleChange(this.id, title);
+          }
+        });
       });
     }
 
