@@ -51,6 +51,7 @@ export class PtyManager {
   private _visibilityDisposable?: { dispose(): void };
 
   private _scrollback: number = 1000;
+  private _extensionVersion: string = "0.0.0";
   private _expandCommand: ((cmd: string) => string) | null = null;
 
   // Buffer for PTY output when webview is hidden
@@ -59,10 +60,12 @@ export class PtyManager {
 
   // Combined pattern for escape sequences to filter out in a single pass:
   // - OSC 633: VS Code shell integration protocol
+  // - OSC 133: FinalTerm shell integration (VS Code also responds to this)
   // - OSC 7: Current working directory (can trigger VS Code behavior)
+  // - OSC 9;9: ConEmu/Cmder CWD (Windows, VS Code responds)
   // - OSC 1337: iTerm2 protocol (sometimes used by tools)
   // - DEC private mode ?1004: Focus reporting (in/out events VS Code may intercept)
-  private static readonly FILTER_PATTERN = /\x1b(?:\](?:633|7|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
+  private static readonly FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9;9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
 
   // Extraction patterns (separate from filter because we need capture groups)
   private static readonly CWD_OSC_PATTERN = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
@@ -159,6 +162,10 @@ export class PtyManager {
 
   public setCommandExpander(fn: (cmd: string) => string) {
     this._expandCommand = fn;
+  }
+
+  public setExtensionVersion(version: string) {
+    this._extensionVersion = version;
   }
 
   public setScrollback(scrollback: number) {
@@ -373,13 +380,15 @@ export class PtyManager {
         process.env.USERPROFILE ||
         process.cwd();
 
-      // Build clean environment: strip VSCODE_* and ELECTRON_* vars that can
-      // cause VS Code's built-in terminal to steal focus or trigger shell
-      // integration scripts in child processes
+      // Build clean environment: strip vars that can cause VS Code's
+      // built-in terminal to steal focus or trigger shell integration
       const cleanEnv: { [key: string]: string } = {};
       for (const [key, value] of Object.entries(process.env)) {
         if (value === undefined) continue;
         if (key.startsWith("VSCODE_") || key.startsWith("ELECTRON_")) continue;
+        // Strip askpass helpers only when they point to VS Code's credential helper.
+        // User-configured helpers (keychain, ksshaskpass, etc.) are left intact.
+        if ((key === "GIT_ASKPASS" || key === "SSH_ASKPASS") && /vscode|Code/i.test(value)) continue;
         cleanEnv[key] = value;
       }
 
@@ -393,7 +402,7 @@ export class PtyManager {
           TERM: TERMINAL_DEFAULTS.TERM_TYPE,
           COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
           TERM_PROGRAM: "alterminal",
-          TERM_PROGRAM_VERSION: vscode.version,
+          TERM_PROGRAM_VERSION: this._extensionVersion,
           PATH: process.env.PATH || "",
           SHELL: userShell,
         },
@@ -406,6 +415,20 @@ export class PtyManager {
         // lines, etc.) and avoids 5+ regex operations per chunk.
         const hasEsc = data.indexOf('\x1b') !== -1;
 
+        // Extract metadata from the raw data BEFORE filtering strips the
+        // escape sequences (OSC 7 for CWD, OSC 1337 for user vars).
+        if (hasEsc) {
+          const cwd = this._extractCwdFromOsc7(data);
+          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+            this._handleCwdChange(tabId, cwd);
+          }
+
+          const userVars = this._extractUserVars(data);
+          if (userVars) {
+            this._handleUserVarChange(tabId, userVars);
+          }
+        }
+
         // Filter out VS Code-specific escape sequences that can cause focus stealing
         const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
 
@@ -414,8 +437,7 @@ export class PtyManager {
           return;
         }
 
-        // Forward data to webview FIRST — minimize latency on the hot path.
-        // Metadata extraction (CWD, user vars, process check) runs after.
+        // Forward data to webview
         if (this._webviewView?.visible) {
           this._webviewView.webview.postMessage({
             command: "data",
@@ -436,19 +458,6 @@ export class PtyManager {
             const excess = buffer.length - this._maxBufferSize;
             buffer.splice(0, excess);
             Logger.warn(`⚠️ Output buffer for tab ${tabId} exceeded max size, trimmed ${excess} oldest entries`);
-          }
-        }
-
-        // Extract metadata AFTER forwarding data to keep the hot path fast
-        if (hasEsc) {
-          const cwd = this._extractCwdFromOsc7(data);
-          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
-            this._handleCwdChange(tabId, cwd);
-          }
-
-          const userVars = this._extractUserVars(data);
-          if (userVars) {
-            this._handleUserVarChange(tabId, userVars);
           }
         }
 
