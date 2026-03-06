@@ -318,6 +318,11 @@
           "maximum": 50000,
           "description": "Number of lines to keep in terminal scrollback buffer. Higher values use more memory but preserve more history."
         },
+        "alterminal.clearSelectionOnCopy": {
+          "type": "boolean",
+          "default": true,
+          "description": "Clear the text selection after copying to clipboard. Disable to keep text selected after Cmd/Ctrl+C."
+        },
         "alterminal.alwaysShowTabs": {
           "type": "boolean",
           "default": false,

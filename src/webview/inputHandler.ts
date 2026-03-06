@@ -90,7 +90,9 @@ export class InputHandler {
         if (this.terminal.hasSelection()) {
           const text = this.terminal.getSelection();
           this.vscode.postMessage({ command: "clipboardCopy", text });
-          this.terminal.clearSelection();
+          if ((window as any).clearSelectionOnCopy !== false) {
+            this.terminal.clearSelection();
+          }
         }
         return false;
       }

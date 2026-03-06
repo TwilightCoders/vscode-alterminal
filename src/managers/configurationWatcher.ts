@@ -65,6 +65,7 @@ export class ConfigurationWatcher {
 
     return {
       alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
+      clearSelectionOnCopy: config.get<boolean>("clearSelectionOnCopy", true),
       scrollback: config.get<number>("terminal.scrollback", 1000),
       tabLayout: config.get<string>("tabLayout", "auto"),
       tabTitleTemplate: config.get<string>("tabTitle.template", "{base}{p? • {p}}"),
@@ -98,6 +99,7 @@ export class ConfigurationWatcher {
 
 export interface AlterminalConfig {
   alwaysShowTabs: boolean;
+  clearSelectionOnCopy: boolean;
   scrollback: number;
   tabLayout: string;
   tabTitleTemplate: string;

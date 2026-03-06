@@ -370,6 +370,9 @@ export class MessageHandler {
         this.callbacks.setAlwaysShowTabs(message.config.alwaysShowTabs);
         this.callbacks.updateTabBarVisibility();
       }
+      if (typeof message.config.clearSelectionOnCopy === "boolean") {
+        (window as any).clearSelectionOnCopy = message.config.clearSelectionOnCopy;
+      }
       if (typeof message.config.scrollback === "number") {
         (window as any).scrollbackLines = message.config.scrollback;
       }

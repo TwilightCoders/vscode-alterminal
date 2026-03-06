@@ -134,6 +134,7 @@ export class WebViewLifecycleManager {
       command: "updateConfig",
       config: {
         alwaysShowTabs: config.alwaysShowTabs,
+        clearSelectionOnCopy: config.clearSelectionOnCopy,
         scrollback: config.scrollback,
       },
     });
@@ -142,16 +143,13 @@ export class WebViewLifecycleManager {
   /**
    * Handle configuration changes
    */
-  public handleConfigChange(webview: vscode.Webview, alwaysShowTabs: boolean, scrollback: number): void {
+  public handleConfigChange(webview: vscode.Webview, config: { alwaysShowTabs: boolean; clearSelectionOnCopy: boolean; scrollback: number }): void {
     webview.postMessage({
       command: "updateConfig",
-      config: {
-        alwaysShowTabs,
-        scrollback,
-      },
+      config,
     });
 
-    this.ptyManager.setScrollback(scrollback);
+    this.ptyManager.setScrollback(config.scrollback);
   }
 
   /**

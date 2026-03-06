@@ -107,8 +107,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       if (this._view) {
         this.webviewLifecycleManager.handleConfigChange(
           this._view.webview,
-          config.alwaysShowTabs,
-          config.scrollback,
+          {
+            alwaysShowTabs: config.alwaysShowTabs,
+            clearSelectionOnCopy: config.clearSelectionOnCopy,
+            scrollback: config.scrollback,
+          },
         );
       }
       // Reload saved commands so manual settings.json edits take effect
