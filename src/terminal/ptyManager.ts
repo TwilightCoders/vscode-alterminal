@@ -631,6 +631,43 @@ export class PtyManager {
         tabId: tabId,
       });
     }
+
+    // Check CWD via the OS — event-driven since this is called from
+    // the PTY data handler (debounced).  Shells without OSC 7 (i.e. when
+    // VSCODE_SHELL_INTEGRATION is stripped) rely on this path.
+    const cwd = PtyManager._getPidCwd(ptyProcess.pid);
+    if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+      this._handleCwdChange(tabId, cwd);
+    }
+  }
+
+  /**
+   * Get the current working directory of a process by PID.
+   * Called from the data-event-driven process check — not on a timer.
+   *
+   * Linux:  reads /proc/<pid>/cwd symlink — a single syscall, no subprocess.
+   * macOS:  uses lsof -d cwd — lightweight subprocess, ~2ms typical.
+   */
+  private static _getPidCwd(pid: number): string | null {
+    try {
+      if (process.platform === "linux") {
+        const fs = require("fs");
+        return fs.readlinkSync(`/proc/${pid}/cwd`);
+      } else if (process.platform === "darwin") {
+        const { execFileSync } = require("child_process");
+        const output = execFileSync("lsof", ["-a", "-d", "cwd", "-Fn", "-p", String(pid)], {
+          encoding: "utf8",
+          timeout: 2000,
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        // lsof output format: "p<pid>\nfcwd\nn<path>\n"
+        const match = output.match(/\nn(.+)/);
+        return match ? match[1] : null;
+      }
+    } catch {
+      // Process may have exited
+    }
+    return null;
   }
 
   /**
