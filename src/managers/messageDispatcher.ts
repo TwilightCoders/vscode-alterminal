@@ -101,12 +101,6 @@ export class MessageDispatcher {
         ),
       clipboardCopy: (msg: any) =>
         vscode.env.clipboard.writeText(msg.text),
-      clipboardPaste: async (msg: any) => {
-        const text = await vscode.env.clipboard.readText();
-        if (text) {
-          this.ptyManager.writeToPty(text, msg.tabId);
-        }
-      },
       // PTY input — hottest message, handled inline for direct dispatch
       data: (msg: any) => {
         const d = typeof msg.data === "string" ? msg.data : "";

@@ -97,12 +97,9 @@ export class InputHandler {
         return false;
       }
 
-      // Clipboard: Paste — suppress the key event but do NOT send our own
-      // clipboardPaste message.  The browser paste event fires independently
-      // and xterm handles it natively.  Sending an additional clipboardPaste
-      // message caused double-paste because both paths wrote to the PTY.
-      // Returning false prevents Ctrl+V from sending ^V (literal-next) to
-      // the terminal on Linux/Windows.
+      // Clipboard: Paste — let xterm.js handle it natively via the browser
+      // paste event.  Returning false prevents Ctrl+V from sending ^V
+      // (literal-next) to the terminal on Linux/Windows.
       if (key === 'v' && (isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey) {
         return false;
       }
