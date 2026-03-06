@@ -2,6 +2,37 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.28]
+
+### New Features
+
+- **Clear Selection on Copy Setting**: New `alterminal.clearSelectionOnCopy` option to keep text selected after copying (defaults to true for existing behavior)
+- **Panel Border**: Left border divider matching VS Code's built-in terminal panel appearance
+
+### Bug Fixes
+
+- **CWD Persistence on Reload**: Terminal tabs now restore to the correct working directory after window reload. Detects directory changes via OS process inspection since shell integration sequences are filtered
+- **CWD Not Updating in Tabs**: Fixed metadata extraction being skipped when PTY data consisted entirely of escape sequences
+- **Double Paste**: Removed dead `clipboardPaste` handler that was the second write path causing paste duplication in remote/tunnel instances
+
+### Performance
+
+- **Reduced Typing Lag**: Consolidated per-keystroke regex operations, added fast-path bypass for plain text output, debounced title formatting to prevent IPC storms
+- **Lower Timer Churn**: Eliminated per-keystroke timer creation and dispatch overhead
+- **Hot Path Optimization**: Unified escape sequence filtering into a single regex pass, added Debouncer utility, deferred serialization
+
+### Hardening
+
+- **PTY Environment**: Strip `VSCODE_*`/`ELECTRON_*` env vars and VS Code's ASKPASS helpers to prevent focus stealing. Filter OSC 133 (FinalTerm) and OSC 9;9 (ConEmu) sequences
+- **Data-First Forwarding**: PTY data is forwarded to the webview before metadata extraction to reduce perceived latency
+
+## [0.2.27]
+
+### Bug Fixes
+
+- **Separated Buffer Storage**: Terminal metadata saved to clean JSON state, buffers stored individually by UUID. Fixes editable debug state and legacy migration
+- **Saved Command Overwrite**: Fixed race condition where saved commands could be overwritten
+
 ## [0.2.26]
 
 ### New Features
