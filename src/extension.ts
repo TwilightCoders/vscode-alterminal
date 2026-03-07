@@ -37,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
   ptyManager.setExtensionVersion(packageJson.version || "0.0.0");
+  ptyManager.setExtensionPath(context.extensionUri.fsPath);
 
   // Create serializer to manage persisted state
   const serializer = new WebviewViewSerializer(context);

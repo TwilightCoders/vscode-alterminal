@@ -52,7 +52,10 @@ export class PtyManager {
 
   private _scrollback: number = 1000;
   private _extensionVersion: string = "0.0.0";
+  private _extensionPath: string = "";
   private _expandCommand: ((cmd: string) => string) | null = null;
+  // Tabs using shell integration (OSC 7) don't need the lsof fallback
+  private _shellIntegrationTabs = new Set<number>();
 
   // Buffer for PTY output when webview is hidden
   private _outputBuffer = new Map<number, string[]>();
@@ -166,6 +169,10 @@ export class PtyManager {
 
   public setExtensionVersion(version: string) {
     this._extensionVersion = version;
+  }
+
+  public setExtensionPath(extensionPath: string) {
+    this._extensionPath = extensionPath;
   }
 
   public setScrollback(scrollback: number) {
@@ -392,6 +399,34 @@ export class PtyManager {
         cleanEnv[key] = value;
       }
 
+      // Set up shell integration for CWD reporting via OSC 7.
+      // Each shell type uses a different injection mechanism.
+      const shellIntEnv: Record<string, string> = {};
+      const shellBase = require("path").basename(command).toLowerCase();
+      let hasShellIntegration = false;
+
+      if (this._extensionPath && terminalType !== "command") {
+        if (shellBase === "zsh" || shellBase.startsWith("zsh")) {
+          const zdotdir = require("path").join(this._extensionPath, "shell-integration", "zsh");
+          shellIntEnv.ALTERMINAL_ORIG_ZDOTDIR = process.env.ZDOTDIR || process.env.HOME || "";
+          shellIntEnv.ZDOTDIR = zdotdir;
+          hasShellIntegration = true;
+        } else if (shellBase === "bash" || shellBase.startsWith("bash")) {
+          const bashInit = require("path").join(this._extensionPath, "shell-integration", "bash.sh");
+          shellIntEnv.ALTERMINAL_SHELL_INIT = bashInit;
+          shellIntEnv.PROMPT_COMMAND = `. "$ALTERMINAL_SHELL_INIT"`;
+          hasShellIntegration = true;
+        } else if (shellBase === "fish") {
+          const fishInit = require("path").join(this._extensionPath, "shell-integration", "fish.fish");
+          args.push("--init-command", `source ${fishInit}`);
+          hasShellIntegration = true;
+        }
+      }
+
+      if (hasShellIntegration) {
+        this._shellIntegrationTabs.add(tabId);
+      }
+
       const ptyProcess = pty.spawn(command, args, {
         name: TERMINAL_DEFAULTS.TERM_TYPE,
         cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
@@ -399,6 +434,7 @@ export class PtyManager {
         cwd: resolvedCwd,
         env: {
           ...cleanEnv,
+          ...shellIntEnv,
           TERM: TERMINAL_DEFAULTS.TERM_TYPE,
           COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
           TERM_PROGRAM: "alterminal",
@@ -467,7 +503,7 @@ export class PtyManager {
         Debouncer.debounce(
           `process-check-${tabId}`, 500,
           () => this._checkProcessChange(tabId),
-          { leading: true, maxWait: 500 },
+          { maxWait: 500 },
         );
       });
 
@@ -525,6 +561,7 @@ export class PtyManager {
     this._terminalTypes.delete(tabId);
     this._currentWorkingDirs.delete(tabId);
     this._userVars.delete(tabId);
+    this._shellIntegrationTabs.delete(tabId);
     Debouncer.cancel(`process-check-${tabId}`);
 
     // Clear output buffer for this tab
@@ -632,42 +669,46 @@ export class PtyManager {
       });
     }
 
-    // Check CWD via the OS — event-driven since this is called from
-    // the PTY data handler (debounced).  Shells without OSC 7 (i.e. when
-    // VSCODE_SHELL_INTEGRATION is stripped) rely on this path.
-    const cwd = PtyManager._getPidCwd(ptyProcess.pid);
-    if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
-      this._handleCwdChange(tabId, cwd);
+    // For shells without our integration (unsupported shells), fall back
+    // to async OS-level CWD inspection.  Shells WITH integration emit
+    // OSC 7 directly — no need for the subprocess overhead.
+    if (!this._shellIntegrationTabs.has(tabId)) {
+      this._checkCwdAsync(tabId, ptyProcess.pid);
     }
   }
 
   /**
-   * Get the current working directory of a process by PID.
-   * Called from the data-event-driven process check — not on a timer.
+   * Asynchronously check the CWD of a process by PID.
+   * Only used for shells without our shell integration scripts.
    *
-   * Linux:  reads /proc/<pid>/cwd symlink — a single syscall, no subprocess.
-   * macOS:  uses lsof -d cwd — lightweight subprocess, ~2ms typical.
+   * Linux:  reads /proc/<pid>/cwd symlink — single async syscall.
+   * macOS:  uses lsof — async subprocess, ~2ms typical.
    */
-  private static _getPidCwd(pid: number): string | null {
+  private _checkCwdAsync(tabId: number, pid: number): void {
     try {
       if (process.platform === "linux") {
         const fs = require("fs");
-        return fs.readlinkSync(`/proc/${pid}/cwd`);
+        fs.readlink(`/proc/${pid}/cwd`, (err: any, cwd: string) => {
+          if (!err && cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+            this._handleCwdChange(tabId, cwd);
+          }
+        });
       } else if (process.platform === "darwin") {
-        const { execFileSync } = require("child_process");
-        const output = execFileSync("lsof", ["-a", "-d", "cwd", "-Fn", "-p", String(pid)], {
+        const { execFile } = require("child_process");
+        execFile("lsof", ["-a", "-d", "cwd", "-Fn", "-p", String(pid)], {
           encoding: "utf8",
           timeout: 2000,
-          stdio: ["ignore", "pipe", "ignore"],
+        }, (err: any, stdout: string) => {
+          if (err) return;
+          const match = stdout.match(/\nn(.+)/);
+          if (match && match[1] !== this._currentWorkingDirs.get(tabId)) {
+            this._handleCwdChange(tabId, match[1]);
+          }
         });
-        // lsof output format: "p<pid>\nfcwd\nn<path>\n"
-        const match = output.match(/\nn(.+)/);
-        return match ? match[1] : null;
       }
     } catch {
       // Process may have exited
     }
-    return null;
   }
 
   /**
