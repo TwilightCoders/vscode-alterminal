@@ -11,7 +11,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 ### Bug Fixes
 
-- **CWD Persistence on Reload**: Terminal tabs now restore to the correct working directory after window reload. Detects directory changes via OS process inspection since shell integration sequences are filtered
+- **CWD Persistence on Reload**: Terminal tabs now restore to the correct working directory after window reload via lightweight shell integration hooks (zsh, bash, fish) that emit OSC 7 on directory change
 - **CWD Not Updating in Tabs**: Fixed metadata extraction being skipped when PTY data consisted entirely of escape sequences
 - **Double Paste**: Removed dead `clipboardPaste` handler that was the second write path causing paste duplication in remote/tunnel instances
 
@@ -25,6 +25,11 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 - **PTY Environment**: Strip `VSCODE_*`/`ELECTRON_*` env vars and VS Code's ASKPASS helpers to prevent focus stealing. Filter OSC 133 (FinalTerm) and OSC 9;9 (ConEmu) sequences
 - **Data-First Forwarding**: PTY data is forwarded to the webview before metadata extraction to reduce perceived latency
+- **Shell Integration**: Bundled lightweight shell hooks for zsh (ZDOTDIR), bash (PROMPT_COMMAND), and fish (--init-command) with async OS-level fallback for unsupported shells
+
+### Build
+
+- **Separate Webview Output**: Webview ES6 modules now compile to `out-webview/` to avoid overwriting the extension host's CommonJS output, fixing module loading failures
 
 ## [0.2.27]
 
