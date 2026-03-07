@@ -14,11 +14,11 @@ export class TemplateUtils {
     webview: vscode.Webview,
     timestamp: number,
   ): string {
-    // Get webview URIs for compiled ES6 modules
-    const outDir = path.join(__dirname, "..");
+    // Get webview URIs for compiled ES6 modules (separate output dir)
+    const webviewOutDir = path.join(__dirname, "..", "..", "out-webview");
     const getWebviewScriptUri = (scriptPath: string) =>
       webview.asWebviewUri(
-        vscode.Uri.joinPath(vscode.Uri.file(outDir), "webview", scriptPath),
+        vscode.Uri.joinPath(vscode.Uri.file(webviewOutDir), "webview", scriptPath),
       );
 
     // Helper to create webview URIs for node_modules files
@@ -64,7 +64,10 @@ export class TemplateUtils {
       console.warn("Could not read package.json version:", error);
     }
 
-    // Get ES6 module URIs
+    // Shared constants module (ES6 version for webview import map)
+    const constantsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(vscode.Uri.file(webviewOutDir), "constants.js"),
+    );
     const inputHandlerUri = getWebviewScriptUri("inputHandler.js");
     const tabTitleManagerUri = getWebviewScriptUri("tabTitleManager.js");
     const terminalUri = getWebviewScriptUri("terminal.js");
@@ -124,6 +127,7 @@ export class TemplateUtils {
       linkProviderUri,
       combinedScript,
       // ES6 module URIs for import map
+      constantsUri,
       inputHandlerUri,
       tabTitleManagerUri,
       terminalUri,

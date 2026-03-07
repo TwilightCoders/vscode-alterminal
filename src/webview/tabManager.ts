@@ -5,8 +5,7 @@ import { MessageHandler, MessageHandlerCallbacks } from "./messageHandler.js";
 import { KeyboardManager } from "./keyboardManager.js";
 import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
-// Import shared Debouncer (was missing, causing ReferenceError at runtime)
-import { Debouncer } from "../utils/debouncer.js";
+import { Debouncer } from "./debouncer.js";
 
 // Extend Window interface for webview globals
 declare const window: Window & {

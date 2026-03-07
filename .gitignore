@@ -1,5 +1,6 @@
 # VS Code Extension
 out/
+out-webview/
 node_modules/
 *.vsix
 .vscode-test/
