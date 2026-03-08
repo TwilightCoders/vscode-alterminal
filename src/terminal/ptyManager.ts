@@ -355,20 +355,9 @@ export class PtyManager {
           break;
 
         case "shell":
-          // Always plain shell (no auto command)
-          command = userShell;
-          if (isWindowsPowerShell) {
-            args = ["-NoLogo"];
-          } else if (isWindowsCmd) {
-            args = [];
-          } else {
-            args = ["-l", "-i"];
-          }
-          break;
-
         case "default":
         default:
-          // Default to plain shell
+          // Plain interactive shell (no auto command)
           command = userShell;
           if (isWindowsPowerShell) {
             args = ["-NoLogo"];
