@@ -1,8 +1,8 @@
 import * as assert from 'assert';
 import { TabTitleProvider } from '../../src/providers/tabTitleProvider';
 
-describe('TabTitleProvider', () => {
-  it('renders default template without process', () => {
+suite('TabTitleProvider', () => {
+  test('renders default template without process', () => {
     const provider = new TabTitleProvider();
     const template = provider.getTemplate(); // default: {base}{p? • {p}}
     const title = provider.render(template, {
@@ -14,7 +14,7 @@ describe('TabTitleProvider', () => {
     assert.strictEqual(title, 'Terminal');
   });
 
-  it('renders default template with process', () => {
+  test('renders default template with process', () => {
     const provider = new TabTitleProvider();
     const template = provider.getTemplate(); // default: {base}{p? • {p}}
     const title = provider.render(template, {
@@ -27,7 +27,7 @@ describe('TabTitleProvider', () => {
     assert.strictEqual(title, 'Terminal • node');
   });
 
-  it('supports conditional and nested tokens', () => {
+  test('supports conditional and nested tokens', () => {
     const provider = new TabTitleProvider();
     const template = '{n}{p? ~ {p}: (idle)}';
     const title1 = provider.render(template, {
@@ -48,8 +48,8 @@ describe('TabTitleProvider', () => {
     assert.strictEqual(title2, 'Dev (idle)');
   });
 
-  describe('{title} OSC title token', () => {
-    it('renders oscTitle when set', () => {
+  suite('{title} OSC title token', () => {
+    test('renders oscTitle when set', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{title}', {
         tabId: 1,
@@ -61,7 +61,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, 'user@host:~/project');
     });
 
-    it('renders empty when oscTitle is not set', () => {
+    test('renders empty when oscTitle is not set', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{title}', {
         tabId: 1,
@@ -72,7 +72,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, '');
     });
 
-    it('supports default value when oscTitle is absent', () => {
+    test('supports default value when oscTitle is absent', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{title:Terminal}', {
         tabId: 1,
@@ -83,7 +83,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, 'Terminal');
     });
 
-    it('uses oscTitle over default value when set', () => {
+    test('uses oscTitle over default value when set', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{title:Terminal}', {
         tabId: 1,
@@ -95,7 +95,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, 'vim file.txt');
     });
 
-    it('supports conditional rendering when oscTitle is set', () => {
+    test('supports conditional rendering when oscTitle is set', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{base}{title? - {title}}', {
         tabId: 1,
@@ -107,7 +107,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, 'Terminal - vim');
     });
 
-    it('hides conditional block when oscTitle is absent', () => {
+    test('hides conditional block when oscTitle is absent', () => {
       const provider = new TabTitleProvider();
       const title = provider.render('{base}{title? - {title}}', {
         tabId: 1,
@@ -118,7 +118,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(title, 'Terminal');
     });
 
-    it('supports conditional with else branch', () => {
+    test('supports conditional with else branch', () => {
       const provider = new TabTitleProvider();
       const template = '{title?{title}:no title}';
 
@@ -140,7 +140,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(withoutTitle, 'no title');
     });
 
-    it('combines with process token in complex template', () => {
+    test('combines with process token in complex template', () => {
       const provider = new TabTitleProvider();
       const template = '{base}{p? • {p}}{title? [{title}]}';
 
@@ -172,7 +172,7 @@ describe('TabTitleProvider', () => {
       assert.strictEqual(neither, 'Terminal');
     });
 
-    it('default template is unaffected by oscTitle being set', () => {
+    test('default template is unaffected by oscTitle being set', () => {
       const provider = new TabTitleProvider();
       const template = provider.getTemplate(); // default: {base}{p? • {p}}
       const title = provider.render(template, {

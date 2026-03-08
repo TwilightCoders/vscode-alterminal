@@ -10,7 +10,10 @@
   "include": [
     "test/**/*",
     "src/providers/tabTitleProvider.ts",
-    "src/utils/logger.ts"
+    "src/utils/logger.ts",
+    "src/utils/commandManager.ts",
+    "src/utils/templateEngine.ts",
+    "src/constants.ts"
   ],
   "exclude": ["node_modules", ".vscode-test", "vendor"]
 }
