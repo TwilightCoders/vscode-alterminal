@@ -6,7 +6,12 @@
  * Used by both TabTitleProvider (tab titles) and CommandManager (command templates).
  */
 
-export type TokenResolver = (key: string) => string | null;
+/**
+ * Token resolver function.
+ * Return a string for known values, null for known-but-empty tokens,
+ * or undefined for truly unknown tokens (rendered as literal {key}).
+ */
+export type TokenResolver = (key: string) => string | null | undefined;
 
 export class TemplateEngine {
   /**
@@ -98,11 +103,16 @@ export class TemplateEngine {
     }
 
     // Simple token: {key}
-    if (val !== null) {
+    if (typeof val === "string") {
       return val;
     }
 
-    // Unknown token -> leave as-is so user sees what's wrong
+    // null = known token with no current value → render empty
+    if (val === null) {
+      return "";
+    }
+
+    // undefined = unknown token → leave as-is so user sees what's wrong
     return `{${content}}`;
   }
 

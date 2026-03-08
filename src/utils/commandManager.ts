@@ -241,8 +241,11 @@ export class CommandManager {
   /**
    * Launch a saved command
    */
-  async launchSavedCommand(command: string) {
-    const saved = this.savedCommands.find((c) => c.command === command);
+  async launchSavedCommand(command: string, label?: string) {
+    const saved = label
+      ? this.savedCommands.find((c) => c.command === command && c.label === label)
+        || this.savedCommands.find((c) => c.command === command)
+      : this.savedCommands.find((c) => c.command === command);
 
     // Resolve interactive tokens in command
     let resolvedCommand = command;
@@ -291,7 +294,7 @@ export class CommandManager {
         case "platform":
           return process.platform;
         default:
-          return null;
+          return undefined;
       }
     });
   }

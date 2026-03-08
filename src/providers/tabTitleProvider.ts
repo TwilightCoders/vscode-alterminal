@@ -81,7 +81,8 @@ export class TabTitleProvider {
         }
 
         const token = this.tokens.get(key);
-        return token?.getValue(context) ?? null;
+        if (!token) return undefined; // unknown token
+        return token.getValue(context);
       });
       return this.truncateIfNeeded(result);
     } catch (error) {
