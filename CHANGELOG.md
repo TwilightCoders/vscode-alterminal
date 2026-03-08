@@ -2,6 +2,58 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.36]
+
+### New Features
+
+- **Unified Terminal Launcher**: Single `+` button replaces separate terminal and launch command buttons. Opens a QuickPick showing detected shells, saved commands, and ad-hoc command input in one place
+- **Shell Detection**: Automatically detects installed shells from `/etc/shells` (Unix) or system PATH (Windows) and presents them in the launcher with the default shell marked
+- **Cross-Window Bell Notifications**: Terminal bell events now appear as VS Code notifications in whichever window is focused, not just the originating window. Clicking "Go to Terminal" deep-links back to the originating window and switches to the correct Alterminal tab
+- **Consolidated Toolbar**: Toolbar simplified to two icons — `+` (unified launcher) and wrench (Tools menu containing Settings, Refresh, and debug utilities)
+
+### Improvements
+
+- **Edit Saved Commands** now opens `settings.json` directly, scrolled to the `alterminal.savedCommands` key, instead of the Settings UI
+- **Shell-specific tab labels**: Selecting a non-default shell in the launcher names the tab after the shell (e.g., "fish" instead of "Terminal")
+- **Bell debouncing**: Rapid bell events within 3 seconds are consolidated into a single notification
+
+### Technical
+
+- PTY-side BEL detection strips OSC sequence terminators to avoid false bell triggers
+- Bell events forwarded from webview to extension host with tab labels for richer notifications
+- `shellPath` threaded through the full webview → messageHandler → tabManager → terminal → ptyManager pipeline
+- Cross-window communication via `vscode://` URI routing with `/bell` and `/focus` handlers
+
+## [0.2.32]
+
+### Improvements
+
+- **Test suite fixes**: Fixed test suite and added CommandManager unit tests
+- **Saved command disambiguation**: Launch picker now disambiguates saved commands by label when multiple commands share the same command string
+- **Template token resolution**: Distinguish null vs undefined in template token resolution for more predictable behavior
+
+## [0.2.31]
+
+### Improvements
+
+- **Tab cursor style**: Use pointer cursor for tabs instead of grab cursor
+- **Code cleanup**: Remove dead code and broken one-way message paths
+- **Settings bridge fix**: Wire broken openSettings and saveCurrentCommand message bridges
+
+## [0.2.30]
+
+### New Features
+
+- **Interactive tokens**: `{i:prompt}` in saved commands prompts the user at launch time — use in `cwd` for a folder picker or in `command` for an input box
+- **Per-command CWD**: Saved commands now support a `cwd` property so each command can launch in a specific directory
+
+## [0.2.29]
+
+### Bug Fixes
+
+- **Webview module loading**: Separate ES6 build output for webview modules to avoid overwriting extension host's CommonJS output
+- **Shell integration**: Bundled lightweight shell hooks for zsh, bash, and fish for event-driven CWD tracking
+
 ## [0.2.28]
 
 ### New Features
