@@ -101,6 +101,8 @@ export class MessageDispatcher {
         ),
       clipboardCopy: (msg: any) =>
         vscode.env.clipboard.writeText(msg.text),
+      openSettings: () =>
+        vscode.commands.executeCommand("workbench.action.openSettings", "alterminal"),
       // PTY input — hottest message, handled inline for direct dispatch
       data: (msg: any) => {
         const d = typeof msg.data === "string" ? msg.data : "";

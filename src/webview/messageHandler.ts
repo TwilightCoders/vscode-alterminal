@@ -30,6 +30,7 @@ export interface MessageHandlerCallbacks {
   startTabRename: (tabId: number) => void;
   setTabIcon: (tabId: number, icon: string) => void;
   handleGetTabBuffer: (tabId: number) => void;
+  saveActiveCommand: () => void;
   
   // UI updates
   updateTabBarVisibility: () => void;
@@ -191,6 +192,10 @@ export class MessageHandler {
         case "getTabBuffer":
           Logger.debug("📋 Received get tab buffer request:", message.tabId);
           this.callbacks.handleGetTabBuffer(message.tabId);
+          break;
+
+        case "saveCurrentCommand":
+          this.callbacks.saveActiveCommand();
           break;
 
         default:

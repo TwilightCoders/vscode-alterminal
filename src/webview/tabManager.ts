@@ -188,6 +188,7 @@ export class TabManager {
       setAlwaysShowTabs: (val) => { this._alwaysShowTabs = val; },
       findTabIdByCommand: (cmd) => this._findTabIdByCommand(cmd),
       reportPerformance: () => this._reportPerformance(),
+      saveActiveCommand: () => { if (this.activeTabId !== null) this.saveCommand(this.activeTabId); },
     };
   }
 
