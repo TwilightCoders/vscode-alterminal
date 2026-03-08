@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.29",
+  "version": "0.2.30",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -331,7 +331,7 @@
         "alterminal.savedCommands": {
           "type": "array",
           "default": [],
-          "markdownDescription": "Saved terminal commands for quick launching. Commands support template variables that expand at launch time:\n\n| Token | Value |\n|-------|-------|\n| `{workspace}` | Workspace folder name |\n| `{workspacePath}` | Full workspace folder path |\n| `{user}` | OS username |\n| `{platform}` | `process.platform` (darwin, linux, win32) |\n| `{env.VAR}` | Environment variable `VAR` |\n\nSupports conditionals: `{workspace:default}`, `{workspace?then:else}`. Unknown tokens are left as-is.",
+          "markdownDescription": "Saved terminal commands for quick launching. Commands support template variables that expand at launch time:\n\n| Token | Value |\n|-------|-------|\n| `{workspace}` | Workspace folder name |\n| `{workspacePath}` | Full workspace folder path |\n| `{user}` | OS username |\n| `{platform}` | `process.platform` (darwin, linux, win32) |\n| `{env.VAR}` | Environment variable `VAR` |\n| `{i:prompt}` | Interactive — prompts user at launch time |\n\nSupports conditionals: `{workspace:default}`, `{workspace?then:else}`. Unknown tokens are left as-is. Use `{i:prompt}` in `cwd` for a folder picker or in `command` for an input box.",
           "items": {
             "type": "object",
             "properties": {
@@ -350,6 +350,10 @@
               "lastUsed": {
                 "type": "string",
                 "description": "Last used timestamp"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory. Supports {i:prompt}, {workspace}, {workspacePath}, {env.VAR}."
               }
             }
           }
