@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { exec } from "child_process";
 import { PtyManager } from "../terminal/ptyManager";
 import { CommandLauncher } from "./commandLauncher";
 import { FileOperationHandler } from "./fileOperationHandler";
@@ -19,6 +20,10 @@ export interface PerformanceData {
  * Responsibility: Route messages from webview to appropriate handlers
  */
 export class MessageDispatcher {
+  private _bellDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _pendingBells: Map<number, string> = new Map();
+  private static readonly BELL_DEBOUNCE_MS = 3000;
+
   constructor(
     private readonly ptyManager: PtyManager,
     private readonly commandLauncher: CommandLauncher,
@@ -77,7 +82,7 @@ export class MessageDispatcher {
         this.onWebviewReady();
       },
       switchTab: () => {}, // No-op - handled in webview
-      playBellSound: (msg: any) => this._handleBellSound(msg.tabId, msg.tabLabel),
+      playBellSound: (msg: any) => this.handleBellSound(msg.tabId, msg.tabLabel),
       setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
       setDeveloperMode: () => {}, // Handled in webview
@@ -142,35 +147,130 @@ export class MessageDispatcher {
     Logger.info("Performance Report:", data);
   }
 
-  private async _handleBellSound(tabId: number, tabLabel: string): Promise<void> {
-    try {
-      vscode.window
-        .showInformationMessage(
-          `Terminal Bell: ${tabLabel || `Tab ${tabId}`}`,
-          "Go to Terminal",
-        )
-        .then((selection) => {
-          if (selection === "Go to Terminal") {
-            this.openTerminal().then(() => {
-              const webview = this.getWebview();
-              if (webview) {
-                webview.postMessage({
-                  command: "switchToTab",
-                  tabId: tabId,
-                });
-              }
+  public handleBellSound(tabId: number, tabLabel: string): void {
+    Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
+    this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
+
+    if (this._bellDebounceTimer) {
+      clearTimeout(this._bellDebounceTimer);
+    }
+
+    this._bellDebounceTimer = setTimeout(() => {
+      this._bellDebounceTimer = null;
+      this._showBellNotification();
+    }, MessageDispatcher.BELL_DEBOUNCE_MS);
+  }
+
+  private _showBellNotification(): void {
+    const bells = new Map(this._pendingBells);
+    this._pendingBells.clear();
+
+    if (bells.size === 0) return;
+
+    const labels = Array.from(bells.values());
+    const body = bells.size === 1
+      ? labels[0]
+      : `${bells.size} terminals: ${labels.join(", ")}`;
+    const lastTabId = Array.from(bells.keys()).pop();
+
+    Logger.info(`Sending bell notification: ${body}`);
+
+    // Cross-window notification via URI — appears in whatever window is focused
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || "Unknown";
+    const params = new URLSearchParams({
+      body,
+      tabId: String(lastTabId ?? ""),
+      folder: workspaceFolder,
+      name: workspaceName,
+    });
+    const uri = `vscode://twilightcoders.alterminal/bell?${params}`;
+
+    if (process.platform === "darwin") {
+      exec(`open "${uri}"`);
+    } else if (process.platform === "win32") {
+      exec(`start "" "${uri}"`);
+    } else {
+      exec(`xdg-open "${uri}"`);
+    }
+  }
+
+  /**
+   * Handle incoming bell URI from any VS Code window.
+   */
+  public handleBellUri(uri: vscode.Uri): void {
+    const params = new URLSearchParams(uri.query);
+    const body = params.get("body") || "Terminal bell";
+    const tabId = params.get("tabId");
+    const folder = params.get("folder");
+    const name = params.get("name") || "project";
+
+    // If this IS the originating window, open terminal and switch tab directly
+    const localFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (folder && localFolder && folder === localFolder) {
+      this.openTerminal().then(() => {
+        setTimeout(() => {
+          const webview = this.getWebview();
+          if (webview && tabId) {
+            webview.postMessage({
+              command: "switchToTab",
+              tabId: Number(tabId),
             });
           }
-        });
-
-      vscode.commands
-        .executeCommand("workbench.action.focusActiveEditorGroup")
-        .then(
-          () => {},
-          () => {},
-        );
-    } catch (error) {
-      Logger.error("Failed to play bell sound:", error);
+        }, 200);
+      });
+      return;
     }
+
+    // Cross-window: show notification, clicking activates originating window + tab
+    vscode.window
+      .showInformationMessage(`🔔 ${name}: ${body}`, "Go to Terminal")
+      .then((selection) => {
+        if (selection === "Go to Terminal" && folder) {
+          // Activate the originating window, then send /focus URI to switch tab
+          exec(`code "${folder}"`, () => {
+            const focusParams = new URLSearchParams({
+              tabId: tabId || "",
+              folder: folder,
+            });
+            const focusUri = `vscode://twilightcoders.alterminal/focus?${focusParams}`;
+            if (process.platform === "darwin") {
+              exec(`open "${focusUri}"`);
+            } else if (process.platform === "win32") {
+              exec(`start "" "${focusUri}"`);
+            } else {
+              exec(`xdg-open "${focusUri}"`);
+            }
+          });
+        }
+      });
+  }
+
+  /**
+   * Handle focus URI — opens terminal panel and switches to the specified tab.
+   * Only acts if the folder matches this window.
+   */
+  public handleFocusUri(uri: vscode.Uri): void {
+    const params = new URLSearchParams(uri.query);
+    const tabId = params.get("tabId");
+    const folder = params.get("folder");
+
+    const localFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+    Logger.info(`Focus URI: tabId=${tabId}, folder match=${folder === localFolder}`);
+
+    if (!folder || !localFolder || folder !== localFolder) return;
+
+    this.openTerminal().then(() => {
+      setTimeout(() => {
+        const webview = this.getWebview();
+        if (webview && tabId) {
+          webview.postMessage({
+            command: "switchToTab",
+            tabId: Number(tabId),
+          });
+        }
+      }, 200);
+    });
   }
 }

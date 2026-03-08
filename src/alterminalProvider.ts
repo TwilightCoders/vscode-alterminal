@@ -39,7 +39,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private fileOperationHandler: FileOperationHandler;
   private tabContextMenuHandler: TabContextMenuHandler;
   private webviewLifecycleManager: WebViewLifecycleManager;
-  private messageDispatcher: MessageDispatcher;
+  public messageDispatcher: MessageDispatcher;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -89,6 +89,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       (msg: any) => this._handleFormatTabTitle(msg),
       () => this._handleWebviewReady(),
       this._serializer ? (msg: any) => this._serializer.handleMessage(msg) : undefined,
+    );
+
+    // Wire PTY-side bell detection to notification handler
+    this._ptyManager.onBell((tabId) =>
+      this.messageDispatcher.handleBellSound(tabId, `Tab ${tabId}`),
     );
 
     // WebViewLifecycleManager needs MessageDispatcher
