@@ -29,6 +29,7 @@ interface SavedCommand {
   label: string;
   count: number;
   lastUsed: string;
+  cwd?: string;
 }
 
 interface VSCodeAPI {
@@ -42,7 +43,7 @@ export class CommandManager {
 
   constructor(
     private vscode: VSCodeAPI,
-    private createTab: (command: string) => void,
+    private createTab: (command: string, cwd?: string) => void,
   ) {
     // Load saved commands asynchronously to avoid blocking extension startup
     this.loadSavedCommands().catch((error) => {
@@ -94,12 +95,13 @@ export class CommandManager {
   /**
    * Add a command to saved commands (or increment usage)
    */
-  async saveCommand(command: string, userLabel?: string | null) {
+  async saveCommand(command: string, userLabel?: string | null, cwd?: string) {
     const existing = this.savedCommands.find(
       (c) => c.command === command,
     );
     if (existing) {
       if (userLabel) existing.label = userLabel; // label update only
+      if (cwd !== undefined) existing.cwd = cwd || undefined;
       // Do NOT increment usage here; usage increments only when launched
     } else {
       this.savedCommands.push({
@@ -107,6 +109,7 @@ export class CommandManager {
         label: userLabel || this.generateLabel(command),
         count: 0,
         lastUsed: new Date().toISOString(),
+        ...(cwd ? { cwd } : {}),
       });
     }
     // Limit: keep newest additions if overflow
@@ -192,13 +195,80 @@ export class CommandManager {
   }
 
   /**
+   * Resolve interactive tokens ({i:prompt}) in a template string.
+   * For cwd fields, uses a folder picker; for command fields, uses an input box.
+   * Returns null if the user cancels any prompt (abort launch).
+   */
+  async resolveInteractiveTokens(template: string, useFolderPicker: boolean): Promise<string | null> {
+    const tokenRegex = /\{i:([^}]+)\}/g;
+    let result = template;
+    let match: RegExpExecArray | null;
+    const tokens: { full: string; prompt: string }[] = [];
+
+    while ((match = tokenRegex.exec(template)) !== null) {
+      tokens.push({ full: match[0], prompt: match[1] });
+    }
+
+    for (const token of tokens) {
+      let value: string | undefined;
+
+      if (useFolderPicker) {
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          canSelectMany: false,
+          openLabel: token.prompt,
+          defaultUri,
+        });
+        value = uris?.[0]?.fsPath;
+      } else {
+        value = await vscode.window.showInputBox({
+          prompt: token.prompt,
+        });
+      }
+
+      if (value === undefined) {
+        return null; // User cancelled
+      }
+
+      result = result.replace(token.full, value);
+    }
+
+    return result;
+  }
+
+  /**
    * Launch a saved command
    */
   async launchSavedCommand(command: string) {
+    const saved = this.savedCommands.find((c) => c.command === command);
+
+    // Resolve interactive tokens in command
+    let resolvedCommand = command;
+    if (/\{i:[^}]+\}/.test(resolvedCommand)) {
+      const resolved = await this.resolveInteractiveTokens(resolvedCommand, false);
+      if (resolved === null) return; // User cancelled
+      resolvedCommand = resolved;
+    }
+
+    // Resolve interactive tokens in cwd
+    let resolvedCwd = saved?.cwd;
+    if (resolvedCwd && /\{i:[^}]+\}/.test(resolvedCwd)) {
+      const resolved = await this.resolveInteractiveTokens(resolvedCwd, true);
+      if (resolved === null) return; // User cancelled
+      resolvedCwd = resolved;
+    }
+
+    // Expand non-interactive template variables in cwd
+    if (resolvedCwd) {
+      resolvedCwd = this.expandCommand(resolvedCwd);
+    }
+
     this._recordUsage(command);
     await this.saveSavedCommands();
     if (this.createTab) {
-      this.createTab(command);
+      this.createTab(resolvedCommand, resolvedCwd);
     }
   }
 
@@ -254,7 +324,12 @@ export class CommandManager {
         placeHolder: "Leave empty for auto-generated label",
       });
 
-      await this.saveCommand(command.trim(), label?.trim() || null);
+      const cwdInput = await this.vscode.window.showInputBox({
+        prompt: "Working directory (optional). Supports {i:prompt}, {workspace}, {workspacePath}, {env.VAR}.",
+        placeHolder: "Leave empty for workspace default",
+      });
+
+      await this.saveCommand(command.trim(), label?.trim() || null, cwdInput?.trim() || undefined);
       this.vscode.window.showInformationMessage(
         `Command "${command}" saved successfully!`,
       );

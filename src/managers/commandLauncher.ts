@@ -15,7 +15,7 @@ import { Logger } from "../utils/logger";
 export class CommandLauncher {
   constructor(
     private readonly commandManager: CommandManager,
-    private readonly onCommandSelected: (command: string) => void,
+    private readonly onCommandSelected: (command: string, cwd?: string) => void,
   ) {}
 
   /**
@@ -63,11 +63,8 @@ export class CommandLauncher {
       });
 
       if (selected) {
-        // Launch the command (this also records usage)
+        // Launch the command (this also records usage and calls createTab internally)
         await this.commandManager.launchSavedCommand(selected.command);
-
-        // Notify callback to create terminal with command
-        this.onCommandSelected(selected.command);
 
         Logger.info(`Launching saved command: ${selected.command}`);
       }
