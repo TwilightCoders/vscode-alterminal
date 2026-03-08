@@ -60,7 +60,6 @@ export class WebViewLifecycleManager {
 
     // Set up components with the webview
     this.ptyManager.setWebviewView(webviewView);
-    this.ptyManager.setScrollback(config.scrollback);
 
     // Always include a unique timestamp to force webview refresh (from PostgreSQL extension pattern)
     const timeNow = new Date().getTime();
@@ -149,7 +148,6 @@ export class WebViewLifecycleManager {
       config,
     });
 
-    this.ptyManager.setScrollback(config.scrollback);
   }
 
   /**

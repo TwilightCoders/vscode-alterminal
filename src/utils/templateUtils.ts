@@ -153,22 +153,4 @@ export class TemplateUtils {
     return htmlTemplate;
   }
 
-  private static loadInitScript(extensionUri: vscode.Uri): string {
-    try {
-      const initScriptPath = path.join(
-        extensionUri.fsPath,
-        "out",
-        "webview",
-        "init.js",
-      );
-      return fs.readFileSync(initScriptPath, "utf8");
-    } catch (error) {
-      console.error("Failed to load init script:", error);
-      // Fallback to basic initialization
-      return `
-                Logger.error('Failed to load initialization script');
-                Logger.info('🚀 Starting Alterminal initialization (fallback)');
-            `;
-    }
-  }
 }

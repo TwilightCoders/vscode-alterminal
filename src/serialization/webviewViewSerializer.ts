@@ -86,34 +86,6 @@ export class WebviewViewSerializer {
   }
 
   /**
-   * Send initialization commands to webview based on saved state
-   */
-  private sendInitializationCommands(): void {
-    if (!this._webviewView) return;
-
-    const savedState = this.loadFromExtensionStorage(this._context);
-
-    if (!this._didInitialViewRestore) {
-      if (
-        savedState &&
-        savedState.terminals &&
-        savedState.terminals.length > 0
-      ) {
-        this._webviewView.webview.postMessage({
-          command: "restoreState",
-          state: savedState,
-          cold: true,
-        });
-      } else {
-        this._webviewView.webview.postMessage({ command: "initializeEmpty" });
-      }
-      this._didInitialViewRestore = true;
-    } else {
-      this._webviewView.webview.postMessage({ command: "focus" });
-    }
-  }
-
-  /**
    * Request state from webview and save it
    */
   public async saveState(): Promise<void> {
@@ -208,19 +180,6 @@ export class WebviewViewSerializer {
     return state;
   }
 
-  /**
-   * Deserialize state back to TabManager
-   *
-   * NOTE: This method is designed for potential future use when we need
-   * extension-side deserialization. Currently, deserialization happens
-   * in the webview context via TabManager.restoreFromState().
-   *
-   * The separation is maintained because:
-   * - WebviewViewSerializer (extension context) handles storage/retrieval
-   * - TabManager (webview context) handles UI restoration and terminal creation
-   */
-  public deserialize(state: PersistedState, tabManager: any): void {
-  }
 
   /**
    * Save state to VS Code's extension storage

@@ -14,8 +14,6 @@ import { Logger } from "../utils/logger";
 export class ConfigurationWatcher {
   private disposables: vscode.Disposable[] = [];
   private onConfigChangedCallback?: (config: AlterminalConfig) => void;
-  private onDeveloperModeCallback?: (enabled: boolean) => void;
-
   constructor(
     private readonly context: vscode.ExtensionContext,
   ) {}
@@ -25,13 +23,6 @@ export class ConfigurationWatcher {
    */
   public onConfigChanged(callback: (config: AlterminalConfig) => void): void {
     this.onConfigChangedCallback = callback;
-  }
-
-  /**
-   * Set callback for when developer mode changes
-   */
-  public onDeveloperModeChanged(callback: (enabled: boolean) => void): void {
-    this.onDeveloperModeCallback = callback;
   }
 
   /**
@@ -80,10 +71,6 @@ export class ConfigurationWatcher {
   public checkDeveloperMode(): boolean {
     const isDevelopment =
       this.context.extensionMode === vscode.ExtensionMode.Development;
-
-    if (this.onDeveloperModeCallback) {
-      this.onDeveloperModeCallback(isDevelopment);
-    }
 
     return isDevelopment;
   }

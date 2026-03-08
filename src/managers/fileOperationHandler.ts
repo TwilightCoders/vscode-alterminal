@@ -33,7 +33,7 @@ export class FileOperationHandler {
     tabId: number,
     fileName: string,
     fileType: string,
-    fileSize: number,
+    _fileSize: number,
     fileData: string,
   ): Promise<void> {
     try {

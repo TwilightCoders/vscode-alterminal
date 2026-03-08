@@ -134,8 +134,6 @@ export class TerminalInstance {
     // Icon for this terminal (can be customized)
     this.icon = null;
 
-    // Per-terminal working directory tracked via OSC 7
-    // Preserve cwd from options if provided (e.g., saved command with cwd)
     if (!this.cwd) this.cwd = null;
 
     // OSC title reported by the running program (via \x1b]0;title\x07 or \x1b]2;title\x07)

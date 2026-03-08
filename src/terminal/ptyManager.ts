@@ -47,10 +47,7 @@ export class PtyManager {
   private _currentWorkingDirs = new Map<number, string>();
   private _userVars = new Map<number, Map<string, string>>();
   private _webviewView?: vscode.WebviewView;
-  private _activeTabId?: number;
   private _visibilityDisposable?: { dispose(): void };
-
-  private _scrollback: number = 1000;
   private _extensionVersion: string = "0.0.0";
   private _extensionPath: string = "";
   private _expandCommand: ((cmd: string) => string) | null = null;
@@ -173,10 +170,6 @@ export class PtyManager {
 
   public setExtensionPath(extensionPath: string) {
     this._extensionPath = extensionPath;
-  }
-
-  public setScrollback(scrollback: number) {
-    this._scrollback = scrollback;
   }
 
   public setWebviewView(webviewView: vscode.WebviewView) {

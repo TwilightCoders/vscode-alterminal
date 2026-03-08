@@ -1,4 +1,3 @@
-import { ContextMenu } from "./contextMenu.js";
 /**
  * Tab Title Manager
  *
@@ -33,7 +32,6 @@ export class TabTitleManager {
   public terminal: any;
   public vscode: any;
   public icon: string;
-  public contextMenu: ContextMenu;
   private _state: number;
   public STATES: {
     NOTIFICATION: number;
@@ -57,8 +55,6 @@ export class TabTitleManager {
     this.vscode = vscode;
     this.icon = icon;
 
-    // Initialize context menu helper
-    this.contextMenu = new ContextMenu(vscode);
 
     // State tracking using bitmasks
     this._state = 0;
@@ -156,20 +152,6 @@ export class TabTitleManager {
     // Context menu is handled by the parent tab element
 
     return labelEl;
-  }
-
-  /**
-   * Show native context menu for tab
-   */
-  showNativeContextMenu(x: number, y: number): void {
-    // Send context menu request to extension host
-    this.contextMenu.showTabContextMenu({
-      tabId: String(this.tabId),
-      terminalType: this.getTerminalType(),
-      launchCommand: this.terminal?.launchCommand || null,
-      x,
-      y,
-    });
   }
 
   /**
@@ -589,22 +571,6 @@ export class TabTitleManager {
     });
   }
 
-  /**
-   * Set custom icon for this terminal and save to workspace
-   */
-  setCustomIcon(iconClass) {
-    // Update the display immediately
-    if (this.regularIcon && !this.hasState(this.STATES.NOTIFICATION)) {
-      this.regularIcon.className = `codicon ${iconClass}`;
-    }
-
-    // Save tab state including new icon
-    this.vscode.postMessage({
-      command: "updateTabIcon",
-      tabId: this.tabId,
-      iconClass: iconClass,
-    });
-  }
 
   /**
    * Keyboard navigation for dropdown
