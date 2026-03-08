@@ -167,7 +167,7 @@ export class TabManager {
       getTerminals: () => this.terminals,
       writeToTerminal: (tabId, data) => this.writeToTerminal(tabId, data),
       ensureInitialized: () => this.ensureInitialized(),
-      createNewTab: (type, cmd) => this.createNewTab(type, cmd),
+      createNewTab: (type, cmd, cwd) => this.createNewTab(type, cmd, cwd),
       closeTab: (tabId) => this.closeTab(tabId),
       switchToTab: (tabId) => this.switchToTab(tabId),
       updateTabLabel: (tabId, label) => this.updateTabLabel(tabId, label),
@@ -292,7 +292,7 @@ export class TabManager {
   /**
    * Create a new terminal tab
    */
-  createNewTab(terminalType = "default", launchCommand = null) {
+  createNewTab(terminalType = "default", launchCommand = null, cwd: string | null = null) {
     // Clear init timeout since we're getting messages from extension
     if (this._initTimeoutId) {
       clearTimeout(this._initTimeoutId);
@@ -339,7 +339,7 @@ export class TabManager {
       this.terminalTheme,
       this.getThemeColor,
       terminalType,
-      { launchCommand },
+      { launchCommand, cwd },
     );
     Logger.debug("🏗️ TerminalInstance created successfully:", terminal);
 

@@ -17,6 +17,7 @@ declare const globalThis: any;
 interface TerminalOptions {
   autoStartPty?: boolean;
   launchCommand?: string | null;
+  cwd?: string | null;
   uuid?: string;
 }
 
@@ -109,9 +110,10 @@ export class TerminalInstance {
     terminalType: string = "default",
     options: TerminalOptions = {},
   ) {
-    const { autoStartPty = true, launchCommand = null, uuid } = options;
+    const { autoStartPty = true, launchCommand = null, cwd = null, uuid } = options;
     this.uuid = uuid || crypto.randomUUID();
     this.launchCommand = launchCommand;
+    this.cwd = cwd;
     this.id = id;
     this.label = label;
     this.vscode = vscode;
@@ -133,7 +135,8 @@ export class TerminalInstance {
     this.icon = null;
 
     // Per-terminal working directory tracked via OSC 7
-    this.cwd = null;
+    // Preserve cwd from options if provided (e.g., saved command with cwd)
+    if (!this.cwd) this.cwd = null;
 
     // OSC title reported by the running program (via \x1b]0;title\x07 or \x1b]2;title\x07)
     this.oscTitle = null;

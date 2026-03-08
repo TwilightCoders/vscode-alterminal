@@ -60,7 +60,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         window: vscode.window,
         commands: vscode.commands,
       },
-      (command: string) => this.createNewTabWithCommand(command),
+      (command: string, cwd?: string) => this.createNewTabWithCommand(command, cwd),
     );
 
     // Initialize managers
@@ -68,7 +68,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.configurationWatcher = new ConfigurationWatcher(context);
     this.commandLauncher = new CommandLauncher(
       this._commandManager,
-      (command: string) => this.createNewTabWithCommand(command),
+      (command: string, cwd?: string) => this.createNewTabWithCommand(command, cwd),
     );
     this._ptyManager.setCommandExpander((cmd) => this._commandManager.expandCommand(cmd));
     this.fileOperationHandler = new FileOperationHandler(this._ptyManager);
@@ -274,11 +274,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   /**
    * Create a new terminal tab with a command
    */
-  public createNewTabWithCommand(cmd: string): void {
+  public createNewTabWithCommand(cmd: string, cwd?: string): void {
     this._view?.webview.postMessage({
       command: "createNewTab",
       terminalType: "command",
       launchCommand: cmd,
+      cwd: cwd || undefined,
     });
   }
 
@@ -344,7 +345,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       qp.matchOnDescription = true;
       qp.matchOnDetail = true;
 
-      // Separator + help item shown at the bottom of every list
+      // Separator + help/settings items shown at the bottom of every list
       const helpSeparator = { label: "Template Variables", kind: vscode.QuickPickItemKind.Separator } as any;
       const helpItem = {
         label: "$(symbol-variable) {workspace}  {workspacePath}  {user}  {platform}  {env.VAR}",
@@ -354,17 +355,26 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         saved: false,
         alwaysShow: true,
       };
+      const editItem = {
+        label: "$(edit) Edit Saved Commands\u2026",
+        description: "",
+        detail: "Open settings to add, remove, or modify saved commands",
+        launchCommand: "",
+        saved: false,
+        alwaysShow: true,
+      };
 
       const buildItems = (value: string) => {
         const items: any[] = saved.map((c) => {
           const expanded = this._commandManager.expandCommand(c.command);
           const preview = expanded !== c.command ? `\u2192 ${expanded}` : undefined;
+          const cwdHint = c.cwd ? `  \u2022  cwd: ${c.cwd}` : "";
           return {
             label: c.label,
             description: c.command,
             detail: preview
-              ? `${preview}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
-              : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`,
+              ? `${preview}${cwdHint}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
+              : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}${cwdHint}`,
             launchCommand: c.command,
             saved: true,
           };
@@ -381,7 +391,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
             saved: false,
           });
         }
-        items.push(helpSeparator, helpItem);
+        items.push(helpSeparator, helpItem, editItem);
         return items;
       };
       qp.items = buildItems("");
@@ -394,13 +404,20 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           const value = qp.value.trim();
           const sel = qp.selectedItems[0];
 
+          // Handle edit settings item
+          if (sel === editItem && !value) {
+            qp.dispose();
+            vscode.commands.executeCommand("workbench.action.openSettings", "alterminal.savedCommands");
+            return;
+          }
+
           // Ignore selection of the help item
           if (sel === helpItem && !value) {
             return;
           }
 
           // Use what they typed if they typed anything, otherwise use selection
-          const commandToRun = value || (sel && sel !== helpItem ? sel.launchCommand : "");
+          const commandToRun = value || (sel && sel !== helpItem && sel !== editItem ? sel.launchCommand : "");
 
           if (!commandToRun) {
             return;

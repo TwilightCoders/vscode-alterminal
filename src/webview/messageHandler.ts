@@ -23,7 +23,7 @@ export interface MessageHandlerCallbacks {
   ensureInitialized: () => void;
   
   // Tab operations
-  createNewTab: (type?: string, cmd?: string | null) => void;
+  createNewTab: (type?: string, cmd?: string | null, cwd?: string | null) => void;
   closeTab: (tabId: number) => void;
   switchToTab: (tabId: number) => void;
   updateTabLabel: (tabId: number, label: string) => void;
@@ -136,7 +136,7 @@ export class MessageHandler {
           break;
 
         case "createNewTab":
-          this.callbacks.createNewTab(message.terminalType, message.launchCommand);
+          this.callbacks.createNewTab(message.terminalType, message.launchCommand, message.cwd);
           break;
 
         case "switchToTab":
