@@ -221,6 +221,22 @@ export class TabManager {
     };
   }
 
+  private _wireBellHandler(terminal: TerminalInstance): void {
+    terminal.onBellReceived = (id: number) => {
+      // Tab UI notification only for inactive tabs
+      if (!terminal.isActive) {
+        this._tabUIManager.showNotification(id);
+      }
+      // Always notify extension host (for OS-level notification)
+      const t = this.terminals.get(id);
+      this.vscode.postMessage({
+        command: "playBellSound",
+        tabId: id,
+        tabLabel: t?.label || `Tab ${id}`,
+      });
+    };
+  }
+
   _findTabIdByCommand(cmd: string | null): number | null {
     if (!cmd) return null;
     for (const [id, term] of this.terminals) {
@@ -351,10 +367,7 @@ export class TabManager {
     // Store the terminal
     this.terminals.set(tabId, terminal);
 
-    // Wire bell notifications to tab UI
-    terminal.onBellReceived = (id: number) => {
-      this._tabUIManager.showNotification(id);
-    };
+    this._wireBellHandler(terminal);
 
     // Create tab DOM element
     this._tabUIManager.createTabElement(tabId, label, this.vscode);
@@ -922,10 +935,7 @@ export class TabManager {
       // Store terminal (Map preserves insertion order)
       this.terminals.set(terminalData.id, terminal);
 
-      // Wire bell notifications to tab UI
-      terminal.onBellReceived = (id: number) => {
-        this._tabUIManager.showNotification(id);
-      };
+      this._wireBellHandler(terminal);
 
       Logger.debug(
         "Stored terminal",

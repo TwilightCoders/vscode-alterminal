@@ -51,6 +51,8 @@ export class PtyManager {
   private _extensionVersion: string = "0.0.0";
   private _extensionPath: string = "";
   private _expandCommand: ((cmd: string) => string) | null = null;
+  private _onBell: ((tabId: number) => void) | null = null;
+
   // Tabs using shell integration (OSC 7) don't need the lsof fallback
   private _shellIntegrationTabs = new Set<number>();
 
@@ -162,6 +164,10 @@ export class PtyManager {
 
   public setCommandExpander(fn: (cmd: string) => string) {
     this._expandCommand = fn;
+  }
+
+  public onBell(fn: (tabId: number) => void) {
+    this._onBell = fn;
   }
 
   public setExtensionVersion(version: string) {
@@ -444,6 +450,18 @@ export class PtyManager {
           const userVars = this._extractUserVars(data);
           if (userVars) {
             this._handleUserVarChange(tabId, userVars);
+          }
+        }
+
+        // Detect bare BEL characters — strip OSC sequences first
+        // so their \x07 terminators aren't mistaken for bells
+        if (this._onBell && data.indexOf("\x07") !== -1) {
+          const stripped = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+          if (stripped.indexOf("\x07") !== -1) {
+            Logger.info(`[Bell] Detected BEL for tabId=${tabId}`);
+            this._onBell(tabId);
+          } else {
+            Logger.debug(`[Bell] BEL was inside OSC sequence, ignoring`);
           }
         }
 

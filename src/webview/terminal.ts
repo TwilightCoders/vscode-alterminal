@@ -339,8 +339,7 @@ export class TerminalInstance {
 
     // Set up bell handler - listen for terminal bell events
     this.bellDisposable = this.terminal.onBell(() => {
-      // Only show indicator if tab is not currently active
-      if (!this.isActive && this.onBellReceived) {
+      if (this.onBellReceived) {
         this.onBellReceived(this.id);
       }
     });
