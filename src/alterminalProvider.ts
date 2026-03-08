@@ -418,6 +418,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
           // Use what they typed if they typed anything, otherwise use selection
           const commandToRun = value || (sel && sel !== helpItem && sel !== editItem ? sel.launchCommand : "");
+          const savedLabel = (!value && sel) ? sel.label : undefined;
 
           if (!commandToRun) {
             return;
@@ -425,7 +426,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           qp.busy = true;
           try {
             if (saved.some((c) => c.command === commandToRun)) {
-              await this._commandManager.launchSavedCommand(commandToRun);
+              await this._commandManager.launchSavedCommand(commandToRun, savedLabel);
             } else {
               this.createNewTabWithCommand(commandToRun);
             }
