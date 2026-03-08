@@ -71,8 +71,8 @@
       },
       {
         "command": "alterminal.newTerminal.command",
-        "title": "Launch Command",
-        "icon": "$(rocket)"
+        "title": "New Terminal",
+        "icon": "$(add)"
       },
       {
         "command": "alterminal.openTerminal",
@@ -157,62 +157,40 @@
     ],
     "submenus": [
       {
-        "id": "alterminal.newTerminal",
-        "label": "More Options",
-        "icon": "$(ellipsis)"
-      },
-      {
-        "id": "alterminal.debug",
-        "label": "Debug",
-        "icon": "$(bug)"
+        "id": "alterminal.tools",
+        "label": "Tools",
+        "icon": "$(tools)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "alterminal.newTerminal.default",
+          "command": "alterminal.newTerminal.command",
           "when": "view == alterminalView",
           "group": "navigation@1"
         },
         {
-          "command": "alterminal.newTerminal.command",
+          "submenu": "alterminal.tools",
           "when": "view == alterminalView",
           "group": "navigation@2"
-        },
+        }
+      ],
+      "alterminal.tools": [
         {
           "command": "alterminal.openSettings",
-          "when": "view == alterminalView",
-          "group": "navigation@3"
+          "group": "1_general@1"
         },
         {
           "command": "alterminal.refresh",
-          "when": "view == alterminalView",
-          "group": "navigation@4"
+          "group": "1_general@2"
         },
-        {
-          "submenu": "alterminal.debug",
-          "when": "view == alterminalView && alterminal.debugMode",
-          "group": "navigation@5"
-        }
-      ],
-      "alterminal.newTerminal": [
-        {
-          "command": "alterminal.newTerminal.shell",
-          "group": "1_terminals@1"
-        },
-        {
-          "command": "alterminal.saveCurrentCommand",
-          "group": "2_commands@1"
-        }
-      ],
-      "alterminal.debug": [
         {
           "command": "alterminal.debugState",
-          "group": "1_debug@1"
+          "group": "2_debug@1"
         },
         {
           "command": "alterminal.clearWorkspaceState",
-          "group": "1_debug@2"
+          "group": "2_debug@2"
         }
       ],
       "commandPalette": [
