@@ -18,6 +18,7 @@ interface TerminalOptions {
   autoStartPty?: boolean;
   launchCommand?: string | null;
   cwd?: string | null;
+  shellPath?: string | null;
   uuid?: string;
 }
 
@@ -78,6 +79,7 @@ export class TerminalInstance {
   titleChangeDisposable: any;
 
   // State tracking
+  shellPath: string | null;
   cwd: string | null;
   oscTitle: string | null;
   userVars: Record<string, string> | null;
@@ -110,10 +112,11 @@ export class TerminalInstance {
     terminalType: string = "default",
     options: TerminalOptions = {},
   ) {
-    const { autoStartPty = true, launchCommand = null, cwd = null, uuid } = options;
+    const { autoStartPty = true, launchCommand = null, cwd = null, shellPath = null, uuid } = options;
     this.uuid = uuid || crypto.randomUUID();
     this.launchCommand = launchCommand;
     this.cwd = cwd;
+    this.shellPath = shellPath;
     this.id = id;
     this.label = label;
     this.vscode = vscode;
@@ -796,6 +799,7 @@ export class TerminalInstance {
       terminalType: this.terminalType,
       launchCommand: this.launchCommand,
       cwd: this.cwd || undefined,
+      shellPath: this.shellPath || undefined,
       cols: cols,
       rows: rows,
     });

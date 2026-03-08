@@ -244,6 +244,7 @@ export class PtyManager {
           message.cols,
           message.rows,
           message.cwd,
+          message.shellPath,
         );
         break;
       case "disposePty":
@@ -307,6 +308,7 @@ export class PtyManager {
     cols?: number,
     rows?: number,
     cwd?: string,
+    shellPath?: string,
   ): void {
     // Only create new PTY process if one doesn't exist for this tab
     if (!this._ptyProcesses.has(tabId)) {
@@ -314,7 +316,7 @@ export class PtyManager {
       this._terminalTypes.set(tabId, terminalType);
 
       // Determine what command/shell to spawn based on terminal type
-      const userShell = this._getDefaultShell();
+      const userShell = shellPath || this._getDefaultShell();
       let command: string;
       let args: string[];
 

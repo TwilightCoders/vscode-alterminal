@@ -167,7 +167,7 @@ export class TabManager {
       getTerminals: () => this.terminals,
       writeToTerminal: (tabId, data) => this.writeToTerminal(tabId, data),
       ensureInitialized: () => this.ensureInitialized(),
-      createNewTab: (type, cmd, cwd) => this.createNewTab(type, cmd, cwd),
+      createNewTab: (type, cmd, cwd, shellPath) => this.createNewTab(type, cmd, cwd, shellPath),
       closeTab: (tabId) => this.closeTab(tabId),
       switchToTab: (tabId) => this.switchToTab(tabId),
       updateTabLabel: (tabId, label) => this.updateTabLabel(tabId, label),
@@ -309,7 +309,7 @@ export class TabManager {
   /**
    * Create a new terminal tab
    */
-  createNewTab(terminalType = "default", launchCommand = null, cwd: string | null = null) {
+  createNewTab(terminalType = "default", launchCommand = null, cwd: string | null = null, shellPath: string | null = null) {
     // Clear init timeout since we're getting messages from extension
     if (this._initTimeoutId) {
       clearTimeout(this._initTimeoutId);
@@ -331,7 +331,7 @@ export class TabManager {
     let label;
     switch (terminalType) {
       case "shell":
-        label = "Shell";
+        label = shellPath ? shellPath.split("/").pop() || "Shell" : "Shell";
         break;
       case "command":
         if (launchCommand) {
@@ -344,7 +344,7 @@ export class TabManager {
         break;
       case "default":
       default:
-        label = "Terminal";
+        label = shellPath ? shellPath.split("/").pop() || "Terminal" : "Terminal";
         break;
     }
 
@@ -356,7 +356,7 @@ export class TabManager {
       this.terminalTheme,
       this.getThemeColor,
       terminalType,
-      { launchCommand, cwd },
+      { launchCommand, cwd, shellPath },
     );
     Logger.debug("🏗️ TerminalInstance created successfully:", terminal);
 

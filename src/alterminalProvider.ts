@@ -11,6 +11,7 @@ import { FileOperationHandler } from "./managers/fileOperationHandler";
 import { TabContextMenuHandler } from "./managers/tabContextMenuHandler";
 import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
 import { MessageDispatcher } from "./managers/messageDispatcher";
+import { ShellDetector } from "./utils/shellDetector";
 
 /**
  * AlterminalProvider
@@ -269,10 +270,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   /**
    * Create a new terminal tab
    */
-  public createNewTab(type?: string): void {
+  public createNewTab(type?: string, shellPath?: string): void {
     this._view?.webview.postMessage({
       command: "createNewTab",
       terminalType: type,
+      shellPath,
     });
   }
 
@@ -330,27 +332,25 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Unified launcher: pick a saved command or type a new one inline.
-   * - Filters saved commands as user types
-   * - Enter with no selection launches typed command (unsaved)
-   * - Selecting saved command increments usage & launches
+   * Unified launcher: shells + saved commands + ad-hoc command input.
+   * - Top section: detected shells (default shell first)
+   * - Middle section: user's saved commands
+   * - Bottom: template variable help + edit saved commands
+   * - Type to filter or enter an ad-hoc command
+   * - Enter with no input opens the default shell
    */
   public async launchCommandPicker(): Promise<void> {
     try {
+      const shells = ShellDetector.detectShells();
       const saved = this._commandManager.getSavedCommands();
-      const qp = vscode.window.createQuickPick<{
-        label: string;
-        description: string;
-        detail?: string;
-        launchCommand: string;
-        saved: boolean;
-      }>();
-      qp.title = "Launch Command";
-      qp.placeholder = "Type a command or use variables: {workspace}, {user}, {env.VAR}";
+
+      const qp = vscode.window.createQuickPick<any>();
+      qp.title = "New Terminal";
+      qp.placeholder = "Select a shell, saved command, or type a command";
       qp.matchOnDescription = true;
       qp.matchOnDetail = true;
 
-      // Separator + help/settings items shown at the bottom of every list
+      // Sentinel items
       const helpSeparator = { label: "Template Variables", kind: vscode.QuickPickItemKind.Separator } as any;
       const helpItem = {
         label: "$(symbol-variable) {workspace}  {workspacePath}  {user}  {platform}  {env.VAR}",
@@ -358,6 +358,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         detail: "Use these in commands to adapt per-workspace. Supports {key:default} and {key?then:else}.",
         launchCommand: "",
         saved: false,
+        isShell: false,
         alwaysShow: true,
       };
       const editItem = {
@@ -366,68 +367,110 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         detail: "Open settings to add, remove, or modify saved commands",
         launchCommand: "",
         saved: false,
+        isShell: false,
         alwaysShow: true,
       };
 
+      // Shell items
+      const shellSeparator = { label: "Shells", kind: vscode.QuickPickItemKind.Separator } as any;
+      const shellItems = shells.map((s) => ({
+        label: `$(terminal) ${s.label}${s.isDefault ? " (default)" : ""}`,
+        description: s.path,
+        launchCommand: "",
+        saved: false,
+        isShell: true,
+        shellPath: s.path,
+      }));
+
+      // Saved command items
+      const savedSeparator = saved.length > 0
+        ? { label: "Saved Commands", kind: vscode.QuickPickItemKind.Separator } as any
+        : null;
+
       const buildItems = (value: string) => {
-        const items: any[] = saved.map((c) => {
-          const expanded = this._commandManager.expandCommand(c.command);
-          const preview = expanded !== c.command ? `\u2192 ${expanded}` : undefined;
-          const cwdHint = c.cwd ? `  \u2022  cwd: ${c.cwd}` : "";
-          return {
-            label: c.label,
-            description: c.command,
-            detail: preview
-              ? `${preview}${cwdHint}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
-              : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}${cwdHint}`,
-            launchCommand: c.command,
-            saved: true,
-          };
-        });
+        const items: any[] = [];
+
+        // Ad-hoc command if user typed something
         const trimmed = value.trim();
         if (trimmed && !saved.some((c) => c.command === trimmed)) {
           const expanded = this._commandManager.expandCommand(trimmed);
           const preview = expanded !== trimmed ? `\u2192 ${expanded}` : undefined;
-          items.unshift({
+          items.push({
             label: `Run: ${trimmed}`,
             description: "(new command)",
-            detail: preview || "Press Enter to launch (not yet saved)",
+            detail: preview || "Press Enter to launch",
             launchCommand: trimmed,
             saved: false,
+            isShell: false,
           });
         }
+
+        // Shells
+        items.push(shellSeparator, ...shellItems);
+
+        // Saved commands
+        if (savedSeparator) {
+          items.push(savedSeparator);
+          for (const c of saved) {
+            const expanded = this._commandManager.expandCommand(c.command);
+            const preview = expanded !== c.command ? `\u2192 ${expanded}` : undefined;
+            const cwdHint = c.cwd ? `  \u2022  cwd: ${c.cwd}` : "";
+            items.push({
+              label: c.label,
+              description: c.command,
+              detail: preview
+                ? `${preview}${cwdHint}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
+                : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}${cwdHint}`,
+              launchCommand: c.command,
+              saved: true,
+              isShell: false,
+            });
+          }
+        }
+
         items.push(helpSeparator, helpItem, editItem);
         return items;
       };
+
       qp.items = buildItems("");
+
       const disposables: vscode.Disposable[] = [];
       disposables.push(
-        qp.onDidChangeValue((val) => {
+        qp.onDidChangeValue((val: string) => {
           qp.items = buildItems(val);
         }),
         qp.onDidAccept(async () => {
           const value = qp.value.trim();
           const sel = qp.selectedItems[0];
 
-          // Handle edit settings item
+          // Handle sentinel items
           if (sel === editItem && !value) {
             qp.dispose();
-            vscode.commands.executeCommand("workbench.action.openSettings", "alterminal.savedCommands");
+            vscode.commands.executeCommand("workbench.action.openSettingsJson", {
+              revealSetting: { key: "alterminal.savedCommands" },
+            });
+            return;
+          }
+          if (sel === helpItem && !value) return;
+
+          // Shell selected
+          if (!value && sel?.isShell) {
+            qp.dispose();
+            this.createNewTab("default", sel.shellPath);
             return;
           }
 
-          // Ignore selection of the help item
-          if (sel === helpItem && !value) {
-            return;
-          }
-
-          // Use what they typed if they typed anything, otherwise use selection
-          const commandToRun = value || (sel && sel !== helpItem && sel !== editItem ? sel.launchCommand : "");
+          // Command (typed or selected saved command)
+          const commandToRun = value || (sel && !sel.isShell && sel !== helpItem && sel !== editItem ? sel.launchCommand : "");
           const savedLabel = (!value && sel) ? sel.label : undefined;
 
           if (!commandToRun) {
+            // No input, no selection change — open default shell
+            qp.dispose();
+            this.createNewTab();
             return;
           }
+
           qp.busy = true;
           try {
             if (saved.some((c) => c.command === commandToRun)) {
