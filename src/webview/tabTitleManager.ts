@@ -165,15 +165,6 @@ export class TabTitleManager {
   }
 
   /**
-   * Setup event listeners for icon interactions
-   */
-  setupEventListeners() {
-    if (!this.iconContainer) return;
-
-    // No event listeners needed - context menu is handled by parent tab element
-  }
-
-  /**
    * Check if this is a command tab
    */
   isCommandTab() {
