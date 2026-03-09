@@ -819,169 +819,128 @@ export class TabManager {
     Logger.debug("TabManager.restoreFromState() called with:", {
       hasState: !!savedState,
       terminalCount: savedState?.terminals?.length,
-      terminals: savedState?.terminals?.map((t) => ({
-        id: t.id,
-        label: t.label,
-        type: t.terminalType,
-      })),
     });
 
     // If no state or empty state, manufacture a default state
-    if (
-      !savedState ||
-      !savedState.terminals ||
-      savedState.terminals.length === 0
-    ) {
-      Logger.warn("⚠️ No valid saved state, manufacturing default state");
+    if (!savedState?.terminals?.length) {
+      Logger.warn("No valid saved state, manufacturing default state");
       savedState = this.createDefaultState();
     }
 
-    // Only dispose existing terminals if we actually have any
+    this._clearExistingState();
+
+    // Recreate terminals from saved state (in the saved order)
+    for (const terminalData of savedState.terminals) {
+      this._restoreSingleTerminal(terminalData, isColdBoot);
+    }
+
+    this._activateRestoredTab(savedState.activeTabId);
+    this._finalizeRestore(savedState);
+  }
+
+  /**
+   * Dispose existing terminals and clear tab UI before restore.
+   */
+  private _clearExistingState(): void {
     if (this.terminals.size > 0) {
-      Logger.debug("Disposing existing terminals before restore");
       this.dispose();
     }
     this.terminals.clear();
     this.activeTabId = null;
 
-    // Clear tab UI
     const tabBar = document.getElementById("tab-bar");
     if (tabBar) {
-      const existingTabs = tabBar.querySelectorAll(".tab");
-      existingTabs.forEach((tab) => tab.remove());
+      tabBar.querySelectorAll(".tab").forEach((tab) => tab.remove());
     }
+  }
 
-    // Recreate terminals from saved state (in the saved order)
-    Logger.debug(
-      "Starting to recreate",
-      savedState.terminals.length,
-      "terminals",
+  /**
+   * Recreate a single terminal from saved state data.
+   */
+  private _restoreSingleTerminal(terminalData: any, isColdBoot: boolean): void {
+    const terminal = new TerminalInstance(
+      terminalData.id,
+      terminalData.label,
+      this.vscode,
+      this.terminalTheme,
+      this.getThemeColor,
+      terminalData.terminalType || "default",
+      { autoStartPty: false, uuid: terminalData.uuid },
     );
-    let maxRestoreDelay = 0;
-    for (const terminalData of savedState.terminals) {
-      Logger.debug("🔄 Creating terminal from state:", {
-        id: terminalData.id,
-        label: terminalData.label,
-        type: terminalData.terminalType,
-      });
-      Logger.debug("🔄 About to create TerminalInstance from restore...");
-      const terminal = new TerminalInstance(
-        terminalData.id,
-        terminalData.label,
-        this.vscode,
-        this.terminalTheme,
-        this.getThemeColor,
-        terminalData.terminalType || "default",
-        { autoStartPty: false, uuid: terminalData.uuid }, // delay PTY spawn until after restored content is written
-      );
-      Logger.warn("🔄 TerminalInstance created from restore:", terminal);
 
-      // Create container and attach
-      const container = this.createTerminalContainer(terminalData.id);
-      terminal.attachToContainer(container);
+    // Create container and attach
+    const container = this.createTerminalContainer(terminalData.id);
+    terminal.attachToContainer(container);
 
-      // Inject cold boot banner BEFORE first restore to avoid duplicate content writes
-      if (isColdBoot && !terminalData.launchCommand) {
-        const existingContent = terminalData.buffer;
-        if (existingContent) {
-          Logger.debug(
-            "🏁 Decorating cold boot content prior to restore for terminal",
-            terminalData.id,
-          );
-          terminalData.buffer =
-            existingContent +
-            "\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n";
-        }
-      }
+    // Inject cold boot banner before restore
+    if (isColdBoot && !terminalData.launchCommand && terminalData.buffer) {
+      terminalData.buffer +=
+        "\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n";
+    }
 
-      // Restore terminal state (includes label, terminalType, launchCommand, and modes) exactly once
-      terminal.restoreFromState(terminalData);
+    // Restore terminal state (label, terminalType, launchCommand, modes, buffer)
+    terminal.restoreFromState(terminalData);
 
-      if (
-        terminal.whenOpened &&
-        typeof terminal.whenOpened.then === "function"
-      ) {
-        terminal.whenOpened.then(() => {
-          try {
-            terminal.startDeferredPtyIfNeeded();
-          } catch (e) {
-            Logger.error("Deferred PTY start error:", e);
-          }
-          try {
-            const snap = terminal.serialize();
-            if (snap && snap.length) {
-              Logger.debug(
-                `📌 Anchored snapshot post-open for terminal ${terminal.id} (chars=${snap.length})`,
-              );
-            }
-          } catch (e) {
-            Logger.warn("Failed to update tab context:", e);
-          }
-        });
-      } else {
-        // Fallback immediate start if promise missing
+    // Start deferred PTY after terminal is ready
+    if (terminal.whenOpened && typeof terminal.whenOpened.then === "function") {
+      terminal.whenOpened.then(() => {
+        try { terminal.startDeferredPtyIfNeeded(); }
+        catch (e) { Logger.error("Deferred PTY start error:", e); }
         try {
-          terminal.startDeferredPtyIfNeeded();
-        } catch (e) {
-          Logger.error("Deferred PTY start error (no whenOpened):", e);
-        }
-      }
-
-      // Update next tab ID if needed
-      if (terminalData.id >= this.nextTabId) {
-        this.nextTabId = terminalData.id + 1;
-      }
-
-      // Store terminal (Map preserves insertion order)
-      this.terminals.set(terminalData.id, terminal);
-
-      this._wireBellHandler(terminal);
-
-      Logger.debug(
-        "Stored terminal",
-        terminalData.id,
-        "- Current terminal count:",
-        this.terminals.size,
-      );
-
-      // Create tab element with saved label as initial display
-      const labelForTab = terminalData.label || "Terminal";
-      this._tabUIManager.createTabElement(terminalData.id, labelForTab, this.vscode);
-
-      // Re-render the template with current context
-      try {
-        this.requestFormattedTitle(terminalData.id);
-      } catch (e) {
-        Logger.warn("Failed to render title on restore:", e);
-      }
-
-      // PTY process creation is now handled by the Terminal instance itself
+          const snap = terminal.serialize();
+          if (snap?.length) {
+            Logger.debug(`Anchored snapshot post-open for terminal ${terminal.id} (chars=${snap.length})`);
+          }
+        } catch (e) { Logger.warn("Failed to update tab context:", e); }
+      });
+    } else {
+      try { terminal.startDeferredPtyIfNeeded(); }
+      catch (e) { Logger.error("Deferred PTY start error (no whenOpened):", e); }
     }
 
-    // Delay switching to active tab until after all terminals have been restored
-    const targetActiveTabId =
-      savedState.activeTabId && this.terminals.has(savedState.activeTabId)
-        ? savedState.activeTabId
-        : Array.from(this.terminals.keys())[0];
+    // Track next available ID
+    if (terminalData.id >= this.nextTabId) {
+      this.nextTabId = terminalData.id + 1;
+    }
 
-    if (targetActiveTabId) {
-      // Wait for all terminals to be opened before switching to active tab
-      const allOpenPromises = Array.from(this.terminals.values()).map((t) =>
-        t.whenOpened.catch(() => {}),
-      );
+    this.terminals.set(terminalData.id, terminal);
+    this._wireBellHandler(terminal);
+
+    // Create tab UI element
+    this._tabUIManager.createTabElement(
+      terminalData.id,
+      terminalData.label || "Terminal",
+      this.vscode,
+    );
+
+    // Re-render the template with current context
+    try { this.requestFormattedTitle(terminalData.id); }
+    catch (e) { Logger.warn("Failed to render title on restore:", e); }
+  }
+
+  /**
+   * Wait for all terminals to open, then switch to the saved active tab.
+   */
+  private _activateRestoredTab(savedActiveTabId: number | null): void {
+    const targetId = savedActiveTabId && this.terminals.has(savedActiveTabId)
+      ? savedActiveTabId
+      : Array.from(this.terminals.keys())[0];
+
+    if (targetId) {
+      const allOpenPromises = Array.from(this.terminals.values())
+        .map((t) => t.whenOpened.catch(() => {}));
       Promise.all(allOpenPromises).then(() => {
-        Logger.debug(
-          "🔄 All terminals opened, now switching to active tab:",
-          targetActiveTabId,
-        );
-        this.switchToTab(targetActiveTabId);
+        this.switchToTab(targetId);
       });
     }
+  }
 
-    // Show the interface after restoring
+  /**
+   * Show interface, persist state, and clean up init timeout after restore.
+   */
+  private _finalizeRestore(savedState: any): void {
     this._layoutManager.showInterface();
 
-    // Clear the init timeout since we successfully received state
     if (this._initTimeoutId) {
       clearTimeout(this._initTimeoutId);
       this._initTimeoutId = null;
@@ -994,31 +953,8 @@ export class TabManager {
       timestamp: Date.now(),
     });
 
-    // Immediate post-restore baseline save (terminals mark ready instantly now)
-    try {
-      for (const [id, term] of this.terminals) {
-        try {
-          const state = term.getState();
-          Logger.debug("🔍 Restored terminal verification", {
-            id,
-            label: state.label,
-            bufferLength: (state.buffer || "").length,
-          });
-        } catch (e) {
-      Logger.warn("Operation failed:", e);
-    }
-      }
-    } catch (e) {
-      Logger.warn("Operation failed:", e);
-    }
-    Logger.debug("🧷 Post-restore immediate baseline save");
     this.saveToLocalState();
-    Logger.debug(
-      "Restore complete - Final terminal count:",
-      this.terminals.size,
-      "Active tab:",
-      this.activeTabId,
-    );
+    Logger.debug("Restore complete -", this.terminals.size, "terminals, active tab:", this.activeTabId);
   }
 
   /**
@@ -1090,9 +1026,6 @@ export class TabManager {
     }
   }
 
-  /**
-   * Debounced global state save with maxWait safeguard so constant activity still persists.
-   */
   /**
    * Check if any terminal has unsaved buffer changes.
    */
