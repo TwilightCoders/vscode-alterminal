@@ -65,20 +65,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(disposable);
 
-  // Register URI handler for cross-window bell notifications
-  context.subscriptions.push(
-    vscode.window.registerUriHandler({
-      handleUri(uri: vscode.Uri) {
-        Logger.info(`URI handler: ${uri.path}`);
-        if (uri.path === "/bell") {
-          provider.messageDispatcher?.handleBellUri(uri);
-        } else if (uri.path === "/focus") {
-          provider.messageDispatcher?.handleFocusUri(uri);
-        }
-      },
-    }),
-  );
-
   // Create status bar item
   const statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,

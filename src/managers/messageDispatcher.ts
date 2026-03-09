@@ -245,92 +245,25 @@ export class MessageDispatcher {
       : `${bells.size} terminals: ${labels.join(", ")}`;
     const lastTabId = Array.from(bells.keys()).pop();
 
-    Logger.info(`Sending bell notification: ${body}`);
+    Logger.info(`Bell notification: ${body}`);
 
-    // Cross-window notification via URI — appears in whatever window is focused
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-    const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || "Unknown";
-    const params = new URLSearchParams({
-      body,
-      tabId: String(lastTabId ?? ""),
-      folder: workspaceFolder,
-      name: workspaceName,
-    });
-    const uri = vscode.Uri.parse(`vscode://twilightcoders.alterminal/bell?${params}`);
-    vscode.env.openExternal(uri);
-  }
-
-  /**
-   * Handle incoming bell URI from any VS Code window.
-   */
-  public handleBellUri(uri: vscode.Uri): void {
-    const params = new URLSearchParams(uri.query);
-    const body = params.get("body") || "Terminal bell";
-    const tabId = params.get("tabId");
-    const folder = params.get("folder");
-    const name = params.get("name") || "project";
-
-    // If this IS the originating window, open terminal and switch tab directly
-    const localFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (folder && localFolder && folder === localFolder) {
-      this.clearBellIndicator();
-      this.openTerminal().then(() => {
+    // Local notification — no URI routing to avoid focus stealing.
+    // Cross-window visibility is provided by the window title bell indicator.
+    vscode.window
+      .showInformationMessage(`${body}`, "Go to Terminal")
+      .then(async (selection) => {
+        if (selection !== "Go to Terminal") return;
+        this.clearBellIndicator();
+        await this.openTerminal();
         setTimeout(() => {
           const webview = this.getWebview();
-          if (webview && tabId) {
+          if (webview && lastTabId !== undefined) {
             webview.postMessage({
               command: "switchToTab",
-              tabId: Number(tabId),
+              tabId: Number(lastTabId),
             });
           }
         }, 200);
       });
-      return;
-    }
-
-    // Cross-window: show notification, clicking activates originating window + tab
-    vscode.window
-      .showInformationMessage(`🔔 ${name}: ${body}`, "Go to Terminal")
-      .then(async (selection) => {
-        if (selection === "Go to Terminal" && folder) {
-          // Activate the originating window via VS Code API
-          await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(folder), { forceNewWindow: false });
-          // Send /focus URI to switch to the correct tab
-          const focusParams = new URLSearchParams({
-            tabId: tabId || "",
-            folder: folder,
-          });
-          const focusUri = vscode.Uri.parse(`vscode://twilightcoders.alterminal/focus?${focusParams}`);
-          vscode.env.openExternal(focusUri);
-        }
-      });
-  }
-
-  /**
-   * Handle focus URI — opens terminal panel and switches to the specified tab.
-   * Only acts if the folder matches this window.
-   */
-  public handleFocusUri(uri: vscode.Uri): void {
-    const params = new URLSearchParams(uri.query);
-    const tabId = params.get("tabId");
-    const folder = params.get("folder");
-
-    const localFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-    Logger.info(`Focus URI: tabId=${tabId}, folder match=${folder === localFolder}`);
-
-    if (!folder || !localFolder || folder !== localFolder) return;
-
-    this.openTerminal().then(() => {
-      setTimeout(() => {
-        const webview = this.getWebview();
-        if (webview && tabId) {
-          webview.postMessage({
-            command: "switchToTab",
-            tabId: Number(tabId),
-          });
-        }
-      }, 200);
-    });
   }
 }
