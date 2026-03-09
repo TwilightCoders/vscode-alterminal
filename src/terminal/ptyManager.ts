@@ -582,7 +582,9 @@ export class PtyManager {
       const fs = require("fs").promises;
 
       const tempDir = os.tmpdir();
-      const tempFileName = `alterminal-${Date.now()}-${fileName}`;
+      // Strip path separators to prevent directory traversal
+      const safeName = path.basename(fileName).replace(/[/\\]/g, "_");
+      const tempFileName = `alterminal-${Date.now()}-${safeName}`;
       const tempFilePath = path.join(tempDir, tempFileName);
 
       // Handle different data formats
