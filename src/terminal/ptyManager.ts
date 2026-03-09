@@ -35,6 +35,10 @@
 
 import * as vscode from "vscode";
 import * as pty from "@lydell/node-pty";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
+import { execFile, execSync } from "child_process";
 import { Logger } from "../utils/logger";
 import { Debouncer } from "../utils/debouncer";
 import { TERMINAL_DEFAULTS } from "../constants";
@@ -392,22 +396,22 @@ export class PtyManager {
       // Set up shell integration for CWD reporting via OSC 7.
       // Each shell type uses a different injection mechanism.
       const shellIntEnv: Record<string, string> = {};
-      const shellBase = require("path").basename(command).toLowerCase();
+      const shellBase = path.basename(command).toLowerCase();
       let hasShellIntegration = false;
 
       if (this._extensionPath && terminalType !== "command") {
         if (shellBase === "zsh" || shellBase.startsWith("zsh")) {
-          const zdotdir = require("path").join(this._extensionPath, "shell-integration", "zsh");
+          const zdotdir = path.join(this._extensionPath, "shell-integration", "zsh");
           shellIntEnv.ALTERMINAL_ORIG_ZDOTDIR = process.env.ZDOTDIR || process.env.HOME || "";
           shellIntEnv.ZDOTDIR = zdotdir;
           hasShellIntegration = true;
         } else if (shellBase === "bash" || shellBase.startsWith("bash")) {
-          const bashInit = require("path").join(this._extensionPath, "shell-integration", "bash.sh");
+          const bashInit = path.join(this._extensionPath, "shell-integration", "bash.sh");
           shellIntEnv.ALTERMINAL_SHELL_INIT = bashInit;
           shellIntEnv.PROMPT_COMMAND = `. "$ALTERMINAL_SHELL_INIT"`;
           hasShellIntegration = true;
         } else if (shellBase === "fish") {
-          const fishInit = require("path").join(this._extensionPath, "shell-integration", "fish.fish");
+          const fishInit = path.join(this._extensionPath, "shell-integration", "fish.fish");
           args.push("--init-command", `source ${fishInit}`);
           hasShellIntegration = true;
         }
@@ -577,10 +581,6 @@ export class PtyManager {
     tabId: number,
   ): Promise<void> {
     try {
-      const os = require("os");
-      const path = require("path");
-      const fs = require("fs").promises;
-
       const tempDir = os.tmpdir();
       // Strip path separators to prevent directory traversal
       const safeName = path.basename(fileName).replace(/[/\\]/g, "_");
@@ -598,8 +598,8 @@ export class PtyManager {
         buffer = Buffer.from(fileData, "utf8");
       }
 
-      await fs.writeFile(tempFilePath, buffer);
-      await fs.chmod(tempFilePath, 0o644);
+      await fs.promises.writeFile(tempFilePath, buffer);
+      await fs.promises.chmod(tempFilePath, 0o644);
 
       // Send the temp file path
       this._ptyProcesses.get(tabId)?.write(`'${tempFilePath}' `);
@@ -691,14 +691,12 @@ export class PtyManager {
   private _checkCwdAsync(tabId: number, pid: number): void {
     try {
       if (process.platform === "linux") {
-        const fs = require("fs");
         fs.readlink(`/proc/${pid}/cwd`, (err: any, cwd: string) => {
           if (!err && cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
             this._handleCwdChange(tabId, cwd);
           }
         });
       } else if (process.platform === "darwin") {
-        const { execFile } = require("child_process");
         execFile("lsof", ["-a", "-d", "cwd", "-Fn", "-p", String(pid)], {
           encoding: "utf8",
           timeout: 2000,
@@ -760,7 +758,6 @@ export class PtyManager {
 
       // Look for pwsh (PowerShell Core) or powershell (Windows PowerShell)
       try {
-        const { execSync } = require('child_process');
         try {
           execSync('pwsh.exe -v', { stdio: 'ignore' });
           return 'pwsh.exe';
