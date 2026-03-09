@@ -21,7 +21,9 @@ export interface PerformanceData {
 export class MessageDispatcher {
   private _bellDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _pendingBells: Map<number, string> = new Map();
+  private _unreadBellCount: number = 0;
   private static readonly BELL_DEBOUNCE_MS = 3000;
+  private static readonly TITLE_CONTEXT_KEY = "alterminal:bellIndicator";
 
   constructor(
     private readonly ptyManager: PtyManager,
@@ -150,6 +152,10 @@ export class MessageDispatcher {
     Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
     this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
 
+    // Update window title bell indicator
+    this._unreadBellCount++;
+    this._updateTitleIndicator();
+
     if (this._bellDebounceTimer) {
       clearTimeout(this._bellDebounceTimer);
     }
@@ -158,6 +164,42 @@ export class MessageDispatcher {
       this._bellDebounceTimer = null;
       this._showBellNotification();
     }, MessageDispatcher.BELL_DEBOUNCE_MS);
+  }
+
+  /**
+   * Clear the window title bell indicator (called when panel becomes visible).
+   */
+  public clearBellIndicator(): void {
+    if (this._unreadBellCount === 0) return;
+    this._unreadBellCount = 0;
+    this._updateTitleIndicator();
+  }
+
+  /**
+   * Register the window title variable. Call once at activation.
+   */
+  public static registerTitleVariable(): void {
+    vscode.commands.executeCommand(
+      "setContext",
+      MessageDispatcher.TITLE_CONTEXT_KEY,
+      "",
+    );
+    vscode.commands.executeCommand(
+      "registerWindowTitleVariable",
+      "alterminalBell",
+      MessageDispatcher.TITLE_CONTEXT_KEY,
+    );
+  }
+
+  private _updateTitleIndicator(): void {
+    const value = this._unreadBellCount > 0
+      ? this._unreadBellCount === 1 ? "\u{1F514}" : `\u{1F514}${this._unreadBellCount}`
+      : "";
+    vscode.commands.executeCommand(
+      "setContext",
+      MessageDispatcher.TITLE_CONTEXT_KEY,
+      value,
+    );
   }
 
   private _showBellNotification(): void {
@@ -200,6 +242,7 @@ export class MessageDispatcher {
     // If this IS the originating window, open terminal and switch tab directly
     const localFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (folder && localFolder && folder === localFolder) {
+      this.clearBellIndicator();
       this.openTerminal().then(() => {
         setTimeout(() => {
           const webview = this.getWebview();

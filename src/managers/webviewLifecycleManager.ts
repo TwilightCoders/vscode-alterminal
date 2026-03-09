@@ -159,6 +159,7 @@ export class WebViewLifecycleManager {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became visible");
+        this.messageDispatcher.clearBellIndicator();
       } else {
         Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became hidden");
         // Webview hidden - mark as not initialized so next show triggers restore

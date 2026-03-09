@@ -6,6 +6,7 @@ import { AlterminalProvider } from "./alterminalProvider";
 import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
+import { MessageDispatcher } from "./managers/messageDispatcher";
 
 export function activate(context: vscode.ExtensionContext) {
   // Determine dev mode - enable for development, NODE_ENV, or preview versions
@@ -33,6 +34,9 @@ export function activate(context: vscode.ExtensionContext) {
     isDebugMode,
   );
 
+  // Register window title variable for bell indicator
+  // Users can add ${alterminalBell} to their window.title setting
+  MessageDispatcher.registerTitleVariable();
 
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
