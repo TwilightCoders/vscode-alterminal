@@ -41,6 +41,7 @@ import * as fs from "fs";
 import { execFile } from "child_process";
 import { Logger } from "../utils/logger";
 import { Debouncer } from "../utils/debouncer";
+import { BellDetector } from "./bellDetector";
 import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
 
@@ -60,6 +61,8 @@ export class PtyManager {
 
   // Tabs using shell integration (OSC 7) don't need the lsof fallback
   private _shellIntegrationTabs = new Set<number>();
+
+  private _bellDetector = new BellDetector();
 
   // Buffer for PTY output when webview is hidden
   private _outputBuffer = new Map<number, string[]>();
@@ -460,13 +463,10 @@ export class PtyManager {
           }
         }
 
-        // Detect bare BEL characters (\x07) — strip OSC sequences first
-        // so their \x07 terminators aren't mistaken for bells.
-        if (this._onBell && data.indexOf("\x07") !== -1) {
-          const stripped = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
-          if (stripped.indexOf("\x07") !== -1) {
-            this._onBell(tabId);
-          }
+        // Detect bare BEL characters (\x07) — delegates to BellDetector
+        // which handles chunked OSC sequences across data events.
+        if (this._onBell && this._bellDetector.detect(tabId, data)) {
+          this._onBell(tabId);
         }
 
         // Filter out VS Code-specific escape sequences that can cause focus stealing
@@ -566,6 +566,7 @@ export class PtyManager {
     this._currentWorkingDirs.delete(tabId);
     this._userVars.delete(tabId);
     this._shellIntegrationTabs.delete(tabId);
+    this._bellDetector.delete(tabId);
     Debouncer.cancel(`process-check-${tabId}`);
 
     // Clear output buffer for this tab
