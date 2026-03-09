@@ -5,7 +5,7 @@ import { MessageHandler, MessageHandlerCallbacks } from "./messageHandler.js";
 import { KeyboardManager } from "./keyboardManager.js";
 import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
-import { Debouncer } from "./debouncer.js";
+import { Debouncer } from "../utils/debouncer.js";
 
 // Extend Window interface for webview globals
 declare const window: Window & {

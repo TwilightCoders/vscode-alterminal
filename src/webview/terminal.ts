@@ -1,7 +1,7 @@
 import { InputHandler } from "./inputHandler.js";
 import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { Logger } from "./logger.js";
-import { Debouncer } from "./debouncer.js";
+import { Debouncer } from "../utils/debouncer.js";
 import { TERMINAL_DEFAULTS } from "../constants.js";
 
 // Type declarations for xterm.js and addons (loaded dynamically in webview)
