@@ -41,10 +41,21 @@ export const TERMINAL_SEQUENCES = {
 } as const;
 
 // VS Code Keyboard Shortcuts (pass-through to VS Code)
-export const VSCODE_SHORTCUTS = [
-  { key: "F5", ctrlKey: false, shiftKey: false, altKey: false },
+export const VSCODE_SHORTCUTS: ReadonlyArray<{
+  key: string;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  metaKey?: boolean;
+}> = [
+  // Function keys
   { key: "F1", ctrlKey: false, shiftKey: false, altKey: false },
+  { key: "F5", ctrlKey: false, shiftKey: false, altKey: false },
+  { key: "F11", ctrlKey: false, shiftKey: false, altKey: false },
+  // Command palette
   { key: "p", ctrlKey: true, shiftKey: true, altKey: false },
+  { key: "P", ctrlKey: true, shiftKey: true, altKey: false },
+  // Common editor shortcuts
   { key: "k", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "w", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "t", ctrlKey: true, shiftKey: false, altKey: false },
@@ -55,10 +66,16 @@ export const VSCODE_SHORTCUTS = [
   { key: "h", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "g", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "b", ctrlKey: true, shiftKey: false, altKey: false },
+  { key: ",", ctrlKey: true, shiftKey: false, altKey: false },
+  // Terminal toggle
   { key: "`", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "j", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: ",", ctrlKey: true, shiftKey: false, altKey: false },
+  // Tab navigation
   { key: "Tab", ctrlKey: true, shiftKey: false, altKey: false },
   { key: "Tab", ctrlKey: true, shiftKey: true, altKey: false },
   { key: "PageUp", ctrlKey: true, shiftKey: false, altKey: false },
-] as const;
+  // Zoom
+  { key: "=", ctrlKey: true, shiftKey: false, altKey: false },
+  { key: "-", ctrlKey: true, shiftKey: false, altKey: false },
+  { key: "0", ctrlKey: true, shiftKey: false, altKey: false },
+];

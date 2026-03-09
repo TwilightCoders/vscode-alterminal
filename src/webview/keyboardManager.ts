@@ -1,65 +1,24 @@
 /**
  * Keyboard Manager
- * 
+ *
  * Handles document-level keyboard shortcuts for the webview.
  * - VS Code shortcut passthrough
  * - Terminal-specific shortcuts (clear, reset)
- * 
+ *
  * Note: Per-terminal key handling (navigation, input) is in InputHandler.
  * This module handles webview-global shortcuts only.
  */
+
+import { VSCODE_SHORTCUTS } from "../constants.js";
 
 export interface KeyboardManagerCallbacks {
   clearActiveTerminal: () => void;
   resetActiveTerminal: () => void;
 }
 
-/**
- * VS Code shortcuts that should be passed through to the editor
- */
-const VS_CODE_SHORTCUTS: Array<{
-  key: string;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
-  metaKey?: boolean;
-}> = [
-  // Function keys
-  { key: "F5", ctrlKey: false, shiftKey: false, altKey: false },
-  { key: "F1", ctrlKey: false, shiftKey: false, altKey: false },
-  { key: "F11", ctrlKey: false, shiftKey: false, altKey: false },
-  
-  // Command palette
-  { key: "p", ctrlKey: true, shiftKey: true, altKey: false },
-  { key: "P", ctrlKey: true, shiftKey: true, altKey: false },
-  
-  // Common editor shortcuts
-  { key: "n", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "o", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "s", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "w", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "g", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "f", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "h", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "b", ctrlKey: true, shiftKey: false, altKey: false },
-  
-  // Terminal toggle
-  { key: "`", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "j", ctrlKey: true, shiftKey: false, altKey: false },
-  
-  // Tab navigation
-  { key: "Tab", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "Tab", ctrlKey: true, shiftKey: true, altKey: false },
-  
-  // Zoom
-  { key: "=", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "-", ctrlKey: true, shiftKey: false, altKey: false },
-  { key: "0", ctrlKey: true, shiftKey: false, altKey: false },
-];
-
 export class KeyboardManager {
   private callbacks: KeyboardManagerCallbacks;
-  private shortcuts: typeof VS_CODE_SHORTCUTS;
+  private shortcuts: typeof VSCODE_SHORTCUTS;
   private handler: ((event: KeyboardEvent) => boolean | void) | null = null;
 
   constructor(callbacks: KeyboardManagerCallbacks) {
@@ -70,12 +29,12 @@ export class KeyboardManager {
   /**
    * Build the full shortcut list including macOS variants
    */
-  private buildShortcutList(): typeof VS_CODE_SHORTCUTS {
-    const shortcuts = [...VS_CODE_SHORTCUTS];
+  private buildShortcutList(): typeof VSCODE_SHORTCUTS {
+    const shortcuts = [...VSCODE_SHORTCUTS];
 
     // Add macOS variants (Cmd instead of Ctrl)
     if (this.isMac()) {
-      const macShortcuts = VS_CODE_SHORTCUTS.map((shortcut) => ({
+      const macShortcuts = VSCODE_SHORTCUTS.map((shortcut) => ({
         ...shortcut,
         ctrlKey: false,
         metaKey: shortcut.ctrlKey,
