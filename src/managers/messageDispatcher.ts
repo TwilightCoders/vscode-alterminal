@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { exec } from "child_process";
 import { PtyManager } from "../terminal/ptyManager";
 import { CommandLauncher } from "./commandLauncher";
 import { FileOperationHandler } from "./fileOperationHandler";
@@ -184,15 +183,8 @@ export class MessageDispatcher {
       folder: workspaceFolder,
       name: workspaceName,
     });
-    const uri = `vscode://twilightcoders.alterminal/bell?${params}`;
-
-    if (process.platform === "darwin") {
-      exec(`open "${uri}"`);
-    } else if (process.platform === "win32") {
-      exec(`start "" "${uri}"`);
-    } else {
-      exec(`xdg-open "${uri}"`);
-    }
+    const uri = vscode.Uri.parse(`vscode://twilightcoders.alterminal/bell?${params}`);
+    vscode.env.openExternal(uri);
   }
 
   /**
@@ -225,23 +217,17 @@ export class MessageDispatcher {
     // Cross-window: show notification, clicking activates originating window + tab
     vscode.window
       .showInformationMessage(`🔔 ${name}: ${body}`, "Go to Terminal")
-      .then((selection) => {
+      .then(async (selection) => {
         if (selection === "Go to Terminal" && folder) {
-          // Activate the originating window, then send /focus URI to switch tab
-          exec(`code "${folder}"`, () => {
-            const focusParams = new URLSearchParams({
-              tabId: tabId || "",
-              folder: folder,
-            });
-            const focusUri = `vscode://twilightcoders.alterminal/focus?${focusParams}`;
-            if (process.platform === "darwin") {
-              exec(`open "${focusUri}"`);
-            } else if (process.platform === "win32") {
-              exec(`start "" "${focusUri}"`);
-            } else {
-              exec(`xdg-open "${focusUri}"`);
-            }
+          // Activate the originating window via VS Code API
+          await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(folder), { forceNewWindow: false });
+          // Send /focus URI to switch to the correct tab
+          const focusParams = new URLSearchParams({
+            tabId: tabId || "",
+            folder: folder,
           });
+          const focusUri = vscode.Uri.parse(`vscode://twilightcoders.alterminal/focus?${focusParams}`);
+          vscode.env.openExternal(focusUri);
         }
       });
   }
