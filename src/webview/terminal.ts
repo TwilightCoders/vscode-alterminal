@@ -46,62 +46,64 @@ interface TerminalOptions {
  */
 
 export class TerminalInstance {
-  // Core properties
-  uuid: string;
-  id: number;
-  label: string;
-  baseLabel: string;
-  icon: string | null;
-  vscode: any;
-  terminalTheme: any;
-  getThemeColor: (cssVar: string, fallback: string) => string;
-  terminalType: string;
-  launchCommand: string | null;
+  // Core properties (public — accessed by TabManager, TabTitleManager, TabUIManager)
+  public uuid: string;
+  public id: number;
+  public label: string;
+  public baseLabel: string;
+  public icon: string | null;
+  public terminalType: string;
+  public launchCommand: string | null;
+  public cwd: string | null;
+  public oscTitle: string | null;
+  public userVars: Record<string, string> | null;
+  public titleTemplate: string | null;
+  public hasUserInteraction: boolean;
+  public isActive: boolean;
+  public whenOpened: Promise<any>;
+  public onBellReceived?: (tabId: number) => void;
 
-  // Terminal and addons
-  terminal: any;
-  fitAddon: any;
-  serializeAddon: any;
-  unicodeAddon: any;
-  webglAddon?: any;
+  // Internal — passed to child managers but not accessed externally
+  private vscode: any;
+  private terminalTheme: any;
+  private getThemeColor: (cssVar: string, fallback: string) => string;
 
-  // Managers and handlers
-  lifecycleManager: TerminalLifecycleManager;
-  inputHandler: any;
-  linkProviderDisposable: any;
-  linkProviders?: any[];
-  linkMatcherIds?: number[];
+  // Terminal and addons (internal xterm.js plumbing)
+  private terminal: any;
+  private fitAddon: any;
+  private serializeAddon: any;
+  private unicodeAddon: any;
+  private webglAddon?: any;
 
-  // Event disposables
-  resizeDisposable: any;
-  bellDisposable: any;
-  renderDisposable: any;
-  titleChangeDisposable: any;
+  // Managers and handlers (internal)
+  private lifecycleManager: TerminalLifecycleManager;
+  private inputHandler: any;
+  private linkProviderDisposable: any;
+  private linkProviders?: any[];
+  private linkMatcherIds?: number[];
 
-  // State tracking
-  shellPath: string | null;
-  cwd: string | null;
-  oscTitle: string | null;
-  userVars: Record<string, string> | null;
-  titleTemplate: string | null;
-  hasUserInteraction: boolean;
-  _isDirty: boolean;
-  _cachedSerializedState: string | null;
-  _didInit: boolean;
-  _pendingPtyStart: boolean;
-  _openedResolve?: (value: any) => void;
+  // Event disposables (internal)
+  private resizeDisposable: any;
+  private bellDisposable: any;
+  private renderDisposable: any;
+  private titleChangeDisposable: any;
 
-  // Lifecycle
-  isActive: boolean;
-  whenOpened: Promise<any>;
-  terminalContainer: HTMLElement | null;
-  onBellReceived?: (tabId: number) => void;
-  _openedResolved?: boolean;
-  _ptyStarted?: boolean;
-  _visibilityInstalled?: boolean;
-  _resizeObserver?: ResizeObserver;
-  _visibilityHandler?: () => void;
-  _webglContextLostHandlers?: Array<{ canvas: HTMLCanvasElement; handler: (e: Event) => void }>;
+  // State tracking (internal)
+  public shellPath: string | null;
+  private _isDirty: boolean;
+  private _cachedSerializedState: string | null;
+  private _didInit: boolean;
+  private _pendingPtyStart: boolean;
+  private _openedResolve?: (value: any) => void;
+
+  // Lifecycle (internal)
+  private terminalContainer: HTMLElement | null;
+  private _openedResolved?: boolean;
+  private _ptyStarted?: boolean;
+  private _visibilityInstalled?: boolean;
+  private _resizeObserver?: ResizeObserver;
+  private _visibilityHandler?: () => void;
+  private _webglContextLostHandlers?: Array<{ canvas: HTMLCanvasElement; handler: (e: Event) => void }>;
 
   constructor(
     id: number,
@@ -174,13 +176,27 @@ export class TerminalInstance {
     }
   }
 
+  /**
+   * Mark this terminal's state as dirty (needs re-serialization on next save).
+   */
+  markDirty(): void {
+    this._isDirty = true;
+  }
+
+  /**
+   * Whether this terminal has unsaved state changes.
+   */
+  get isDirty(): boolean {
+    return this._isDirty;
+  }
+
   initialize() {
     if (this._didInit) return;
     this._didInit = true;
     this._createTerminal();
   }
 
-  _createTerminal() {
+  private _createTerminal() {
     try {
       let XTerminal = null;
       if (window.Terminal && typeof window.Terminal === "function")
@@ -415,7 +431,7 @@ export class TerminalInstance {
     }
   }
 
-  _markOpened() {
+  private _markOpened() {
     if (this._openedResolved) return;
     this._openedResolved = true;
     if (this._openedResolve) {
@@ -893,7 +909,7 @@ export class TerminalInstance {
     }
   }
 
-  _installVisibilityHandlers() {
+  private _installVisibilityHandlers() {
     if (this._visibilityInstalled) return;
     this._visibilityInstalled = true;
 

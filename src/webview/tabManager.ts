@@ -129,7 +129,7 @@ export class TabManager {
     // Periodic dirty-check: persist terminal buffers that changed since last save.
     // This replaces per-write() Debouncer calls — instead of churning browser
     // timers on every PTY echo, we just check every 5 seconds whether any
-    // terminal's _isDirty flag is set.
+    // terminal's isDirty flag is set.
     this._dirtySaveTimer = setInterval(() => {
       if (this._hasDirtyTerminals()) {
         this.scheduleSaveState("dirtyCheck");
@@ -622,7 +622,7 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (terminal) {
       terminal.label = label;
-      terminal._isDirty = true; // Mark dirty when label changes
+      terminal.markDirty(); // Mark dirty when label changes
 
       const tabElement = document.querySelector(
         `[data-tab-id="${tabId}"] .tab-label`,
@@ -689,7 +689,7 @@ export class TabManager {
 
     // Update terminal's icon property for persistence
     terminal.icon = iconClass;
-    terminal._isDirty = true; // Mark dirty when icon changes
+    terminal.markDirty(); // Mark dirty when icon changes
 
     // Update UI via TabTitleManager
     titleManager.setIcon(icon);
@@ -1098,7 +1098,7 @@ export class TabManager {
    */
   private _hasDirtyTerminals(): boolean {
     for (const [, terminal] of this.terminals) {
-      if (terminal._isDirty) return true;
+      if (terminal.isDirty) return true;
     }
     return false;
   }
@@ -1182,7 +1182,7 @@ export class TabManager {
     if (!terminal) return;
 
     terminal.cwd = cwd;
-    terminal._isDirty = true;
+    terminal.markDirty();
     this.requestFormattedTitle(tabId);
   }
 
@@ -1197,7 +1197,7 @@ export class TabManager {
       terminal.userVars = {};
     }
     Object.assign(terminal.userVars, vars);
-    terminal._isDirty = true;
+    terminal.markDirty();
     this.requestFormattedTitle(tabId);
   }
 

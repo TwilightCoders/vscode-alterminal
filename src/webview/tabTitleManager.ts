@@ -271,7 +271,7 @@ export class TabTitleManager {
         // Store the raw template on the terminal
         if (this.terminal) {
           this.terminal.titleTemplate = newTemplate;
-          this.terminal._isDirty = true;
+          this.terminal.markDirty();
         }
       }
       this.endTitleEdit(input);
