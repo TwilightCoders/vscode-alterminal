@@ -38,10 +38,11 @@ import * as pty from "@lydell/node-pty";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
-import { execFile, execSync } from "child_process";
+import { execFile } from "child_process";
 import { Logger } from "../utils/logger";
 import { Debouncer } from "../utils/debouncer";
 import { TERMINAL_DEFAULTS } from "../constants";
+import { ShellDetector } from "../utils/shellDetector";
 
 export class PtyManager {
   private _ptyProcesses = new Map<number, pty.IPty>();
@@ -740,44 +741,19 @@ export class PtyManager {
    * Unix: Use $SHELL or fallback to bash
    */
   private _getDefaultShell(): string {
-    if (process.platform === "win32") {
-      // Check VS Code's terminal.integrated.shell.windows setting first
-      const vscodeShell = vscode.workspace.getConfiguration("terminal.integrated.shell").get<string>("windows");
-      if (vscodeShell) {
-        return vscodeShell;
-      }
+    // Check VS Code's terminal shell setting first
+    const configKey = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "osx" : "linux";
+    const vscodeShell = vscode.workspace.getConfiguration("terminal.integrated.shell").get<string>(configKey);
+    if (vscodeShell) return vscodeShell;
 
-      // Check for PowerShell (Core) first, then Windows PowerShell, fallback to cmd.exe
-      // PowerShell properly loads the user's PATH from the registry
-      const comspec = process.env.COMSPEC; // Usually C:\Windows\System32\cmd.exe
+    // Use ShellDetector's cached results — no blocking execSync calls
+    const shells = ShellDetector.detectShells();
+    const defaultShell = shells.find((s) => s.isDefault);
+    if (defaultShell) return defaultShell.path;
 
-      // Try to find PowerShell
-      if (process.env.PWSH_PATH) {
-        return process.env.PWSH_PATH;
-      }
-
-      // Look for pwsh (PowerShell Core) or powershell (Windows PowerShell)
-      try {
-        try {
-          execSync('pwsh.exe -v', { stdio: 'ignore' });
-          return 'pwsh.exe';
-        } catch {
-          try {
-            execSync('powershell.exe -v', { stdio: 'ignore' });
-            return 'powershell.exe';
-          } catch {
-            // Fall back to cmd.exe
-          }
-        }
-      } catch {
-        // If execSync fails, continue to fallback
-      }
-
-      // Fallback to cmd.exe
-      return comspec || "cmd.exe";
-    }
-
-    // Unix/Mac: use configured shell or default to bash
-    return process.env.SHELL || "/bin/bash";
+    // Final fallback
+    return process.platform === "win32"
+      ? process.env.COMSPEC || "cmd.exe"
+      : process.env.SHELL || "/bin/bash";
   }
 }
