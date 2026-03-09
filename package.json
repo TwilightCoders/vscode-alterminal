@@ -306,6 +306,11 @@
           "default": false,
           "description": "Always show the tab bar, even when there is only one terminal tab"
         },
+        "alterminal.bellIndicator": {
+          "type": "string",
+          "default": "🔔",
+          "markdownDescription": "Text shown in the window title when a background terminal has unread bell activity. Add `${alterminalBell}` to your `#window.title#` setting to enable. Set to empty string to disable."
+        },
         "alterminal.savedCommands": {
           "type": "array",
           "default": [],

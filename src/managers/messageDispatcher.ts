@@ -216,9 +216,15 @@ export class MessageDispatcher {
   }
 
   private _updateTitleIndicator(): void {
+    const icon = vscode.workspace.getConfiguration("alterminal").get<string>("bellIndicator", "\u{1F514}");
+    if (!icon) {
+      // Empty string = disabled
+      vscode.commands.executeCommand("setContext", MessageDispatcher.TITLE_CONTEXT_KEY, "");
+      return;
+    }
     const count = this._unreadBellTabs.size;
     const value = count > 0
-      ? count === 1 ? "\u{1F514}" : `\u{1F514}${count}`
+      ? count === 1 ? icon : `${icon}${count}`
       : "";
     vscode.commands.executeCommand(
       "setContext",
