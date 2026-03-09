@@ -22,6 +22,11 @@
 
 import { TabTitleManager } from "./tabTitleManager.js";
 import { Logger } from "./logger.js";
+import {
+  hideAllDropdowns as hideDropdowns,
+  focusNextDropdownItem as focusNextItem,
+  focusPrevDropdownItem as focusPrevItem,
+} from "./dropdownUtils.js";
 
 /**
  * Callbacks interface for TabUIManager
@@ -471,10 +476,7 @@ export class TabUIManager {
    * Hide all dropdown menus
    */
   hideAllDropdowns(): void {
-    const dropdowns = document.querySelectorAll(".tab-dropdown");
-    dropdowns.forEach((dropdown) => {
-      dropdown.classList.remove("show");
-    });
+    hideDropdowns();
   }
 
   /**
@@ -502,15 +504,7 @@ export class TabUIManager {
    */
   private focusNextDropdownItem(currentItem: HTMLElement): void {
     const dropdown = currentItem.closest(".tab-dropdown");
-    if (!dropdown) return;
-
-    const items = dropdown.querySelectorAll(
-      ".tab-dropdown-item:not(.disabled)",
-    ) as NodeListOf<HTMLElement>;
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const nextIndex = (currentIndex + 1) % items.length;
-
-    items[nextIndex].focus();
+    focusNextItem(dropdown, currentItem);
   }
 
   /**
@@ -518,15 +512,7 @@ export class TabUIManager {
    */
   private focusPrevDropdownItem(currentItem: HTMLElement): void {
     const dropdown = currentItem.closest(".tab-dropdown");
-    if (!dropdown) return;
-
-    const items = dropdown.querySelectorAll(
-      ".tab-dropdown-item:not(.disabled)",
-    ) as NodeListOf<HTMLElement>;
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const prevIndex = currentIndex === 0 ? items.length - 1 : currentIndex - 1;
-
-    items[prevIndex].focus();
+    focusPrevItem(dropdown, currentItem);
   }
 
   /**

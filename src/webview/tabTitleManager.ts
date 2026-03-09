@@ -1,3 +1,9 @@
+import {
+  hideAllDropdowns as hideDropdowns,
+  focusNextDropdownItem as focusNextItem,
+  focusPrevDropdownItem as focusPrevItem,
+} from "./dropdownUtils.js";
+
 /**
  * Tab Title Manager
  *
@@ -457,10 +463,7 @@ export class TabTitleManager {
    * Hide all dropdown menus (static method for global use)
    */
   static hideAllDropdowns() {
-    const dropdowns = document.querySelectorAll(".tab-dropdown");
-    dropdowns.forEach((dropdown) => {
-      dropdown.classList.remove("show");
-    });
+    hideDropdowns();
   }
 
   /**
@@ -566,31 +569,12 @@ export class TabTitleManager {
   /**
    * Keyboard navigation for dropdown
    */
-  focusNextDropdownItem(currentItem: any): void {
-    if (!this.dropdown) return;
-
-    const items = this.dropdown.querySelectorAll<HTMLElement>(
-      ".tab-dropdown-item:not(.disabled)",
-    );
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const nextIndex = (currentIndex + 1) % items.length;
-
-    items[nextIndex].focus();
+  focusNextDropdownItem(currentItem: HTMLElement): void {
+    focusNextItem(this.dropdown, currentItem);
   }
 
-  /**
-   * Keyboard navigation for dropdown
-   */
-  focusPrevDropdownItem(currentItem: any): void {
-    if (!this.dropdown) return;
-
-    const items = this.dropdown.querySelectorAll<HTMLElement>(
-      ".tab-dropdown-item:not(.disabled)",
-    );
-    const currentIndex = Array.from(items).indexOf(currentItem);
-    const prevIndex = currentIndex === 0 ? items.length - 1 : currentIndex - 1;
-
-    items[prevIndex].focus();
+  focusPrevDropdownItem(currentItem: HTMLElement): void {
+    focusPrevItem(this.dropdown, currentItem);
   }
 
   /**
