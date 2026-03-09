@@ -460,15 +460,12 @@ export class PtyManager {
           }
         }
 
-        // Detect bare BEL characters — strip OSC sequences first
-        // so their \x07 terminators aren't mistaken for bells
+        // Detect bare BEL characters (\x07) — strip OSC sequences first
+        // so their \x07 terminators aren't mistaken for bells.
         if (this._onBell && data.indexOf("\x07") !== -1) {
           const stripped = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
           if (stripped.indexOf("\x07") !== -1) {
-            Logger.info(`[Bell] Detected BEL for tabId=${tabId}`);
             this._onBell(tabId);
-          } else {
-            Logger.debug(`[Bell] BEL was inside OSC sequence, ignoring`);
           }
         }
 

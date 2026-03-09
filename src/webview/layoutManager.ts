@@ -27,6 +27,7 @@ export interface LayoutManagerCallbacks {
   getActiveTerminal: () => any;
   saveToLocalState: () => void;
   scheduleSaveState: (reason: string) => void;
+  onPanelFocused?: () => void;
 }
 
 export class LayoutManager {
@@ -86,6 +87,7 @@ export class LayoutManager {
         activeTerminal.focus();
         Logger.info("🔍 [FOCUS DEBUG] Refocused active terminal");
       }
+      this._callbacks.onPanelFocused?.();
     };
     window.addEventListener("focus", this._windowFocusHandler);
 

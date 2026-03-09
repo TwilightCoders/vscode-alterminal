@@ -218,6 +218,9 @@ export class TabManager {
       getActiveTerminal: () => this.getActiveTerminal(),
       saveToLocalState: () => this.saveToLocalState(),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
+      onPanelFocused: () => {
+        this.vscode.postMessage({ command: "panelFocused" });
+      },
     };
   }
 

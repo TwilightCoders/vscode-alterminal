@@ -21,8 +21,11 @@ export interface PerformanceData {
 export class MessageDispatcher {
   private _bellDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _pendingBells: Map<number, string> = new Map();
-  private _unreadBellCount: number = 0;
+  private _unreadBellTabs: Set<number> = new Set();
+  private _lastBellTime: number = 0;
+  private _clearBellTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly BELL_DEBOUNCE_MS = 3000;
+  private static readonly BELL_CLEAR_GRACE_MS = 2000;
   private static readonly TITLE_CONTEXT_KEY = "alterminal:bellIndicator";
 
   constructor(
@@ -84,6 +87,7 @@ export class MessageDispatcher {
       },
       switchTab: () => {}, // No-op - handled in webview
       playBellSound: (msg: any) => this.handleBellSound(msg.tabId, msg.tabLabel),
+      panelFocused: () => this.clearBellIndicator(),
       setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
       setDeveloperMode: () => {}, // Handled in webview
@@ -152,8 +156,14 @@ export class MessageDispatcher {
     Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
     this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
 
-    // Update window title bell indicator
-    this._unreadBellCount++;
+    // Update window title bell indicator (Set deduplicates PTY + webview calls)
+    this._unreadBellTabs.add(tabId);
+    this._lastBellTime = Date.now();
+    // Cancel any pending clear so the indicator stays visible
+    if (this._clearBellTimer) {
+      clearTimeout(this._clearBellTimer);
+      this._clearBellTimer = null;
+    }
     this._updateTitleIndicator();
 
     if (this._bellDebounceTimer) {
@@ -168,10 +178,24 @@ export class MessageDispatcher {
 
   /**
    * Clear the window title bell indicator (called when panel becomes visible).
+   * Defers if a bell fired very recently to avoid clearing before the user sees it.
    */
   public clearBellIndicator(): void {
-    if (this._unreadBellCount === 0) return;
-    this._unreadBellCount = 0;
+    if (this._unreadBellTabs.size === 0) return;
+
+    const elapsed = Date.now() - this._lastBellTime;
+    if (elapsed < MessageDispatcher.BELL_CLEAR_GRACE_MS) {
+      // Bell fired very recently — defer the clear so user sees it
+      if (this._clearBellTimer) return; // already scheduled
+      this._clearBellTimer = setTimeout(() => {
+        this._clearBellTimer = null;
+        this._unreadBellTabs.clear();
+        this._updateTitleIndicator();
+      }, MessageDispatcher.BELL_CLEAR_GRACE_MS - elapsed);
+      return;
+    }
+
+    this._unreadBellTabs.clear();
     this._updateTitleIndicator();
   }
 
@@ -192,8 +216,9 @@ export class MessageDispatcher {
   }
 
   private _updateTitleIndicator(): void {
-    const value = this._unreadBellCount > 0
-      ? this._unreadBellCount === 1 ? "\u{1F514}" : `\u{1F514}${this._unreadBellCount}`
+    const count = this._unreadBellTabs.size;
+    const value = count > 0
+      ? count === 1 ? "\u{1F514}" : `\u{1F514}${count}`
       : "";
     vscode.commands.executeCommand(
       "setContext",
