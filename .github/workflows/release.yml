@@ -37,7 +37,13 @@ jobs:
           )
           for pkg in "${PKGS[@]}"; do
             if [ ! -d "node_modules/$pkg" ]; then
-              tarball=$(npm pack "$pkg" --pack-destination /tmp 2>/dev/null)
+              # Extract exact version from package-lock.json to avoid fetching latest
+              VERSION=$(node -p "require('./package-lock.json').packages['node_modules/$pkg']?.version || ''")
+              if [ -z "$VERSION" ]; then
+                echo "⚠️ Could not find $pkg version in lockfile, skipping"
+                continue
+              fi
+              tarball=$(npm pack "$pkg@$VERSION" --pack-destination /tmp 2>/dev/null)
               mkdir -p "node_modules/$pkg"
               tar xzf "/tmp/$tarball" -C "node_modules/$pkg" --strip-components=1
             fi
