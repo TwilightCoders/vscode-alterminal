@@ -662,7 +662,7 @@ export class PtyManager {
     processName: string;
   }> {
     const info = [];
-    for (const [tabId, ptyProcess] of this._ptyProcesses.entries()) {
+    for (const [tabId] of this._ptyProcesses.entries()) {
       info.push({
         tabId,
         terminalType: this._terminalTypes.get(tabId) || "unknown",
@@ -749,6 +749,7 @@ export class PtyManager {
     const timer = setInterval(() => {
       this._checkProcessChange(tabId);
     }, 5000);
+    timer.unref();
 
     this._processMonitorTimers.set(tabId, timer);
   }

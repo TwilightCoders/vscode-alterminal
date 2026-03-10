@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(disposable);
+  context.subscriptions.push(disposable, provider);
 
   // Create status bar item
   const statusBarItem = vscode.window.createStatusBarItem(
