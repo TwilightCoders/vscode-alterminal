@@ -44,7 +44,7 @@ export class MessageDispatcher {
   /**
    * Set up message routing for webview
    */
-  public setupMessageRouter(webviewView: vscode.WebviewView): void {
+  public setupMessageRouter(alterminal: vscode.WebviewView): void {
     // Provider-specific message handlers
     const providerHandlers = {
       fileDrop: (msg: any) =>
@@ -101,7 +101,7 @@ export class MessageDispatcher {
       checkCommandSaved: (msg: any) =>
         this.commandLauncher.handleCheckCommandSaved(
           msg.launchCommand,
-          webviewView.webview,
+          alterminal.webview,
         ),
       formatTabTitle: (msg: any) => this.onFormatTabTitle(msg),
       bufferContent: (msg: any) =>
@@ -120,7 +120,7 @@ export class MessageDispatcher {
       },
     };
 
-    webviewView.webview.onDidReceiveMessage(
+    alterminal.webview.onDidReceiveMessage(
       (message) => {
         try {
           // Direct O(1) lookup for both provider and hot-path messages
@@ -155,6 +155,15 @@ export class MessageDispatcher {
   public handleBellSound(tabId: number, tabLabel: string): void {
     Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
     this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
+
+    // Suppress notification spam: if we already notified for this tab
+    // recently, only update the title indicator (no toast).
+    const lastNotified = this._bellNotifiedAt.get(tabId) ?? 0;
+    const inCooldown = (Date.now() - lastNotified) < MessageDispatcher.BELL_COOLDOWN_MS;
+
+    if (!inCooldown) {
+      this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
+    }
 
     // Update window title bell indicator (Set deduplicates PTY + webview calls)
     this._unreadBellTabs.add(tabId);

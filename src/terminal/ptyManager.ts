@@ -52,7 +52,7 @@ export class PtyManager {
   private _terminalTypes = new Map<number, string>();
   private _currentWorkingDirs = new Map<number, string>();
   private _userVars = new Map<number, Map<string, string>>();
-  private _webviewView?: vscode.WebviewView;
+  private _alterminal?: vscode.WebviewView;
   private _visibilityDisposable?: { dispose(): void };
   private _extensionVersion: string = "0.0.0";
   private _extensionPath: string = "";
@@ -150,7 +150,7 @@ export class PtyManager {
       }
     }
     if (Object.keys(changed).length > 0) {
-      this._webviewView?.webview.postMessage({
+      this._alterminal?.webview.postMessage({
         command: "userVarChange",
         vars: changed,
         tabId,
@@ -163,7 +163,7 @@ export class PtyManager {
    */
   private _handleCwdChange(tabId: number, cwd: string): void {
     this._currentWorkingDirs.set(tabId, cwd);
-    this._webviewView?.webview.postMessage({
+    this._alterminal?.webview.postMessage({
       command: "cwdChange",
       cwd,
       tabId,
@@ -186,18 +186,18 @@ export class PtyManager {
     this._extensionPath = extensionPath;
   }
 
-  public setWebviewView(webviewView: vscode.WebviewView) {
+  public setAlterminal(alterminal: vscode.WebviewView) {
     // Clean up previous visibility subscription
     if (this._visibilityDisposable) {
       this._visibilityDisposable.dispose();
       this._visibilityDisposable = undefined;
     }
 
-    this._webviewView = webviewView;
+    this._alterminal = alterminal;
 
     // Set up visibility handler to manage output buffering
-    this._visibilityDisposable = webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) {
+    this._visibilityDisposable = alterminal.onDidChangeVisibility(() => {
+      if (alterminal.visible) {
         // Webview became visible - replay buffered output
         this._replayBufferedOutput();
       }
@@ -208,7 +208,7 @@ export class PtyManager {
    * Replay buffered output when webview becomes visible
    */
   private _replayBufferedOutput() {
-    if (!this._webviewView?.visible) {
+    if (!this._alterminal?.visible) {
       return;
     }
 
@@ -219,7 +219,7 @@ export class PtyManager {
 
         // Send all buffered data at once (joined)
         const combinedData = buffer.join('');
-        this._webviewView.webview.postMessage({
+        this._alterminal.webview.postMessage({
           command: "data",
           data: combinedData,
           tabId: tabId,
@@ -478,8 +478,8 @@ export class PtyManager {
         }
 
         // Forward data to webview
-        if (this._webviewView?.visible) {
-          this._webviewView.webview.postMessage({
+        if (this._alterminal?.visible) {
+          this._alterminal.webview.postMessage({
             command: "data",
             data: filteredData,
             tabId: tabId,
@@ -622,7 +622,7 @@ export class PtyManager {
     }
 
     // Release webview reference
-    this._webviewView = undefined;
+    this._alterminal = undefined;
   }
 
   /**
@@ -665,7 +665,7 @@ export class PtyManager {
 
     if (currentProcess !== previousProcess) {
       this._currentProcessNames.set(tabId, currentProcess);
-      this._webviewView?.webview.postMessage({
+      this._alterminal?.webview.postMessage({
         command: "processChange",
         processName: currentProcess,
         tabId: tabId,

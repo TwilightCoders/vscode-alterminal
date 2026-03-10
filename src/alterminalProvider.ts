@@ -132,20 +132,20 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Resolve and initialize webview
    */
   public resolveWebviewView(
-    webviewView: vscode.WebviewView,
+    alterminal: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
-    this._view = webviewView;
+    this._view = alterminal;
 
     // Serializer will handle webview lifecycle
-    if (this._serializer && this._serializer.setWebviewView) {
-      this._serializer.setWebviewView(webviewView);
+    if (this._serializer && this._serializer.setAlterminal) {
+      this._serializer.setAlterminal(alterminal);
     }
 
     // Delegate to lifecycle manager
     this.webviewLifecycleManager.resolveWebviewView(
-      webviewView,
+      alterminal,
       _context,
       _token,
     );

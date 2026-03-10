@@ -34,44 +34,44 @@ export class WebViewLifecycleManager {
    * Resolve and initialize webview
    */
   public resolveWebviewView(
-    webviewView: vscode.WebviewView,
+    alterminal: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
-    Logger.debug("🚀 resolveWebviewView() called - VS Code is creating/recreating the webview");
-    
+    Logger.debug("resolveWebviewView() called - VS Code is creating/recreating the webview");
+
     // Reset state manager for new webview instance
     // This is critical for proper restoration when panel is closed and reopened
     this.stateManager.resetForNewWebview();
     this._webviewInitialized = false;
 
     // Configure webview options
-    webviewView.webview.options = {
+    alterminal.webview.options = {
       enableScripts: true,
       enableCommandUris: true,
       localResourceRoots: [this.extensionUri],
     };
 
     // Set up message router BEFORE loading HTML so we don't miss early messages (e.g., webviewReady)
-    this.messageDispatcher.setupMessageRouter(webviewView);
+    this.messageDispatcher.setupMessageRouter(alterminal);
 
     // Get configuration
     const config = this.configurationWatcher.getConfiguration();
 
     // Set up components with the webview
-    this.ptyManager.setWebviewView(webviewView);
+    this.ptyManager.setAlterminal(alterminal);
 
     // Always include a unique timestamp to force webview refresh (from PostgreSQL extension pattern)
     const timeNow = new Date().getTime();
     try {
-      webviewView.webview.html = TemplateUtils.getHtmlTemplate(
+      alterminal.webview.html = TemplateUtils.getHtmlTemplate(
         this.extensionUri,
-        webviewView.webview,
+        alterminal.webview,
         timeNow,
       );
     } catch (error) {
       Logger.error("Failed to generate webview HTML template:", error);
-      webviewView.webview.html = `
+      alterminal.webview.html = `
         <html><body>
         <h1>Error Loading Alterminal</h1>
         <p>Failed to generate webview template: ${(error as Error).message}</p>
@@ -83,10 +83,10 @@ export class WebViewLifecycleManager {
     // State restoration will happen when webview emits 'webviewReady' event
 
     // Setup visibility change handler
-    this.setupVisibilityHandler(webviewView);
+    this.setupVisibilityHandler(alterminal);
 
     // Setup disposal handler
-    this.setupDisposalHandler(webviewView);
+    this.setupDisposalHandler(alterminal);
   }
 
   /**
@@ -155,9 +155,9 @@ export class WebViewLifecycleManager {
    * Note: The serializer handles restoration on visibility changes.
    * This handler only manages the _webviewInitialized flag.
    */
-  private setupVisibilityHandler(webviewView: vscode.WebviewView): void {
-    webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) {
+  private setupVisibilityHandler(alterminal: vscode.WebviewView): void {
+    alterminal.onDidChangeVisibility(() => {
+      if (alterminal.visible) {
         Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became visible");
         this.messageDispatcher.clearBellIndicator();
       } else {
@@ -171,8 +171,8 @@ export class WebViewLifecycleManager {
   /**
    * Set up disposal handler
    */
-  private setupDisposalHandler(webviewView: vscode.WebviewView): void {
-    webviewView.onDidDispose(() => {
+  private setupDisposalHandler(alterminal: vscode.WebviewView): void {
+    alterminal.onDidDispose(() => {
       this._webviewInitialized = false;
     });
   }

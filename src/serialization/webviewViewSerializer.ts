@@ -33,7 +33,7 @@ export interface PersistedState {
 
 export class WebviewViewSerializer {
   private static readonly STORAGE_KEY = "alterminal.state";
-  private _webviewView?: vscode.WebviewView;
+  private _alterminal?: vscode.WebviewView;
   private _context: vscode.ExtensionContext;
   private _didInitialViewRestore = false;
 
@@ -41,8 +41,8 @@ export class WebviewViewSerializer {
     this._context = context;
   }
 
-  public setWebviewView(webviewView: vscode.WebviewView) {
-    this._webviewView = webviewView;
+  public setAlterminal(alterminal: vscode.WebviewView) {
+    this._alterminal = alterminal;
     // Reset flag when a new webview is set - this happens on resolveWebviewView
     this._didInitialViewRestore = false;
     this.setupWebviewLifecycle();
@@ -60,18 +60,18 @@ export class WebviewViewSerializer {
    * Set up webview lifecycle event handlers
    */
   private setupWebviewLifecycle() {
-    if (!this._webviewView) {
+    if (!this._alterminal) {
       return;
     }
     // Monitor visibility changes for SUBSEQUENT visibility toggles (after initial restore)
     // Initial restore is handled by webviewReady message -> StateManager.restoreWebviewState
-    this._webviewView.onDidChangeVisibility(() => {
-      if (this._webviewView?.visible) {
+    this._alterminal.onDidChangeVisibility(() => {
+      if (this._alterminal?.visible) {
         // Only send focus/restore for subsequent visibility changes
         // Initial restore is handled by webviewReady -> StateManager
         if (this._didInitialViewRestore) {
           // Already restored once, just focus
-          this._webviewView.webview.postMessage({ command: "focus" });
+          this._alterminal.webview.postMessage({ command: "focus" });
         }
         // Note: if _didInitialViewRestore is false, StateManager will handle it via webviewReady
       } else {
@@ -80,7 +80,7 @@ export class WebviewViewSerializer {
     });
 
     // Monitor disposal
-    this._webviewView.onDidDispose(() => {
+    this._alterminal.onDidDispose(() => {
       this.saveState();
     });
   }
@@ -89,11 +89,11 @@ export class WebviewViewSerializer {
    * Request state from webview and save it
    */
   public async saveState(): Promise<void> {
-    if (!this._webviewView) {
+    if (!this._alterminal) {
       return;
     }
 
-    this._webviewView.webview.postMessage({ command: "requestState" });
+    this._alterminal.webview.postMessage({ command: "requestState" });
   }
 
   /**
@@ -142,19 +142,19 @@ export class WebviewViewSerializer {
    * Load state and send it to webview for restoration
    */
   public sendSavedStateToWebview(): void {
-    if (!this._webviewView) {
+    if (!this._alterminal) {
       return;
     }
 
     const savedState = this.loadFromExtensionStorage(this._context);
 
     if (savedState && savedState.terminals && savedState.terminals.length > 0) {
-      this._webviewView.webview.postMessage({
+      this._alterminal.webview.postMessage({
         command: "restoreState",
         state: savedState,
       });
     } else {
-      this._webviewView.webview.postMessage({
+      this._alterminal.webview.postMessage({
         command: "initializeEmpty",
       });
     }
