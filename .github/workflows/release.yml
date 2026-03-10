@@ -76,7 +76,7 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx @vscode/vsce package --no-git-tag-version --skip-license -o alterminal.vsix
+        run: npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies -o alterminal.vsix
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
