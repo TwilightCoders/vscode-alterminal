@@ -120,7 +120,9 @@ export class WebviewViewSerializer {
   }
 
   /**
-   * Handle state response from webview and save it
+   * Handle state response from webview.
+   * Storage is delegated to StateManager (single source of truth for alterminal.state).
+   * This method is kept for lifecycle coordination only.
    */
   public async handleStateResponse(state: any): Promise<void> {
     if (!state) {
@@ -135,7 +137,8 @@ export class WebviewViewSerializer {
       return;
     }
 
-    await this.saveToExtensionStorage(this._context, state);
+    // Note: StateManager.saveState/saveMetadata handles persistence.
+    // We no longer write to the same key here to avoid dual-write races.
   }
 
   /**
@@ -161,44 +164,6 @@ export class WebviewViewSerializer {
   }
 
   /**
-   * Serialize the current state from TabManager
-   */
-  public serialize(tabManager: any): PersistedState {
-    const terminals: SerializedTerminal[] = [];
-
-    for (const [id, terminal] of tabManager.terminals) {
-      const serializedTerminal = this.serializeTerminalContent(terminal);
-      terminals.push(serializedTerminal);
-    }
-
-    const state = {
-      terminals,
-      activeTabId: tabManager.activeTabId,
-      timestamp: Date.now(),
-    };
-
-    return state;
-  }
-
-
-  /**
-   * Save state to VS Code's extension storage
-   */
-  public async saveToExtensionStorage(
-    context: vscode.ExtensionContext,
-    state: PersistedState,
-  ): Promise<void> {
-    try {
-      await context.workspaceState.update(
-        WebviewViewSerializer.STORAGE_KEY,
-        state,
-      );
-    } catch (error) {
-      Logger.error("Failed to save state to extension storage:", error);
-    }
-  }
-
-  /**
    * Load state from VS Code's extension storage
    */
   public loadFromExtensionStorage(
@@ -216,18 +181,4 @@ export class WebviewViewSerializer {
     }
   }
 
-  /**
-   * Serialize individual terminal content and metadata
-   */
-  private serializeTerminalContent(terminal: any): SerializedTerminal {
-    const terminalState = terminal.getState ? terminal.getState() : null;
-    return {
-      uuid: terminal.uuid || terminalState?.uuid || crypto.randomUUID(),
-      id: terminal.id,
-      label: terminal.label,
-      buffer: terminal.serialize() || "",
-      modes: terminalState?.modes,
-      command: terminalState?.command,
-    };
-  }
 }
