@@ -71,10 +71,12 @@ export class WebViewLifecycleManager {
       );
     } catch (error) {
       Logger.error("Failed to generate webview HTML template:", error);
+      const safeMsg = (error as Error).message.replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
       alterminal.webview.html = `
         <html><body>
         <h1>Error Loading Alterminal</h1>
-        <p>Failed to generate webview template: ${(error as Error).message}</p>
+        <p>Failed to generate webview template: ${safeMsg}</p>
         <p>Check the extension logs for more details.</p>
         </body></html>
       `;

@@ -618,11 +618,13 @@ export class PtyManager {
       await fs.promises.writeFile(tempFilePath, buffer);
       await fs.promises.chmod(tempFilePath, 0o644);
 
-      // Send the temp file path
+      // Send the temp file path and schedule cleanup
       this._ptyProcesses.get(tabId)?.write(`'${tempFilePath}' `);
+      setTimeout(() => fs.promises.unlink(tempFilePath).catch(() => {}), 60_000);
     } catch (error) {
       Logger.error("Error writing file to temp:", error);
-      this._ptyProcesses.get(tabId)?.write(`"${fileName}" `);
+      const escapedName = fileName.replace(/'/g, "'\\''");
+      this._ptyProcesses.get(tabId)?.write(`'${escapedName}' `);
     }
   }
 
