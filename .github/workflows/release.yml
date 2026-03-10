@@ -28,12 +28,20 @@ jobs:
 
       - name: Install all platform binaries
         run: |
-          npm install --no-save --force \
-            @lydell/node-pty-darwin-arm64 \
-            @lydell/node-pty-darwin-x64 \
-            @lydell/node-pty-linux-arm64 \
-            @lydell/node-pty-linux-x64 \
-            @lydell/node-pty-win32-x64
+          PKGS=(
+            "@lydell/node-pty-darwin-arm64"
+            "@lydell/node-pty-darwin-x64"
+            "@lydell/node-pty-linux-arm64"
+            "@lydell/node-pty-linux-x64"
+            "@lydell/node-pty-win32-x64"
+          )
+          for pkg in "${PKGS[@]}"; do
+            if [ ! -d "node_modules/$pkg" ]; then
+              tarball=$(npm pack "$pkg" --pack-destination /tmp 2>/dev/null)
+              mkdir -p "node_modules/$pkg"
+              tar xzf "/tmp/$tarball" -C "node_modules/$pkg" --strip-components=1
+            fi
+          done
 
       - name: Determine release info
         id: release_info
