@@ -11,16 +11,6 @@
 import { TabManager } from "./tabManager.js";
 import { DragDropHandler } from "./dragDropHandler.js";
 
-// Extend Window interface for webview globals
-declare const vscode: any;
-declare const window: Window & {
-  tabManager?: TabManager;
-  dragDropHandler?: DragDropHandler;
-  linkModeState?: {
-    isCmdPressed: boolean;
-    isCtrlPressed: boolean;
-  };
-};
 
 // No configuration needed - webview will receive commands from extension
 

@@ -4,16 +4,6 @@ import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { TERMINAL_DEFAULTS } from "../constants.js";
 
-// Type declarations for xterm.js and addons (loaded dynamically in webview)
-declare const window: Window & {
-  Terminal?: any;
-  scrollbackLines?: number;
-  tabManager?: any;
-  DEVELOPER_MODE?: boolean;
-};
-
-declare const globalThis: any;
-
 interface TerminalOptions {
   autoStartPty?: boolean;
   launchCommand?: string | null;
@@ -202,12 +192,12 @@ export class TerminalInstance {
       let XTerminal = null;
       if (window.Terminal && typeof window.Terminal === "function")
         XTerminal = window.Terminal;
-      else if (globalThis.Terminal && typeof globalThis.Terminal === "function")
-        XTerminal = globalThis.Terminal;
+      else if ((globalThis as any).Terminal && typeof (globalThis as any).Terminal === "function")
+        XTerminal = (globalThis as any).Terminal;
       else if ((self as any).Terminal && typeof (self as any).Terminal === "function")
         XTerminal = (self as any).Terminal;
       else {
-        const possible = (window as any).Terminal || globalThis.Terminal;
+        const possible = (window as any).Terminal || (globalThis as any).Terminal;
         if (possible && possible.Terminal) XTerminal = possible.Terminal;
         else throw new Error("Terminal constructor not found");
       }

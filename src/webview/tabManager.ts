@@ -7,23 +7,6 @@ import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
 import { Debouncer } from "../utils/debouncer.js";
 
-// Extend Window interface for webview globals
-declare const window: Window & {
-  scrollbackLines?: number;
-  tabManager?: any;
-  workspaceFileCache?: Set<string>;
-  DEVELOPER_MODE?: boolean;
-  __terminalPerf?: {
-    samples: any[];
-  };
-  linkModeState?: {
-    isCmdPressed: boolean;
-    isCtrlPressed: boolean;
-  };
-};
-
-// VS Code webview API
-declare const vscode: any;
 /**
  * Tab Manager Class (Refactored)
  *

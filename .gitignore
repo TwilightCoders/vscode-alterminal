@@ -9,6 +9,7 @@ build/
 # TypeScript
 *.js.map
 *.d.ts
+!src/**/*.d.ts
 
 # Logs
 *.log
