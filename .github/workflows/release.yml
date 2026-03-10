@@ -40,8 +40,6 @@ jobs:
               tarball=$(npm pack "$pkg" --pack-destination /tmp 2>/dev/null)
               mkdir -p "node_modules/$pkg"
               tar xzf "/tmp/$tarball" -C "node_modules/$pkg" --strip-components=1
-              # Remove os/cpu restrictions so npm list accepts them on any platform
-              node -e "const p=require('./' + 'node_modules/$pkg/package.json'); delete p.os; delete p.cpu; require('fs').writeFileSync('node_modules/$pkg/package.json', JSON.stringify(p, null, 2))"
             fi
           done
 
@@ -51,7 +49,6 @@ jobs:
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             TAG="${{ github.ref_name }}"
-            # Sync package.json version from tag (v0.2.0 -> 0.2.0)
             VERSION="${TAG#v}"
             NAME="Alterminal ${TAG}"
             PRERELEASE=false
@@ -78,7 +75,56 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx @vscode/vsce package --no-git-tag-version --skip-license -o alterminal.vsix
+        run: |
+          # vsce's npm list rejects cross-platform optional deps, so we build
+          # with --no-dependencies and inject node_modules into the vsix.
+          npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies -o alterminal-bare.vsix
+
+          # Unpack, inject deps, repack
+          WORK=$(mktemp -d)
+          cd "$WORK"
+          unzip -q "$GITHUB_WORKSPACE/alterminal-bare.vsix"
+
+          # Copy runtime dependencies into the vsix
+          DEPS=(
+            "@lydell/node-pty"
+            "@lydell/node-pty-darwin-arm64"
+            "@lydell/node-pty-darwin-x64"
+            "@lydell/node-pty-linux-arm64"
+            "@lydell/node-pty-linux-x64"
+            "@lydell/node-pty-win32-x64"
+            "@vscode/codicons"
+            "@xterm/addon-fit"
+            "@xterm/addon-serialize"
+            "@xterm/addon-unicode11"
+            "@xterm/addon-web-links"
+            "@xterm/addon-webgl"
+            "@xterm/xterm"
+            "xterm-link-provider"
+          )
+          for dep in "${DEPS[@]}"; do
+            src="$GITHUB_WORKSPACE/node_modules/$dep"
+            if [ -d "$src" ]; then
+              mkdir -p "extension/node_modules/$dep"
+              cp -r "$src"/. "extension/node_modules/$dep/"
+            else
+              echo "⚠️ Missing dependency: $dep"
+            fi
+          done
+
+          # Repackage vsix
+          rm "$GITHUB_WORKSPACE/alterminal-bare.vsix"
+          zip -qr "$GITHUB_WORKSPACE/alterminal.vsix" .
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "$WORK"
+
+          # Verify size is reasonable (should be ~10MB with deps, not ~3MB without)
+          SIZE=$(stat --printf='%s' alterminal.vsix)
+          echo "VSIX size: $((SIZE / 1024 / 1024))MB ($SIZE bytes)"
+          if [ "$SIZE" -lt 5000000 ]; then
+            echo "❌ VSIX too small — dependencies likely missing"
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
