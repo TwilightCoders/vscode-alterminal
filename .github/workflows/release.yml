@@ -28,7 +28,7 @@ jobs:
 
       - name: Install all platform binaries
         run: |
-          npm install --no-save \
+          npm install --no-save --force \
             @lydell/node-pty-darwin-arm64 \
             @lydell/node-pty-darwin-x64 \
             @lydell/node-pty-linux-arm64 \
