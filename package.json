@@ -10,6 +10,7 @@
     "type": "git",
     "url": "https://github.com/twilightcoders/vscode-alterminal"
   },
+  "extensionKind": ["workspace"],
   "engines": {
     "vscode": "^1.108.0"
   },
