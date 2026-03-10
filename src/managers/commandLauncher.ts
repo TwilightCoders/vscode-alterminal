@@ -15,7 +15,6 @@ import { Logger } from "../utils/logger";
 export class CommandLauncher {
   constructor(
     private readonly commandManager: CommandManager,
-    private readonly onCommandSelected: (command: string, cwd?: string) => void,
   ) {}
 
   /**

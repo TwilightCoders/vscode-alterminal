@@ -13,6 +13,7 @@ import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
 import { MessageDispatcher } from "./managers/messageDispatcher";
 import { FocusGuard } from "./managers/focusGuard";
 import { ShellDetector } from "./utils/shellDetector";
+import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 
 /**
  * AlterminalProvider
@@ -31,7 +32,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _ptyManager: PtyManager;
   private _context: vscode.ExtensionContext;
   private _commandManager: CommandManager;
-  private _serializer?: any;
+  private _serializer?: WebviewViewSerializer;
   private _tabTitleProvider = new TabTitleProvider();
 
   // Managers
@@ -48,7 +49,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     private readonly _extensionUri: vscode.Uri,
     context: vscode.ExtensionContext,
     ptyManager: PtyManager,
-    serializer?: any,
+    serializer?: WebviewViewSerializer,
   ) {
     AlterminalProvider._instance = this;
     this._context = context;
@@ -71,7 +72,6 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.configurationWatcher = new ConfigurationWatcher(context);
     this.commandLauncher = new CommandLauncher(
       this._commandManager,
-      (command: string, cwd?: string) => this.createNewTabWithCommand(command, cwd),
     );
     this._ptyManager.setCommandExpander((cmd) => this._commandManager.expandCommand(cmd));
     this.fileOperationHandler = new FileOperationHandler(this._ptyManager);

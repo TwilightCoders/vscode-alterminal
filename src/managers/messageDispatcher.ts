@@ -220,6 +220,15 @@ export class MessageDispatcher {
   }
 
   /**
+   * Clean up bell tracking state for a closed tab.
+   */
+  public handleTabClosed(tabId: number): void {
+    this._pendingBells.delete(tabId);
+    this._unreadBellTabs.delete(tabId);
+    this._bellNotifiedAt.delete(tabId);
+  }
+
+  /**
    * Register the window title variable. Call once at activation.
    */
   public static registerTitleVariable(): void {

@@ -184,14 +184,9 @@ export class CommandManager {
    * Get saved commands sorted by usage and recency
    */
   getSavedCommands(): SavedCommand[] {
-    return this.savedCommands.slice().sort((a, b) => {
-      // Weighted score: count primary, recency secondary
-      const aScore =
-        a.count * 1000000000000 + new Date(a.lastUsed).getTime();
-      const bScore =
-        b.count * 1000000000000 + new Date(b.lastUsed).getTime();
-      return bScore - aScore;
-    });
+    return this.savedCommands.slice().sort((a, b) =>
+      (b.count - a.count) || (new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime()),
+    );
   }
 
   /**
