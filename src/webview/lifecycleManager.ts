@@ -192,9 +192,6 @@ export class TerminalLifecycleManager implements ILifecycleManager {
       // Clear any pending timers
       // No timers to clear in simplified model
 
-      // Clear all event listeners
-      this._listeners.clear();
-
       // Mark as disposed
       this._isDisposed = true;
 
@@ -203,6 +200,9 @@ export class TerminalLifecycleManager implements ILifecycleManager {
         terminalId: this.terminalId,
         timestamp: Date.now(),
       });
+
+      // Clear all event listeners after emitting
+      this._listeners.clear();
 
       Logger.debug(
         `🗑️ LifecycleManager disposed for terminal ${this.terminalId}`,

@@ -532,8 +532,11 @@ export class TabManager {
    */
   updateSaveButtonVisibility(command: any, isSaved: any): void {
     // Handle save items in dropdowns only (no more tab bar save buttons)
-    const dropdownSaveItems = document.querySelectorAll<HTMLElement>(
-      `.tab-dropdown-item[data-action="save"][data-command="${command}"]`,
+    const allSaveItems = document.querySelectorAll<HTMLElement>(
+      `.tab-dropdown-item[data-action="save"]`,
+    );
+    const dropdownSaveItems = Array.from(allSaveItems).filter(
+      (el) => el.dataset.command === command,
     );
     dropdownSaveItems.forEach((item) => {
       if (isSaved) {
@@ -752,9 +755,9 @@ export class TabManager {
 
     // Get tabs in DOM order to preserve user's reordering
     const tabElements = document.querySelectorAll<HTMLElement>(".tab");
-    const tabIdsInOrder = Array.from(tabElements).map((tab) =>
-      parseInt(tab.dataset.tabId!),
-    );
+    const tabIdsInOrder = Array.from(tabElements)
+      .map((tab) => parseInt(tab.dataset.tabId ?? "0", 10))
+      .filter((id) => !isNaN(id));
 
     // Iterate in DOM order instead of Map order
     for (const id of tabIdsInOrder) {
