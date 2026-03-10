@@ -42,6 +42,8 @@ jobs:
               tar xzf "/tmp/$tarball" -C "node_modules/$pkg" --strip-components=1
             fi
           done
+          # Rebuild package-lock so npm list sees manually-placed packages as valid
+          npm install --package-lock-only --ignore-scripts
 
       - name: Determine release info
         id: release_info
@@ -76,7 +78,7 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies -o alterminal.vsix
+        run: npx @vscode/vsce package --no-git-tag-version --skip-license -o alterminal.vsix
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

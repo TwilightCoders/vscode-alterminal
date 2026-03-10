@@ -3,10 +3,17 @@ out/**/*.map
 src/**
 !src/templates/webview.html
 .vscode-test/**
+.vscode/**
+.github/**
+.claude/**
+.qlty/**
 .gitignore
 .yarnrc
+docs/**
+working/**
 vsc-extension-quickstart.md
 **/tsconfig.json
+**/tsconfig.*.json
 **/.eslintrc.json
 **/*.map
 **/*.ts
