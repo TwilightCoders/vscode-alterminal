@@ -3,17 +3,25 @@
  *
  * Provides conditional logging that only outputs in debug/development mode.
  * Prevents console spam in production builds.
+ *
+ * In all modes, warn/error go to a dedicated "Alterminal" output channel
+ * (visible in the Output panel dropdown). In dev mode, debug/info/trace
+ * also appear there.
  */
+
+import * as vscode from "vscode";
 
 export class Logger {
   private static debugFilter: string[] | null = null;
   private static devMode: boolean | null = null; // explicit runtime flag
   private static configured = false;
+  private static _channel: vscode.LogOutputChannel | undefined;
 
   /** Configure logger with explicit dev/prod mode (call once at activation). */
   static configure(isDev: boolean) {
     this.devMode = isDev;
     this.configured = true;
+    this._channel = vscode.window.createOutputChannel("Alterminal", { log: true });
     if (!isDev) {
       // Hard-disable noisy levels for perf; keep warn/error always.
       // Reassign only if not already no-op to avoid breaking references.
@@ -26,6 +34,10 @@ export class Logger {
 
   private static _noop = (..._args: any[]) => {};
   private static _traceNoopWrapper = (_message: string, ..._args: any[]) => {};
+
+  private static _formatArgs(args: any[]): string {
+    return args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
+  }
 
   private static isDebugMode(): boolean {
   // Prefer explicit runtime flag if configured
@@ -67,34 +79,38 @@ export class Logger {
 
   static debug(...args: any[]): void {
     if (this.shouldLog(args)) {
-      console.log("🐛 DEBUG:", ...args);
+      this._channel?.debug(this._formatArgs(args));
     }
   }
 
   static info(...args: any[]): void {
     if (this.isDebugMode()) {
-      console.info("[INFO]", ...args);
+      this._channel?.info(this._formatArgs(args));
     }
   }
 
   static warn(...args: any[]): void {
-    // Always show warnings
-    console.warn("[WARN]", ...args);
+    this._channel?.warn(this._formatArgs(args));
   }
 
   static error(...args: any[]): void {
-    // Always show errors
-    console.error("[ERROR]", ...args);
+    this._channel?.error(this._formatArgs(args));
   }
 
   static trace(message: string, ...args: any[]): void {
     if (this.isDebugMode()) {
-      console.log(`[TRACE] ${message}`, ...args);
+      this._channel?.trace(`${message} ${this._formatArgs(args)}`);
     }
   }
 
   /** Public cheap guard for hot-path caller side wrapping */
   static isDebugEnabled(): boolean { return this.isDebugMode(); }
+
+  /** Dispose the output channel (call on extension deactivate). */
+  static dispose(): void {
+    this._channel?.dispose();
+    this._channel = undefined;
+  }
 }
 
 // For webview context (JavaScript)

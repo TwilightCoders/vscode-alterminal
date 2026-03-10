@@ -275,5 +275,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  Logger.info("🛑 Alterminal extension is being deactivated");
+  Logger.info("Alterminal extension is being deactivated");
+  Logger.dispose();
 }
