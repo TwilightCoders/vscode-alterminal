@@ -11,6 +11,7 @@ import { FileOperationHandler } from "./managers/fileOperationHandler";
 import { TabContextMenuHandler } from "./managers/tabContextMenuHandler";
 import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
 import { MessageDispatcher } from "./managers/messageDispatcher";
+import { FocusGuard } from "./managers/focusGuard";
 import { ShellDetector } from "./utils/shellDetector";
 
 /**
@@ -41,6 +42,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private tabContextMenuHandler: TabContextMenuHandler;
   private webviewLifecycleManager: WebViewLifecycleManager;
   public messageDispatcher: MessageDispatcher;
+  private focusGuard: FocusGuard;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -90,6 +92,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       (msg: any) => this._handleFormatTabTitle(msg),
       () => this._handleWebviewReady(),
       this._serializer ? (msg: any) => this._serializer.handleMessage(msg) : undefined,
+      () => this.focusGuard.recordInteraction(),
     );
 
     // Wire PTY-side bell detection to notification handler
@@ -107,6 +110,9 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this._commandManager,
       () => this._checkDeveloperMode(),
     );
+
+    // Focus guard: reclaim focus when another extension steals it
+    this.focusGuard = new FocusGuard();
 
     // Listen for configuration changes
     this.configurationWatcher.onConfigChanged((config) => {
@@ -142,6 +148,9 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     if (this._serializer && this._serializer.setAlterminal) {
       this._serializer.setAlterminal(alterminal);
     }
+
+    // Start focus guard for this webview
+    this.focusGuard.attach(alterminal);
 
     // Delegate to lifecycle manager
     this.webviewLifecycleManager.resolveWebviewView(
@@ -530,6 +539,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Dispose of all resources
    */
   public dispose(): void {
+    this.focusGuard.detach();
     this._ptyManager.dispose();
     this.configurationWatcher.dispose();
   }
