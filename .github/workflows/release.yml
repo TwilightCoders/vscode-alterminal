@@ -40,10 +40,10 @@ jobs:
               tarball=$(npm pack "$pkg" --pack-destination /tmp 2>/dev/null)
               mkdir -p "node_modules/$pkg"
               tar xzf "/tmp/$tarball" -C "node_modules/$pkg" --strip-components=1
+              # Remove os/cpu restrictions so npm list accepts them on any platform
+              node -e "const p=require('./' + 'node_modules/$pkg/package.json'); delete p.os; delete p.cpu; require('fs').writeFileSync('node_modules/$pkg/package.json', JSON.stringify(p, null, 2))"
             fi
           done
-          # Rebuild package-lock so npm list sees manually-placed packages as valid
-          npm install --package-lock-only --ignore-scripts
 
       - name: Determine release info
         id: release_info
