@@ -466,6 +466,13 @@ export class PtyManager {
         // Detect bare BEL characters (\x07) — delegates to BellDetector
         // which handles chunked OSC sequences across data events.
         if (this._onBell && this._bellDetector.detect(tabId, data)) {
+          // Log context around the BEL for diagnostics
+          const excerpt = data.length <= 200 ? data : data.substring(0, 200);
+          const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
+            const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
+            return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
+          });
+          Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
           this._onBell(tabId);
         }
 

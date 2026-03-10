@@ -24,8 +24,12 @@ export class MessageDispatcher {
   private _unreadBellTabs: Set<number> = new Set();
   private _lastBellTime: number = 0;
   private _clearBellTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Per-tab timestamp of last notification — suppresses repeated alerts. */
+  private _bellNotifiedAt: Map<number, number> = new Map();
   private static readonly BELL_DEBOUNCE_MS = 3000;
   private static readonly BELL_CLEAR_GRACE_MS = 2000;
+  /** After notifying for a tab, suppress further notifications for this long. */
+  private static readonly BELL_COOLDOWN_MS = 30_000;
   private static readonly TITLE_CONTEXT_KEY = "alterminal:bellIndicator";
 
   constructor(
@@ -39,6 +43,7 @@ export class MessageDispatcher {
     private readonly onFormatTabTitle: (msg: any) => void,
     private readonly onWebviewReady: () => void,
     private readonly serializerHandleMessage?: (msg: any) => void,
+    private readonly onInteraction?: () => void,
   ) {}
 
   /**
@@ -86,6 +91,8 @@ export class MessageDispatcher {
         this.onWebviewReady();
       },
       switchTab: () => {}, // No-op - handled in webview
+      bellDiagnostic: (msg: any) =>
+        Logger.warn(`🔔 Webview bell [tab ${msg.tabId}] source: ${msg.source}`),
       playBellSound: (msg: any) => this.handleBellSound(msg.tabId, msg.tabLabel),
       panelFocused: () => this.clearBellIndicator(),
       setDebugFilter: () => {}, // Handled in webview
@@ -123,6 +130,9 @@ export class MessageDispatcher {
     alterminal.webview.onDidReceiveMessage(
       (message) => {
         try {
+          // Record user interaction for focus guard
+          this.onInteraction?.();
+
           // Direct O(1) lookup for both provider and hot-path messages
           const handler =
             providerHandlers[message.command as keyof typeof providerHandlers];
@@ -154,7 +164,6 @@ export class MessageDispatcher {
 
   public handleBellSound(tabId: number, tabLabel: string): void {
     Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
-    this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
 
     // Suppress notification spam: if we already notified for this tab
     // recently, only update the title indicator (no toast).
@@ -199,12 +208,14 @@ export class MessageDispatcher {
       this._clearBellTimer = setTimeout(() => {
         this._clearBellTimer = null;
         this._unreadBellTabs.clear();
+        this._bellNotifiedAt.clear();
         this._updateTitleIndicator();
       }, MessageDispatcher.BELL_CLEAR_GRACE_MS - elapsed);
       return;
     }
 
     this._unreadBellTabs.clear();
+    this._bellNotifiedAt.clear();
     this._updateTitleIndicator();
   }
 
@@ -247,6 +258,12 @@ export class MessageDispatcher {
     this._pendingBells.clear();
 
     if (bells.size === 0) return;
+
+    // Mark all notified tabs with the current timestamp for cooldown
+    const now = Date.now();
+    for (const tabId of bells.keys()) {
+      this._bellNotifiedAt.set(tabId, now);
+    }
 
     const labels = Array.from(bells.values());
     const body = bells.size === 1
