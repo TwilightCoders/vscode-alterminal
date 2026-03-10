@@ -162,6 +162,7 @@ export class PtyManager {
    * Handle working directory change detected from OSC 7
    */
   private _handleCwdChange(tabId: number, cwd: string): void {
+    Logger.info(`CWD change [tab ${tabId}]: ${cwd}`);
     this._currentWorkingDirs.set(tabId, cwd);
     this._alterminal?.webview.postMessage({
       command: "cwdChange",
@@ -405,9 +406,10 @@ export class PtyManager {
 
       if (this._extensionPath && terminalType !== "command") {
         if (shellBase === "zsh" || shellBase.startsWith("zsh")) {
-          const zdotdir = path.join(this._extensionPath, "shell-integration", "zsh");
-          shellIntEnv.ALTERMINAL_ORIG_ZDOTDIR = process.env.ZDOTDIR || process.env.HOME || "";
-          shellIntEnv.ZDOTDIR = zdotdir;
+          // zsh integration via env var + PTY write (ZDOTDIR trick doesn't
+          // work when /etc/zshenv sets ZDOTDIR — it can't be overridden).
+          const zshInit = path.join(this._extensionPath, "shell-integration", "zsh-init.zsh");
+          shellIntEnv.ALTERMINAL_SHELL_INIT = zshInit;
           hasShellIntegration = true;
         } else if (shellBase === "bash" || shellBase.startsWith("bash")) {
           const bashInit = path.join(this._extensionPath, "shell-integration", "bash.sh");
@@ -442,6 +444,13 @@ export class PtyManager {
         },
       });
 
+      // Inject shell integration by writing a source command to the PTY.
+      // Leading space avoids saving to history (HIST_IGNORE_SPACE).
+      // The shell processes this as its first input once the prompt is ready.
+      if (shellIntEnv.ALTERMINAL_SHELL_INIT) {
+        ptyProcess.write(` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
+      }
+
       ptyProcess.onData((data) => {
         // Fast path: if data contains no ESC character, skip all escape
         // sequence extraction and filtering.  This covers the vast majority
@@ -453,8 +462,10 @@ export class PtyManager {
         // escape sequences (OSC 7 for CWD, OSC 1337 for user vars).
         if (hasEsc) {
           const cwd = this._extractCwdFromOsc7(data);
-          if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
-            this._handleCwdChange(tabId, cwd);
+          if (cwd) {
+            if (cwd !== this._currentWorkingDirs.get(tabId)) {
+              this._handleCwdChange(tabId, cwd);
+            }
           }
 
           const userVars = this._extractUserVars(data);
