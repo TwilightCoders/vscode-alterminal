@@ -2,7 +2,7 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
-## [0.2.36]
+## [0.1.36]
 
 ### New Features
 
@@ -24,7 +24,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - `shellPath` threaded through the full webview → messageHandler → tabManager → terminal → ptyManager pipeline
 - Cross-window communication via `vscode://` URI routing with `/bell` and `/focus` handlers
 
-## [0.2.32]
+## [0.1.32]
 
 ### Improvements
 
@@ -32,7 +32,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Saved command disambiguation**: Launch picker now disambiguates saved commands by label when multiple commands share the same command string
 - **Template token resolution**: Distinguish null vs undefined in template token resolution for more predictable behavior
 
-## [0.2.31]
+## [0.1.31]
 
 ### Improvements
 
@@ -40,21 +40,21 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Code cleanup**: Remove dead code and broken one-way message paths
 - **Settings bridge fix**: Wire broken openSettings and saveCurrentCommand message bridges
 
-## [0.2.30]
+## [0.1.30]
 
 ### New Features
 
 - **Interactive tokens**: `{i:prompt}` in saved commands prompts the user at launch time — use in `cwd` for a folder picker or in `command` for an input box
 - **Per-command CWD**: Saved commands now support a `cwd` property so each command can launch in a specific directory
 
-## [0.2.29]
+## [0.1.29]
 
 ### Bug Fixes
 
 - **Webview module loading**: Separate ES6 build output for webview modules to avoid overwriting extension host's CommonJS output
 - **Shell integration**: Bundled lightweight shell hooks for zsh, bash, and fish for event-driven CWD tracking
 
-## [0.2.28]
+## [0.1.28]
 
 ### New Features
 
@@ -83,14 +83,14 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 - **Separate Webview Output**: Webview ES6 modules now compile to `out-webview/` to avoid overwriting the extension host's CommonJS output, fixing module loading failures
 
-## [0.2.27]
+## [0.1.27]
 
 ### Bug Fixes
 
 - **Separated Buffer Storage**: Terminal metadata saved to clean JSON state, buffers stored individually by UUID. Fixes editable debug state and legacy migration
 - **Saved Command Overwrite**: Fixed race condition where saved commands could be overwritten
 
-## [0.2.26]
+## [0.1.26]
 
 ### New Features
 
@@ -104,7 +104,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Fixed Bell Notifications**: Bell icon now only triggers on actual BEL characters (`\x07`), not on any terminal output. Previously, any substantial output on an inactive tab would show the bell
 - **Tightened Link Detection**: Bare relative paths no longer match trailing slashes (which caused xterm-link-provider to miscalculate link regions and bleed underlines across lines)
 
-## [0.2.25]
+## [0.1.25]
 
 ### New Features
 
@@ -118,7 +118,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Extracted shared `TemplateEngine` from `TabTitleProvider` for reuse across tab titles and command templates
 - Removed dead code: unused terminal methods, wasteful save-on-every-message, stale fields
 
-## [0.2.24]
+## [0.1.24]
 
 ### Architecture
 
@@ -130,33 +130,33 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 - Fixed shell escaping in `sendFilePath` (POSIX quote escaping)
 
-## [0.2.23]
+## [0.1.23]
 
 ### Bug Fixes
 
 - **Fixed missing platform binaries**: Added all platform-specific node-pty binaries to .vscodeignore to ensure they're included in published package (fixes "Cannot find module '@lydell/node-pty'" error on all platforms)
 
-## [0.2.22]
+## [0.1.22]
 
 ### Bug Fixes
 
 - **Fixed blank terminal after workspace switch**: Terminal now properly refreshes and redraws when switching between VS Code workspaces, preventing blank display until typing
 - **Added focus debugging**: Comprehensive logging to track webview focus changes for troubleshooting focus-related issues
 
-## [0.2.21]
+## [0.1.21]
 
 ### Bug Fixes
 
 - **Fixed missing node-pty binaries**: Re-packaged with all platform binaries (v0.2.20 was broken)
 
-## [0.2.20]
+## [0.1.20]
 
 ### Bug Fixes
 
 - **Fixed tab disappearing when switching between panel views**: Added `retainContextWhenHidden` option to webview provider registration
 - **Impact**: Alterminal tab now stays visible in the tab bar regardless of which other panel tabs are active
 
-## [0.2.19]
+## [0.1.19]
 
 ### Bug Fixes
 
@@ -164,7 +164,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Automatic buffer replay**: When switching back to Alterminal, all buffered output is sent to the terminal
 - **Impact**: No more lost output when switching between Alterminal and other panel tabs (Terminal, Debug Console, etc.)
 
-## [0.2.18]
+## [0.1.18]
 
 ### Bug Fixes - CRITICAL for Remote-SSH/WSL Users
 
@@ -172,7 +172,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Root cause**: Extension was only packaged with macOS binaries, causing activation failures when connecting to Linux servers via Remote-SSH or using WSL
 - **Impact**: Remote-SSH and WSL users will no longer see "@lydell/node-pty binary not found" errors
 
-## [0.2.17]
+## [0.1.17]
 
 ### Bug Fixes - CRITICAL for Windows Users
 
@@ -190,7 +190,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Terminals will properly initialize on first launch
 - Better shell environment inheritance on Windows
 
-## [0.2.16]
+## [0.1.16]
 
 ### Performance Improvements
 
@@ -214,7 +214,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Eliminated memory leaks during long sessions
 - Smoother keyboard interactions
 
-## [0.2.15]
+## [0.1.15]
 
 ### Architecture
 
@@ -233,14 +233,14 @@ All notable changes to the Alterminal extension will be documented in this file.
   - Tab titles render correctly without template placeholder artifacts
 - **Fixed Tab Title Rendering on Restore**: Skip `formatTabTitle` request during state restoration to use saved labels directly, preventing double-formatting and template placeholder issues
 
-## [0.2.14]
+## [0.1.14]
 
 ### Bug Fixes
 
 - **Fixed Link Click Sandbox Error**: Override `window.confirm()` in webview to prevent sandbox errors when xterm.js attempts to show confirmation dialogs. Links now activate cleanly with Cmd/Ctrl+Click without errors.
 - **Fixed State Restoration on Panel Reopen**: Terminal state now properly restores when closing and reopening the Alterminal panel. Added `resetRestoreTrigger()` to clear restoration guard on panel visibility changes.
 
-## [0.2.13]
+## [0.1.13]
 
 ### Architecture
 
@@ -266,7 +266,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Fixed State Restoration**: Corrected state restoration flow to properly initialize terminals on first load and restore saved state on subsequent loads
 - **Fixed Serializer Context Binding**: Fixed `this` context loss in serializer's handleMessage method by wrapping in arrow function
 
-## [0.2.12]
+## [0.1.12]
 
 ### Performance Improvements
 
@@ -284,7 +284,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 - **Removed Ghost Cursor Workarounds**: Eliminated all ghost cursor polling/fixing code since the issue was resolved fundamentally by properly handling terminal escape sequences. Removes unnecessary DOM queries and interval timers.
 
-## [0.2.11]
+## [0.1.11]
 
 ### Performance Improvements
 
@@ -295,7 +295,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 - **Fixed HTTPS Link Sandbox Error**: Added `preventDefault()` to link activation to avoid "allow-modals" sandbox errors when clicking HTTPS links
 
-## [0.2.10]
+## [0.1.10]
 
 ### Improvements
 
@@ -303,7 +303,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **More Comprehensive Pattern Matching**: Improved regex to catch more path-like patterns while maintaining accuracy
 - **Updated Tests**: Added tests for git branch/remote references (24 tests total, all passing)
 
-## [0.2.9]
+## [0.1.9]
 
 ### Bug Fixes
 
@@ -315,14 +315,14 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Added Comprehensive Test Suite**: 22 tests covering file paths, directories, URLs, and edge cases to prevent future regressions
 - All link detection scenarios now have automated test coverage
 
-## [0.2.8]
+## [0.1.8]
 
 ### Technical Improvements
 
 - **Code Cleanup**: Removed ~230 lines of dead code including unused workspace file cache system, test commands, and debug statements
 - **Reduced Bundle Size**: Cleaner codebase with better maintainability
 
-## [0.2.7]
+## [0.1.7]
 
 ### Improvements
 
@@ -336,7 +336,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Links now require Command/Ctrl modifier key to activate, preventing accidental clicks during text selection
 - HTTP/HTTPS URLs now properly detected and open in browser (works in production mode)
 
-## [0.2.6]
+## [0.1.6]
 
 ### Bug Fixes
 
@@ -350,7 +350,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Removed duplicate link handling code (unused linkProvider.ts)
 - Added file/directory detection with appropriate VS Code commands
 
-## [0.2.5]
+## [0.1.5]
 
 ### Bug Fixes
 
@@ -364,7 +364,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - Removed expensive workspace file scanning that could hang the extension on large projects
 - Added CMD/Ctrl key state tracking with visual cursor feedback for better UX
 
-## [0.2.4]
+## [0.1.4]
 
 ### New Features
 
@@ -377,7 +377,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **No Save Prompts**: Debug files (state and buffers) now write to OS temp directory - close them without save prompts, OS handles cleanup
 - **Better Async Handling**: Fixed message handling for buffer retrieval with proper timeout and error handling
 
-## [0.2.3]
+## [0.1.3]
 
 ### New Features
 
@@ -391,7 +391,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 - **Cleaner Debug Menu**: Removed unused debug commands for a more focused interface
 - **Visual Polish**: Subtle grey borders around tabs for better definition
 
-## [0.2.0]
+## [0.1.1]
 
 ### New Features
 
