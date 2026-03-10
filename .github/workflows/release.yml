@@ -26,26 +26,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Compile
-        run: npm run compile
-
-      - name: Package VSIX
-        run: npx @vscode/vsce package --no-git-tag-version --skip-license -o alterminal.vsix
+      - name: Install all platform binaries
+        run: |
+          npm install --no-save \
+            @lydell/node-pty-darwin-arm64 \
+            @lydell/node-pty-darwin-x64 \
+            @lydell/node-pty-linux-arm64 \
+            @lydell/node-pty-linux-x64 \
+            @lydell/node-pty-win32-x64
 
       - name: Determine release info
         id: release_info
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             TAG="${{ github.ref_name }}"
+            # Sync package.json version from tag (v0.2.0 -> 0.2.0)
+            VERSION="${TAG#v}"
             NAME="Alterminal ${TAG}"
             PRERELEASE=false
           elif [[ -n "${{ inputs.tag_name }}" ]]; then
             TAG="${{ inputs.tag_name }}"
+            VERSION="${CURRENT_VERSION}"
             NAME="Alterminal ${TAG} (dev)"
             PRERELEASE=true
           else
             TAG="dev-$(date +%Y%m%d-%H%M%S)"
+            VERSION="${CURRENT_VERSION}"
             NAME="Alterminal ${TAG} (dev)"
             PRERELEASE=true
           fi
@@ -53,6 +60,15 @@ jobs:
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set package version
+        run: npm version "${{ steps.release_info.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package VSIX
+        run: npx @vscode/vsce package --no-git-tag-version --skip-license -o alterminal.vsix
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
