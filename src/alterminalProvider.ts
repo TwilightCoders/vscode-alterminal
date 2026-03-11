@@ -455,6 +455,14 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           // Handle sentinel items
           if (sel === editItem && !value) {
             qp.dispose();
+            // Seed a template entry if the setting is empty/missing so users can see the format
+            const config = vscode.workspace.getConfiguration("alterminal");
+            const existing = config.get<unknown[]>("savedCommands", []);
+            if (existing.length === 0) {
+              await config.update("savedCommands", [
+                { label: "Example", command: "echo hello" },
+              ], vscode.ConfigurationTarget.Global);
+            }
             vscode.commands.executeCommand("workbench.action.openSettingsJson", {
               revealSetting: { key: "alterminal.savedCommands" },
             });
