@@ -248,6 +248,11 @@
     "configuration": {
       "title": "Alterminal",
       "properties": {
+        "alterminal.ptyDaemon.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Keep terminal processes alive across window reloads. When enabled, PTY processes are managed by a background daemon that persists independently of the VS Code extension host. **Experimental.**"
+        },
         "alterminal.tabLayout": {
           "type": "string",
           "enum": [

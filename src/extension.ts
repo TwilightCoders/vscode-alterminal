@@ -7,8 +7,9 @@ import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 import { MessageDispatcher } from "./managers/messageDispatcher";
+import { DaemonManager } from "./daemon/daemonManager";
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   // Determine dev mode - enable for development, NODE_ENV, or preview versions
   const packageJson = require('../package.json');
   const isDebugMode =
@@ -42,6 +43,25 @@ export function activate(context: vscode.ExtensionContext) {
   const ptyManager = new PtyManager();
   ptyManager.setExtensionVersion(packageJson.version || "0.0.0");
   ptyManager.setExtensionPath(context.extensionUri.fsPath);
+
+  // PTY Daemon: persistent PTY processes that survive window reloads.
+  // Awaited so daemon is ready before webview restore triggers createPty.
+  const daemonEnabled = vscode.workspace.getConfiguration("alterminal").get<boolean>("ptyDaemon.enabled", false);
+  if (daemonEnabled) {
+    const daemonManager = new DaemonManager(context, context.extensionUri.fsPath);
+    _daemonManager = daemonManager;
+    try {
+      const client = await daemonManager.connect();
+      if (client) {
+        ptyManager.setDaemonClient(client);
+        Logger.info("PTY daemon mode active");
+      } else {
+        Logger.info("PTY daemon unavailable, using direct mode");
+      }
+    } catch (err) {
+      Logger.error("PTY daemon connection failed:", err);
+    }
+  }
 
   // Create serializer to manage persisted state
   const serializer = new WebviewViewSerializer(context);
@@ -274,7 +294,14 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
+// Module-level reference for deactivate() to access
+let _daemonManager: DaemonManager | null = null;
+
 export function deactivate() {
   Logger.info("Alterminal extension is being deactivated");
+  if (_daemonManager) {
+    _daemonManager.disconnect();
+    _daemonManager = null;
+  }
   Logger.dispose();
 }

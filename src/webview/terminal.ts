@@ -817,6 +817,7 @@ export class TerminalInstance {
     this.vscode.postMessage({
       command: "createPty",
       tabId: this.id,
+      uuid: this.uuid,
       terminalType: this.terminalType,
       launchCommand: this.launchCommand,
       cwd: this.cwd || undefined,

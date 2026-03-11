@@ -44,6 +44,7 @@ import { Debouncer } from "../utils/debouncer";
 import { BellDetector } from "./bellDetector";
 import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
+import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
 
 export class PtyManager {
   private _ptyProcesses = new Map<number, pty.IPty>();
@@ -58,6 +59,15 @@ export class PtyManager {
   private _extensionPath: string = "";
   private _expandCommand: ((cmd: string) => string) | null = null;
   private _onBell: ((tabId: number) => void) | null = null;
+
+  // Daemon mode: routes PTY operations through a persistent daemon process
+  private _daemonClient: PtyDaemonClient | null = null;
+  // Map tabId → ptyId (UUID) for daemon mode PTY identity
+  private _tabPtyIds = new Map<number, string>();
+  // Reverse map ptyId → tabId for daemon event routing
+  private _ptyIdToTab = new Map<string, number>();
+  // Live daemon PTYs discovered on connect (before tabs restore)
+  private _liveDaemonPtys = new Set<string>();
 
   // Tabs using shell integration (OSC 7) don't need the lsof fallback
   private _shellIntegrationTabs = new Set<number>();
@@ -87,11 +97,163 @@ export class PtyManager {
   }
 
   /**
+   * Set the daemon client for persistent PTY mode.
+   * When set, PTY operations route through the daemon instead of
+   * spawning processes directly in the extension host.
+   */
+  public setDaemonClient(client: PtyDaemonClient | null): void {
+    // Clean up previous daemon event listeners
+    if (this._daemonClient) {
+      this._daemonClient.removeAllListeners();
+    }
+
+    this._daemonClient = client;
+    this._liveDaemonPtys.clear();
+
+    if (client) {
+      client.on("data", (ptyId: string, data: string) => {
+        const tabId = this._ptyIdToTab.get(ptyId);
+        if (tabId === undefined) return;
+        this._handlePtyData(tabId, data);
+      });
+
+      client.on("exit", (ptyId: string, _exitCode: number) => {
+        const tabId = this._ptyIdToTab.get(ptyId);
+        if (tabId === undefined) return;
+        this._cleanupProcess(tabId);
+      });
+
+      client.on("replayStart", (ptyId: string) => {
+        const tabId = this._ptyIdToTab.get(ptyId);
+        if (tabId === undefined) return;
+        Logger.info(`Replay starting for tab ${tabId} (ptyId ${ptyId})`);
+      });
+
+      client.on("replayEnd", (ptyId: string) => {
+        const tabId = this._ptyIdToTab.get(ptyId);
+        if (tabId === undefined) return;
+        Logger.info(`Replay complete for tab ${tabId} (ptyId ${ptyId})`);
+      });
+
+      // Pre-fetch live PTYs so createPtyProcess can reattach on restore
+      client.list().then((ptys) => {
+        for (const pty of ptys) {
+          this._liveDaemonPtys.add(pty.ptyId);
+        }
+        if (ptys.length > 0) {
+          Logger.info(`Daemon has ${ptys.length} live PTY(s) available for reattach`);
+        }
+      }).catch(() => {
+        // Non-fatal — will spawn fresh PTYs
+      });
+    }
+  }
+
+  /** Whether the daemon is active and connected. */
+  public get daemonActive(): boolean {
+    return this._daemonClient?.connected ?? false;
+  }
+
+  /**
+   * Reattach to PTYs that survived a reload via the daemon.
+   * Called during restore when daemon has live PTYs matching saved UUIDs.
+   */
+  public async reattachDaemonPty(tabId: number, ptyId: string): Promise<boolean> {
+    if (!this._daemonClient?.connected) return false;
+
+    this._tabPtyIds.set(tabId, ptyId);
+    this._ptyIdToTab.set(ptyId, tabId);
+
+    try {
+      await this._daemonClient.attach(ptyId);
+      Logger.info(`Reattached to daemon PTY ${ptyId} for tab ${tabId}`);
+      return true;
+    } catch (err) {
+      Logger.error(`Failed to reattach to daemon PTY ${ptyId}:`, err);
+      this._tabPtyIds.delete(tabId);
+      this._ptyIdToTab.delete(ptyId);
+      return false;
+    }
+  }
+
+  /**
+   * List live PTYs in the daemon for this session.
+   */
+  public async listDaemonPtys(): Promise<Array<{ ptyId: string; pid: number; processName: string; cwd: string }>> {
+    if (!this._daemonClient?.connected) return [];
+    try {
+      return await this._daemonClient.list();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Filter out escape sequences that can cause VS Code to steal focus
    * These include VS Code shell integration sequences and focus reporting mode
    */
   private _filterVSCodeSequences(data: string): string {
     return data.replace(PtyManager.FILTER_PATTERN, '');
+  }
+
+  /**
+   * Common PTY data handler — used by both direct PTY and daemon modes.
+   * Extracts metadata, filters sequences, detects bell, forwards to webview.
+   */
+  private _handlePtyData(tabId: number, data: string): void {
+    const hasEsc = data.indexOf('\x1b') !== -1;
+
+    if (hasEsc) {
+      const cwd = this._extractCwdFromOsc7(data);
+      if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
+        this._handleCwdChange(tabId, cwd);
+      }
+
+      const userVars = this._extractUserVars(data);
+      if (userVars) {
+        this._handleUserVarChange(tabId, userVars);
+      }
+    }
+
+    if (this._onBell && this._bellDetector.detect(tabId, data)) {
+      const excerpt = data.length <= 200 ? data : data.substring(0, 200);
+      const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
+        const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
+        return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
+      });
+      Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
+      this._onBell(tabId);
+    }
+
+    const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
+    if (!filteredData) return;
+
+    if (this._alterminal?.visible) {
+      this._alterminal.webview.postMessage({
+        command: "data",
+        data: filteredData,
+        tabId,
+      });
+    } else {
+      if (!this._outputBuffer.has(tabId)) {
+        this._outputBuffer.set(tabId, []);
+      }
+      const buffer = this._outputBuffer.get(tabId)!;
+      buffer.push(filteredData);
+      if (buffer.length > this._maxBufferSize) {
+        const excess = buffer.length - this._maxBufferSize;
+        buffer.splice(0, excess);
+      }
+    }
+
+    // Throttled process check (direct mode only — daemon doesn't have ptyProcess.process)
+    if (!this._daemonClient) {
+      Debouncer.debounce(
+        `process-check-${tabId}`, 500,
+        () => this._checkProcessChange(tabId),
+        { maxWait: 500 },
+      );
+    }
   }
 
   /**
@@ -254,6 +416,7 @@ export class PtyManager {
           message.rows,
           message.cwd,
           message.shellPath,
+          message.uuid,
         );
         break;
       case "disposePty":
@@ -318,56 +481,51 @@ export class PtyManager {
     rows?: number,
     cwd?: string,
     shellPath?: string,
+    uuid?: string,
   ): void {
     // Only create new PTY process if one doesn't exist for this tab
-    if (!this._ptyProcesses.has(tabId)) {
-      // Store terminal type for this tab
+    if (this._ptyProcesses.has(tabId) || this._tabPtyIds.has(tabId)) {
+      return;
+    }
+
+    // Check if daemon has a live PTY with this UUID (surviving a reload)
+    if (uuid && this._liveDaemonPtys.has(uuid) && this._daemonClient?.connected) {
+      Logger.info(`Reattaching to live daemon PTY ${uuid} for tab ${tabId}`);
+      this._liveDaemonPtys.delete(uuid);
       this._terminalTypes.set(tabId, terminalType);
+      this.reattachDaemonPty(tabId, uuid);
+      return;
+    }
 
-      // Determine what command/shell to spawn based on terminal type
-      const userShell = shellPath || this._getDefaultShell();
-      let command: string;
-      let args: string[];
+    // Store terminal type for this tab
+    this._terminalTypes.set(tabId, terminalType);
 
-      const isWindowsPowerShell = process.platform === "win32" &&
-        (userShell.toLowerCase().includes("powershell") || userShell.toLowerCase().includes("pwsh"));
-      const isWindowsCmd = process.platform === "win32" && !isWindowsPowerShell;
+    // Determine what command/shell to spawn based on terminal type
+    const userShell = shellPath || this._getDefaultShell();
+    let command: string;
+    let args: string[];
 
-      // Expand template variables ({workspace}, {env.VAR}, etc.) at launch time
-      const expandedCommand = launchCommand && this._expandCommand
-        ? this._expandCommand(launchCommand) : launchCommand;
+    const isWindowsPowerShell = process.platform === "win32" &&
+      (userShell.toLowerCase().includes("powershell") || userShell.toLowerCase().includes("pwsh"));
+    const isWindowsCmd = process.platform === "win32" && !isWindowsPowerShell;
 
-      switch (terminalType) {
-        case "command":
-          // Use shell with -c to execute command with full environment
-          // This ensures PATH and other shell variables are available
-          if (expandedCommand) {
-            command = userShell;
-            if (isWindowsPowerShell) {
-              args = ["-NoLogo", "-Command", expandedCommand];
-            } else if (isWindowsCmd) {
-              args = ["/c", expandedCommand];
-            } else {
-              // Unix: Use login shell to load PATH, then execute command interactively
-              args = ["-l", "-i", "-c", expandedCommand];
-            }
+    // Expand template variables ({workspace}, {env.VAR}, etc.) at launch time
+    const expandedCommand = launchCommand && this._expandCommand
+      ? this._expandCommand(launchCommand) : launchCommand;
+
+    switch (terminalType) {
+      case "command":
+        // Use shell with -c to execute command with full environment
+        if (expandedCommand) {
+          command = userShell;
+          if (isWindowsPowerShell) {
+            args = ["-NoLogo", "-Command", expandedCommand];
+          } else if (isWindowsCmd) {
+            args = ["/c", expandedCommand];
           } else {
-            // Default to shell if no command specified
-            command = userShell;
-            if (isWindowsPowerShell) {
-              args = ["-NoLogo"];
-            } else if (isWindowsCmd) {
-              args = [];
-            } else {
-              args = ["-l", "-i"];
-            }
+            args = ["-l", "-i", "-c", expandedCommand];
           }
-          break;
-
-        case "shell":
-        case "default":
-        default:
-          // Plain interactive shell (no auto command)
+        } else {
           command = userShell;
           if (isWindowsPowerShell) {
             args = ["-NoLogo"];
@@ -376,188 +534,185 @@ export class PtyManager {
           } else {
             args = ["-l", "-i"];
           }
-          break;
-      }
-
-      const resolvedCwd =
-        cwd ||
-        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
-        process.env.HOME ||
-        process.env.USERPROFILE ||
-        process.cwd();
-
-      // Build clean environment: strip vars that can cause VS Code's
-      // built-in terminal to steal focus or trigger shell integration
-      const cleanEnv: { [key: string]: string } = {};
-      for (const [key, value] of Object.entries(process.env)) {
-        if (value === undefined) continue;
-        if (key.startsWith("VSCODE_") || key.startsWith("ELECTRON_")) continue;
-        // Strip askpass helpers only when they point to VS Code's credential helper.
-        // User-configured helpers (keychain, ksshaskpass, etc.) are left intact.
-        if ((key === "GIT_ASKPASS" || key === "SSH_ASKPASS") && /vscode|Code/i.test(value)) continue;
-        cleanEnv[key] = value;
-      }
-
-      // Set up shell integration for CWD reporting via OSC 7.
-      // Each shell type uses a different injection mechanism.
-      const shellIntEnv: Record<string, string> = {};
-      const shellBase = path.basename(command).toLowerCase();
-      let hasShellIntegration = false;
-
-      if (this._extensionPath && terminalType !== "command") {
-        if (shellBase === "zsh" || shellBase.startsWith("zsh")) {
-          // zsh integration via env var + PTY write (ZDOTDIR trick doesn't
-          // work when /etc/zshenv sets ZDOTDIR — it can't be overridden).
-          const zshInit = path.join(this._extensionPath, "shell-integration", "zsh-init.zsh");
-          shellIntEnv.ALTERMINAL_SHELL_INIT = zshInit;
-          hasShellIntegration = true;
-        } else if (shellBase === "bash" || shellBase.startsWith("bash")) {
-          const bashInit = path.join(this._extensionPath, "shell-integration", "bash.sh");
-          shellIntEnv.ALTERMINAL_SHELL_INIT = bashInit;
-          shellIntEnv.PROMPT_COMMAND = `. "$ALTERMINAL_SHELL_INIT"`;
-          hasShellIntegration = true;
-        } else if (shellBase === "fish") {
-          const fishInit = path.join(this._extensionPath, "shell-integration", "fish.fish");
-          args.push("--init-command", `source ${fishInit}`);
-          hasShellIntegration = true;
         }
-      }
+        break;
 
-      if (hasShellIntegration) {
-        this._shellIntegrationTabs.add(tabId);
-      }
-
-      const ptyProcess = pty.spawn(command, args, {
-        name: TERMINAL_DEFAULTS.TERM_TYPE,
-        cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
-        rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
-        cwd: resolvedCwd,
-        env: {
-          ...cleanEnv,
-          ...shellIntEnv,
-          TERM: TERMINAL_DEFAULTS.TERM_TYPE,
-          COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
-          TERM_PROGRAM: "alterminal",
-          TERM_PROGRAM_VERSION: this._extensionVersion,
-          PATH: process.env.PATH || "",
-          SHELL: userShell,
-        },
-      });
-
-      // Inject shell integration by writing a source command to the PTY.
-      // Leading space avoids saving to history (HIST_IGNORE_SPACE).
-      // The shell processes this as its first input once the prompt is ready.
-      if (shellIntEnv.ALTERMINAL_SHELL_INIT) {
-        ptyProcess.write(` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
-      }
-
-      ptyProcess.onData((data) => {
-        // Fast path: if data contains no ESC character, skip all escape
-        // sequence extraction and filtering.  This covers the vast majority
-        // of plain-text output (individual character echoes, command output
-        // lines, etc.) and avoids 5+ regex operations per chunk.
-        const hasEsc = data.indexOf('\x1b') !== -1;
-
-        // Extract metadata from the raw data BEFORE filtering strips the
-        // escape sequences (OSC 7 for CWD, OSC 1337 for user vars).
-        if (hasEsc) {
-          const cwd = this._extractCwdFromOsc7(data);
-          if (cwd) {
-            if (cwd !== this._currentWorkingDirs.get(tabId)) {
-              this._handleCwdChange(tabId, cwd);
-            }
-          }
-
-          const userVars = this._extractUserVars(data);
-          if (userVars) {
-            this._handleUserVarChange(tabId, userVars);
-          }
-        }
-
-        // Detect bare BEL characters (\x07) — delegates to BellDetector
-        // which handles chunked OSC sequences across data events.
-        if (this._onBell && this._bellDetector.detect(tabId, data)) {
-          // Log context around the BEL for diagnostics
-          const excerpt = data.length <= 200 ? data : data.substring(0, 200);
-          const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
-            const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
-            return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
-          });
-          Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
-          this._onBell(tabId);
-        }
-
-        // Filter out VS Code-specific escape sequences that can cause focus stealing
-        const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
-
-        // Skip if all data was filtered out
-        if (!filteredData) {
-          return;
-        }
-
-        // Forward data to webview
-        if (this._alterminal?.visible) {
-          this._alterminal.webview.postMessage({
-            command: "data",
-            data: filteredData,
-            tabId: tabId,
-          });
+      case "shell":
+      case "default":
+      default:
+        command = userShell;
+        if (isWindowsPowerShell) {
+          args = ["-NoLogo"];
+        } else if (isWindowsCmd) {
+          args = [];
         } else {
-          // Webview is hidden - buffer the output
-          if (!this._outputBuffer.has(tabId)) {
-            this._outputBuffer.set(tabId, []);
-          }
-
-          const buffer = this._outputBuffer.get(tabId)!;
-          buffer.push(filteredData);
-
-          // Trim buffer if it gets too large (keep last N entries)
-          if (buffer.length > this._maxBufferSize) {
-            const excess = buffer.length - this._maxBufferSize;
-            buffer.splice(0, excess);
-            Logger.warn(`⚠️ Output buffer for tab ${tabId} exceeded max size, trimmed ${excess} oldest entries`);
-          }
+          args = ["-l", "-i"];
         }
+        break;
+    }
 
-        // Check for process changes on data events, throttled to avoid
-        // repeated syscalls (ptyProcess.process reads the foreground process
-        // name via the OS on every invocation).
-        Debouncer.debounce(
-          `process-check-${tabId}`, 500,
-          () => this._checkProcessChange(tabId),
-          { maxWait: 500 },
-        );
+    const resolvedCwd =
+      cwd ||
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+      process.env.HOME ||
+      process.env.USERPROFILE ||
+      process.cwd();
+
+    // Build clean environment
+    const cleanEnv: { [key: string]: string } = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value === undefined) continue;
+      if (key.startsWith("VSCODE_") || key.startsWith("ELECTRON_")) continue;
+      if ((key === "GIT_ASKPASS" || key === "SSH_ASKPASS") && /vscode|Code/i.test(value)) continue;
+      cleanEnv[key] = value;
+    }
+
+    // Set up shell integration for CWD reporting via OSC 7
+    const shellIntEnv: Record<string, string> = {};
+    const shellBase = path.basename(command).toLowerCase();
+    let hasShellIntegration = false;
+
+    if (this._extensionPath && terminalType !== "command") {
+      if (shellBase === "zsh" || shellBase.startsWith("zsh")) {
+        const zshInit = path.join(this._extensionPath, "shell-integration", "zsh-init.zsh");
+        shellIntEnv.ALTERMINAL_SHELL_INIT = zshInit;
+        hasShellIntegration = true;
+      } else if (shellBase === "bash" || shellBase.startsWith("bash")) {
+        const bashInit = path.join(this._extensionPath, "shell-integration", "bash.sh");
+        shellIntEnv.ALTERMINAL_SHELL_INIT = bashInit;
+        shellIntEnv.PROMPT_COMMAND = `. "$ALTERMINAL_SHELL_INIT"`;
+        hasShellIntegration = true;
+      } else if (shellBase === "fish") {
+        const fishInit = path.join(this._extensionPath, "shell-integration", "fish.fish");
+        args.push("--init-command", `source ${fishInit}`);
+        hasShellIntegration = true;
+      }
+    }
+
+    if (hasShellIntegration) {
+      this._shellIntegrationTabs.add(tabId);
+    }
+
+    const fullEnv = {
+      ...cleanEnv,
+      ...shellIntEnv,
+      TERM: TERMINAL_DEFAULTS.TERM_TYPE,
+      COLORTERM: TERMINAL_DEFAULTS.COLOR_TERM,
+      TERM_PROGRAM: "alterminal",
+      TERM_PROGRAM_VERSION: this._extensionVersion,
+      PATH: process.env.PATH || "",
+      SHELL: userShell,
+    };
+
+    // --- Daemon mode: route through persistent daemon process ---
+    if (this._daemonClient?.connected && uuid) {
+      this._tabPtyIds.set(tabId, uuid);
+      this._ptyIdToTab.set(uuid, tabId);
+
+      this._daemonClient.spawn(
+        uuid,
+        command,
+        args,
+        resolvedCwd,
+        fullEnv,
+        cols || TERMINAL_DEFAULTS.PTY_COLS,
+        rows || TERMINAL_DEFAULTS.PTY_ROWS,
+      ).then(() => {
+        // Inject shell integration via daemon write
+        if (shellIntEnv.ALTERMINAL_SHELL_INIT) {
+          this._daemonClient!.write(uuid, ` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
+        }
+      }).catch((err) => {
+        Logger.error(`Daemon spawn failed for tab ${tabId}, falling back to direct:`, err);
+        // Clean up daemon mappings and fall back to direct mode
+        this._tabPtyIds.delete(tabId);
+        this._ptyIdToTab.delete(uuid);
+        this._spawnDirectPty(tabId, command, args, resolvedCwd, fullEnv, cols, rows, shellIntEnv);
       });
 
-      ptyProcess.onExit(() => {
-        this._cleanupProcess(tabId);
-      });
-
-      this._ptyProcesses.set(tabId, ptyProcess);
-
-      // Seed initial working directory so cwd is never empty
       if (resolvedCwd) {
         this._handleCwdChange(tabId, resolvedCwd);
       }
-
-      // Start monitoring the process name for this tab
-      this._startProcessMonitoring(tabId);
+      return;
     }
+
+    // --- Direct mode: spawn PTY in extension host ---
+    this._spawnDirectPty(tabId, command, args, resolvedCwd, fullEnv, cols, rows, shellIntEnv);
+  }
+
+  /** Spawn a PTY directly in the extension host process. */
+  private _spawnDirectPty(
+    tabId: number,
+    command: string,
+    args: string[],
+    cwd: string,
+    env: Record<string, string>,
+    cols?: number,
+    rows?: number,
+    shellIntEnv?: Record<string, string>,
+  ): void {
+    const ptyProcess = pty.spawn(command, args, {
+      name: TERMINAL_DEFAULTS.TERM_TYPE,
+      cols: cols || TERMINAL_DEFAULTS.PTY_COLS,
+      rows: rows || TERMINAL_DEFAULTS.PTY_ROWS,
+      cwd,
+      env,
+    });
+
+    if (shellIntEnv?.ALTERMINAL_SHELL_INIT) {
+      ptyProcess.write(` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
+    }
+
+    ptyProcess.onData((data) => {
+      this._handlePtyData(tabId, data);
+    });
+
+    ptyProcess.onExit(() => {
+      this._cleanupProcess(tabId);
+    });
+
+    this._ptyProcesses.set(tabId, ptyProcess);
+
+    if (cwd) {
+      this._handleCwdChange(tabId, cwd);
+    }
+
+    this._startProcessMonitoring(tabId);
   }
 
   public writeToPty(data: string, tabId: number): void {
+    // Daemon mode
+    const ptyId = this._tabPtyIds.get(tabId);
+    if (ptyId && this._daemonClient?.connected) {
+      this._daemonClient.write(ptyId, data);
+      return;
+    }
+    // Direct mode
     this._ptyProcesses.get(tabId)?.write(data);
   }
 
   public resizePty(cols: number, rows: number, tabId: number): void {
+    // Daemon mode
+    const ptyId = this._tabPtyIds.get(tabId);
+    if (ptyId && this._daemonClient?.connected) {
+      this._daemonClient.resize(ptyId, cols, rows);
+      return;
+    }
+    // Direct mode
     this._ptyProcesses.get(tabId)?.resize(cols, rows);
   }
 
   public sendFilePath(filePath: string, tabId: number): void {
-    // Shell-escape by wrapping in single quotes and escaping embedded single quotes
-    // This safely handles spaces, semicolons, backticks, $, etc.
     const escapedPath = filePath.replace(/'/g, "'\\''");
-    this._ptyProcesses.get(tabId)?.write(`'${escapedPath}' `);
+    const text = `'${escapedPath}' `;
+    // Daemon mode
+    const ptyId = this._tabPtyIds.get(tabId);
+    if (ptyId && this._daemonClient?.connected) {
+      this._daemonClient.write(ptyId, text);
+      return;
+    }
+    // Direct mode
+    this._ptyProcesses.get(tabId)?.write(text);
   }
 
   public disposePtyProcess(tabId: number): void {
@@ -571,11 +726,21 @@ export class PtyManager {
       this._processMonitorTimers.delete(tabId);
     }
 
-    // Kill PTY process
+    // Kill PTY process (direct mode)
     const ptyProcess = this._ptyProcesses.get(tabId);
     if (ptyProcess) {
       ptyProcess.kill();
       this._ptyProcesses.delete(tabId);
+    }
+
+    // Kill PTY process (daemon mode)
+    const ptyId = this._tabPtyIds.get(tabId);
+    if (ptyId) {
+      if (this._daemonClient?.connected) {
+        this._daemonClient.kill(ptyId);
+      }
+      this._tabPtyIds.delete(tabId);
+      this._ptyIdToTab.delete(ptyId);
     }
 
     // Clean up state
@@ -619,21 +784,32 @@ export class PtyManager {
       await fs.promises.chmod(tempFilePath, 0o644);
 
       // Send the temp file path and schedule cleanup
-      this._ptyProcesses.get(tabId)?.write(`'${tempFilePath}' `);
+      this.writeToPty(`'${tempFilePath}' `, tabId);
       setTimeout(() => fs.promises.unlink(tempFilePath).catch(() => {}), 60_000);
     } catch (error) {
       Logger.error("Error writing file to temp:", error);
       const escapedName = fileName.replace(/'/g, "'\\''");
-      this._ptyProcesses.get(tabId)?.write(`'${escapedName}' `);
+      this.writeToPty(`'${escapedName}' `, tabId);
     }
   }
 
   public dispose(): void {
-    // Clean up all PTY processes and timers
-    const tabIds = Array.from(this._ptyProcesses.keys());
-    for (const tabId of tabIds) {
+    // Clean up direct-mode PTY processes only
+    const directTabIds = Array.from(this._ptyProcesses.keys());
+    for (const tabId of directTabIds) {
       this._cleanupProcess(tabId);
     }
+
+    // Disconnect from daemon WITHOUT killing daemon PTYs.
+    // The daemon keeps PTYs alive for reattach on next activation.
+    if (this._daemonClient) {
+      this._daemonClient.removeAllListeners();
+      // Don't call kill() on daemon PTYs — just clear local mappings
+      this._daemonClient = null;
+    }
+    this._tabPtyIds.clear();
+    this._ptyIdToTab.clear();
+    this._liveDaemonPtys.clear();
 
     // Clean up visibility subscription
     if (this._visibilityDisposable) {
@@ -649,8 +825,7 @@ export class PtyManager {
    * Check if we have any running PTY processes (indicates warm boot)
    */
   public hasRunningProcesses(): boolean {
-    const hasProcesses = this._ptyProcesses.size > 0;
-    return hasProcesses;
+    return this._ptyProcesses.size > 0 || this._tabPtyIds.size > 0;
   }
 
   /**
