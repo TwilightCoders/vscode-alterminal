@@ -185,40 +185,67 @@ export class DaemonManager {
     });
   }
 
-  private _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const secret = generateSecret();
-      const daemonScript = path.join(this._extensionPath, "out", "daemon", "ptyDaemon.js");
+  private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
+    const secret = generateSecret();
+    const daemonScript = path.join(this._extensionPath, "out", "daemon", "ptyDaemon.js");
 
-      const child = cp.fork(daemonScript, [lockPath, sockPath, secret], {
+    // Use system node (not process.execPath which is the Electron binary).
+    // VS Code kills processes launched via its own binary on window close.
+    // Spawned detached with stdio:ignore so the daemon is fully independent.
+    const nodeBin = await this._findNode();
+
+    return new Promise((resolve, reject) => {
+      const child = cp.spawn(nodeBin, [daemonScript, lockPath, sockPath, secret], {
         detached: true,
-        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        stdio: "ignore",
+        env: { ...process.env },
       });
+
+      // Fully detach — daemon must survive extension host restarts
+      child.unref();
 
       const timeout = setTimeout(() => {
         reject(new Error("Daemon startup timed out"));
-        child.kill();
+        try { child.kill(); } catch {}
       }, 10000);
 
-      child.on("message", (msg: any) => {
-        if (msg?.type === "ready") {
+      // Poll for lockfile to appear (daemon writes it when server is ready)
+      const pollInterval = 100;
+      const poll = setInterval(() => {
+        const info = readLockfile(lockPath);
+        if (info && info.secret === secret) {
+          clearInterval(poll);
           clearTimeout(timeout);
-          // Detach from parent — daemon lives on after extension host exits
-          child.unref();
-          child.disconnect();
           resolve(secret);
         }
-      });
+      }, pollInterval);
 
       child.on("error", (err) => {
+        clearInterval(poll);
         clearTimeout(timeout);
         reject(err);
       });
 
       child.on("exit", (code) => {
+        clearInterval(poll);
         clearTimeout(timeout);
         if (code !== null && code !== 0) {
           reject(new Error(`Daemon exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  /** Find the system node binary. Falls back to process.execPath (Electron). */
+  private _findNode(): Promise<string> {
+    return new Promise((resolve) => {
+      cp.execFile("which", ["node"], (err, stdout) => {
+        if (!err && stdout.trim()) {
+          resolve(stdout.trim());
+        } else {
+          // Fallback: use Electron binary (may not survive window close)
+          Logger.warn("[daemon] System node not found, falling back to process.execPath");
+          resolve(process.execPath);
         }
       });
     });

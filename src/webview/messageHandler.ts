@@ -290,16 +290,33 @@ export class MessageHandler {
       this.callbacks.setHistoryBannerShownEver(true);
     }
 
+    // Live daemon UUIDs — strip buffers for terminals that will reattach
+    const liveDaemonUuids = new Set<string>(message.liveDaemonUuids || []);
+
+    let stateToRestore: any;
     if (webviewState?.fullTabState) {
       Logger.debug("🔄 Using webview state (more recent)");
-      this.callbacks.restoreFromState(webviewState.fullTabState, !!message.cold);
+      stateToRestore = webviewState.fullTabState;
     } else if (message.state) {
       Logger.debug("🔄 Using extension state (fallback)");
-      this.callbacks.restoreFromState(message.state, !!message.cold);
+      stateToRestore = message.state;
     } else {
       Logger.debug("🔄 No state available, creating default");
-      this.callbacks.restoreFromState(this.callbacks.createDefaultState(), !!message.cold);
+      stateToRestore = this.callbacks.createDefaultState();
     }
+
+    // Strip buffers for terminals with live daemon PTYs — the daemon
+    // will replay its own buffer on reattach; stale saved content must not appear.
+    if (liveDaemonUuids.size > 0 && stateToRestore?.terminals) {
+      stateToRestore = {
+        ...stateToRestore,
+        terminals: stateToRestore.terminals.map((t: any) =>
+          t.uuid && liveDaemonUuids.has(t.uuid) ? { ...t, buffer: "" } : t
+        ),
+      };
+    }
+
+    this.callbacks.restoreFromState(stateToRestore, !!message.cold);
   }
 
   private handleInitializeEmpty(message: any): void {

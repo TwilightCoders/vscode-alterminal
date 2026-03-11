@@ -148,6 +148,11 @@ export class PtyDaemonClient extends EventEmitter {
     this._send({ type: "kill", ptyId });
   }
 
+  /** Clear the daemon's replay buffer for a PTY. */
+  clearBuffer(ptyId: string): void {
+    this._send({ type: "clearBuffer", ptyId });
+  }
+
   /** List all PTYs belonging to this session. */
   async list(): Promise<PtyInfo[]> {
     const id = this._nextId();

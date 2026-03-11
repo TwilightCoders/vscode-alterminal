@@ -56,6 +56,12 @@ export class StateManager {
    * buffers from separate keys, and return the full state object.
    * Returns null if no saved state exists.
    */
+  /**
+   * Set of UUIDs whose buffers should be skipped during restore
+   * (e.g. daemon has live PTYs that will replay their own output).
+   */
+  public skipBufferUuids = new Set<string>();
+
   public getFullState(): any | null {
     let state = this.context.workspaceState.get(METADATA_KEY) as any;
     if (!state?.terminals?.length) return null;
@@ -63,7 +69,8 @@ export class StateManager {
     state = this._migrateIfNeeded(state);
 
     const terminals = state.terminals.map((t: any) => {
-      const buffer = t.uuid
+      const skip = t.uuid && this.skipBufferUuids.has(t.uuid);
+      const buffer = (!skip && t.uuid)
         ? (this.context.workspaceState.get(`${BUFFER_KEY_PREFIX}${t.uuid}`) as string) || ""
         : "";
       return { ...t, buffer };
@@ -199,6 +206,7 @@ export class StateManager {
         command: "restoreState",
         state: fullState,
         cold: this._isColdBoot,
+        liveDaemonUuids: this.skipBufferUuids.size > 0 ? [...this.skipBufferUuids] : undefined,
       });
     } else {
       Logger.debug("🆕 No saved state, initializing empty");

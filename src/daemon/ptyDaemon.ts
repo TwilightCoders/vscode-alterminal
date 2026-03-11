@@ -9,6 +9,8 @@
  */
 
 import * as net from "net";
+import * as fs from "fs";
+import { execFileSync } from "child_process";
 import * as pty from "@lydell/node-pty";
 import {
   type ClientMessage,
@@ -150,6 +152,25 @@ function spawnPty(msg: ClientMessage & { type: "spawn" }, client: ClientConnecti
       cwd: msg.cwd,
       env: msg.env,
     });
+
+    // Shell init via TTY stuffing — same timing as direct mode.
+    // Suppress kernel echo so the stuffed command is invisible.
+    if (msg.env.ALTERMINAL_SHELL_INIT) {
+      const slavePty = (proc as any)._pty as string | undefined;
+      if (slavePty) {
+        try {
+          const fd = fs.openSync(slavePty, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
+          try { execFileSync("stty", ["-echo"], { stdio: [fd, "pipe", "pipe"] }); } finally { fs.closeSync(fd); }
+        } catch { /* stty failed — echo will be visible but init still works */ }
+      }
+      proc.write(` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
+      if (slavePty) {
+        try {
+          const fd = fs.openSync(slavePty, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
+          try { execFileSync("stty", ["echo"], { stdio: [fd, "pipe", "pipe"] }); } finally { fs.closeSync(fd); }
+        } catch { /* ignore */ }
+      }
+    }
 
     const entry: PtyEntry = {
       ptyId: msg.ptyId,
@@ -324,6 +345,15 @@ function handleMessage(msg: ClientMessage, client: ClientConnection): void {
       // since hasConnectedClient() will return false after disconnect.
       break;
 
+    case "clearBuffer": {
+      const entry = ptys.get(msg.ptyId);
+      if (entry) {
+        entry.buffer.length = 0;
+        entry.bufferSize = 0;
+      }
+      break;
+    }
+
     case "ping":
       send(client, { type: "pong", id: msg.id });
       break;
@@ -379,10 +409,7 @@ server.listen(sockPath, () => {
   };
   writeLockfile(lockPath, info);
 
-  // Signal parent that we're ready (if launched via fork)
-  if (process.send) {
-    process.send({ type: "ready", pid: process.pid });
-  }
+  // Lockfile written — parent polls for it to detect readiness.
 });
 
 server.on("error", (err) => {
@@ -390,8 +417,11 @@ server.on("error", (err) => {
   shutdown();
 });
 
-// Graceful shutdown on signals
-process.on("SIGTERM", shutdown);
+// Ignore SIGTERM/SIGHUP — VS Code sends these on window close, but the
+// daemon must survive. Shutdown happens via inactivity timer or SIGKILL.
+process.on("SIGTERM", () => {});
+process.on("SIGHUP", () => {});
+// SIGINT still shuts down (manual Ctrl+C during development)
 process.on("SIGINT", shutdown);
 
 // Start inactivity timer

@@ -18,6 +18,7 @@ export type ClientMessage =
   | ListMessage
   | AttachMessage
   | DetachMessage
+  | ClearBufferMessage
   | PingMessage;
 
 /** Daemon → Client */
@@ -80,6 +81,11 @@ export interface AttachMessage {
 export interface DetachMessage {
   type: "detach";
   sessionId: string;
+}
+
+export interface ClearBufferMessage {
+  type: "clearBuffer";
+  ptyId: string;
 }
 
 export interface PingMessage {

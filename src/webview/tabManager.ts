@@ -1189,6 +1189,12 @@ export class TabManager {
       // Clear the xterm display (this also sets hasContent = false)
       activeTerminal.clear();
 
+      // Tell extension host to clear daemon buffer for this PTY
+      this.vscode.postMessage({
+        command: "clearBuffer",
+        tabId: activeTerminal.id,
+      });
+
       // Save the cleared state
       this.saveToLocalState();
 

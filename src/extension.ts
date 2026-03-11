@@ -51,12 +51,17 @@ export async function activate(context: vscode.ExtensionContext) {
     const daemonManager = new DaemonManager(context, context.extensionUri.fsPath);
     _daemonManager = daemonManager;
     try {
+      Logger.info("[daemon] Attempting daemon connection...");
       const client = await daemonManager.connect();
       if (client) {
+        Logger.info(`[daemon] Connected, sessionId=${daemonManager.sessionId}`);
         ptyManager.setDaemonClient(client);
-        Logger.info("PTY daemon mode active");
+        // Wait for the live PTY list before webview restore, so we can
+        // skip buffer restore for terminals that will reattach to daemon.
+        await ptyManager.daemonListReady;
+        Logger.info("[daemon] PTY daemon mode active");
       } else {
-        Logger.info("PTY daemon unavailable, using direct mode");
+        Logger.info("[daemon] PTY daemon unavailable, using direct mode");
       }
     } catch (err) {
       Logger.error("PTY daemon connection failed:", err);
@@ -72,6 +77,15 @@ export async function activate(context: vscode.ExtensionContext) {
     ptyManager,
     serializer,
   );
+
+  // Tell state manager which terminals have live daemon PTYs (skip their buffers)
+  if (ptyManager.liveDaemonPtyIds.size > 0) {
+    const sm = provider.getStateManager();
+    for (const uuid of ptyManager.liveDaemonPtyIds) {
+      sm.skipBufferUuids.add(uuid);
+    }
+    Logger.info(`[daemon] Skipping buffer restore for ${ptyManager.liveDaemonPtyIds.size} live daemon PTY(s)`);
+  }
 
   const disposable = vscode.window.registerWebviewViewProvider(
     AlterminalProvider.viewType,

@@ -38,7 +38,7 @@ import * as pty from "@lydell/node-pty";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { Logger } from "../utils/logger";
 import { Debouncer } from "../utils/debouncer";
 import { BellDetector } from "./bellDetector";
@@ -68,6 +68,8 @@ export class PtyManager {
   private _ptyIdToTab = new Map<string, number>();
   // Live daemon PTYs discovered on connect (before tabs restore)
   private _liveDaemonPtys = new Set<string>();
+  // Resolves once the daemon PTY list has been fetched
+  private _daemonListReady: Promise<void> = Promise.resolve();
 
   // Tabs using shell integration (OSC 7) don't need the lsof fallback
   private _shellIntegrationTabs = new Set<number>();
@@ -135,16 +137,16 @@ export class PtyManager {
         Logger.info(`Replay complete for tab ${tabId} (ptyId ${ptyId})`);
       });
 
-      // Pre-fetch live PTYs so createPtyProcess can reattach on restore
-      client.list().then((ptys) => {
+      // Pre-fetch live PTYs so createPtyProcess can reattach on restore.
+      // Stored as a promise so createPtyProcess can await it (avoids race).
+      Logger.info("[daemon] Fetching live PTY list from daemon...");
+      this._daemonListReady = client.list().then((ptys) => {
         for (const pty of ptys) {
           this._liveDaemonPtys.add(pty.ptyId);
         }
-        if (ptys.length > 0) {
-          Logger.info(`Daemon has ${ptys.length} live PTY(s) available for reattach`);
-        }
-      }).catch(() => {
-        // Non-fatal — will spawn fresh PTYs
+        Logger.info(`[daemon] Live PTYs from daemon: ${ptys.length} [${ptys.map(p => p.ptyId).join(", ")}]`);
+      }).catch((err) => {
+        Logger.error("[daemon] Failed to fetch PTY list:", err);
       });
     }
   }
@@ -152,6 +154,16 @@ export class PtyManager {
   /** Whether the daemon is active and connected. */
   public get daemonActive(): boolean {
     return this._daemonClient?.connected ?? false;
+  }
+
+  /** UUIDs of live daemon PTYs (available after daemon list is fetched). */
+  public get liveDaemonPtyIds(): Set<string> {
+    return this._liveDaemonPtys;
+  }
+
+  /** Resolves when the daemon PTY list has been fetched. */
+  public get daemonListReady(): Promise<void> {
+    return this._daemonListReady;
   }
 
   /**
@@ -407,6 +419,7 @@ export class PtyManager {
   public async handleMessage(message: any): Promise<void> {
     switch (message.command) {
       case "createPty":
+        Logger.info(`[daemon] createPty msg: tabId=${message.tabId} uuid=${message.uuid} daemonConnected=${this._daemonClient?.connected ?? false}`);
         // Single canonical field now: launchCommand (older aliases removed)
         this.createPtyProcess(
           message.tabId,
@@ -455,6 +468,13 @@ export class PtyManager {
       case "closeTab":
         this.disposePtyProcess(message.tabId);
         break;
+      case "clearBuffer": {
+        const ptyId = this._tabPtyIds.get(message.tabId);
+        if (ptyId && this._daemonClient?.connected) {
+          this._daemonClient.clearBuffer(ptyId);
+        }
+        break;
+      }
       default:
         // Return false to indicate this manager can't handle the message
         return;
@@ -466,7 +486,7 @@ export class PtyManager {
    */
   private static readonly _ptyCommands = new Set([
     "createPty", "disposePty", "data", "resize",
-    "sendFilePath", "sendFileData", "newTab", "closeTab",
+    "sendFilePath", "sendFileData", "newTab", "closeTab", "clearBuffer",
   ]);
 
   public canHandle(command: string): boolean {
@@ -488,15 +508,44 @@ export class PtyManager {
       return;
     }
 
-    // Check if daemon has a live PTY with this UUID (surviving a reload)
-    if (uuid && this._liveDaemonPtys.has(uuid) && this._daemonClient?.connected) {
-      Logger.info(`Reattaching to live daemon PTY ${uuid} for tab ${tabId}`);
-      this._liveDaemonPtys.delete(uuid);
-      this._terminalTypes.set(tabId, terminalType);
-      this.reattachDaemonPty(tabId, uuid);
+    // If daemon is connected and UUID is provided, wait for the PTY list
+    // to arrive before deciding whether to reattach or spawn fresh.
+    if (uuid && this._daemonClient?.connected) {
+      Logger.info(`[daemon] Waiting for daemon list before deciding (uuid=${uuid} tabId=${tabId} livePtys=${this._liveDaemonPtys.size})`);
+      this._daemonListReady.then(() => {
+        Logger.info(`[daemon] List ready: livePtys=[${[...this._liveDaemonPtys].join(",")}] looking for uuid=${uuid}`);
+        // Re-check guard — another call may have resolved first
+        if (this._ptyProcesses.has(tabId) || this._tabPtyIds.has(tabId)) {
+          Logger.info(`[daemon] Tab ${tabId} already has a PTY, skipping`);
+          return;
+        }
+
+        if (this._liveDaemonPtys.has(uuid)) {
+          Logger.info(`[daemon] Reattaching to live daemon PTY ${uuid} for tab ${tabId}`);
+          this._liveDaemonPtys.delete(uuid);
+          this._terminalTypes.set(tabId, terminalType);
+          this.reattachDaemonPty(tabId, uuid);
+        } else {
+          Logger.info(`[daemon] UUID ${uuid} not in daemon, spawning fresh for tab ${tabId}`);
+          this._createPtyProcessInner(tabId, terminalType, launchCommand, cols, rows, cwd, shellPath, uuid);
+        }
+      });
       return;
     }
 
+    this._createPtyProcessInner(tabId, terminalType, launchCommand, cols, rows, cwd, shellPath, uuid);
+  }
+
+  private _createPtyProcessInner(
+    tabId: number,
+    terminalType: string,
+    launchCommand?: string,
+    cols?: number,
+    rows?: number,
+    cwd?: string,
+    shellPath?: string,
+    uuid?: string,
+  ): void {
     // Store terminal type for this tab
     this._terminalTypes.set(tabId, terminalType);
 
@@ -618,16 +667,13 @@ export class PtyManager {
         cols || TERMINAL_DEFAULTS.PTY_COLS,
         rows || TERMINAL_DEFAULTS.PTY_ROWS,
       ).then(() => {
-        // Inject shell integration via daemon write
-        if (shellIntEnv.ALTERMINAL_SHELL_INIT) {
-          this._daemonClient!.write(uuid, ` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
-        }
+        // Spawn succeeded — nothing else to do
       }).catch((err) => {
         Logger.error(`Daemon spawn failed for tab ${tabId}, falling back to direct:`, err);
         // Clean up daemon mappings and fall back to direct mode
         this._tabPtyIds.delete(tabId);
         this._ptyIdToTab.delete(uuid);
-        this._spawnDirectPty(tabId, command, args, resolvedCwd, fullEnv, cols, rows, shellIntEnv);
+        this._spawnDirectPty(tabId, command, args, resolvedCwd, fullEnv, cols, rows);
       });
 
       if (resolvedCwd) {
@@ -660,7 +706,23 @@ export class PtyManager {
     });
 
     if (shellIntEnv?.ALTERMINAL_SHELL_INIT) {
+      // Suppress kernel TTY echo so the stuffed command is invisible.
+      // Open the slave PTY device and run stty -echo on it before writing,
+      // then re-enable echo after.
+      const slavePty = (ptyProcess as any)._pty as string | undefined;
+      if (slavePty) {
+        try {
+          const fd = fs.openSync(slavePty, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
+          try { execFileSync("stty", ["-echo"], { stdio: [fd, "pipe", "pipe"] }); } finally { fs.closeSync(fd); }
+        } catch { /* stty failed — echo will be visible but init still works */ }
+      }
       ptyProcess.write(` source "$ALTERMINAL_SHELL_INIT" 2>/dev/null; unset ALTERMINAL_SHELL_INIT\r`);
+      if (slavePty) {
+        try {
+          const fd = fs.openSync(slavePty, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
+          try { execFileSync("stty", ["echo"], { stdio: [fd, "pipe", "pipe"] }); } finally { fs.closeSync(fd); }
+        } catch { /* ignore */ }
+      }
     }
 
     ptyProcess.onData((data) => {
