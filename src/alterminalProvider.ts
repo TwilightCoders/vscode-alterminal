@@ -291,6 +291,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Create a new terminal tab with a command
    */
   public createNewTabWithCommand(cmd: string, cwd?: string): void {
+    Logger.info(`[provider] createNewTabWithCommand: cmd="${cmd}" cwd="${cwd ?? "(default)"}" viewReady=${!!this._view?.webview}`);
     this._view?.webview.postMessage({
       command: "createNewTab",
       terminalType: "command",
@@ -455,17 +456,16 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
           // Handle sentinel items
           if (sel === editItem && !value) {
             qp.dispose();
-            // Seed a template entry if the setting is empty/missing so users can see the format
+            // Seed template entries if the setting is empty so users can see the format
             const config = vscode.workspace.getConfiguration("alterminal");
             const existing = config.get<unknown[]>("savedCommands", []);
             if (existing.length === 0) {
               await config.update("savedCommands", [
-                { label: "Example", command: "echo hello" },
+                { label: "Hello World", command: "echo hello" },
+                { label: "Dev Server", command: "npm run dev", cwd: "{workspacePath}" },
               ], vscode.ConfigurationTarget.Global);
             }
-            vscode.commands.executeCommand("workbench.action.openSettingsJson", {
-              revealSetting: { key: "alterminal.savedCommands" },
-            });
+            vscode.commands.executeCommand("workbench.action.openSettings", "alterminal.savedCommands");
             return;
           }
           if (sel === helpItem && !value) return;

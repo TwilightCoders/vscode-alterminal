@@ -22,6 +22,7 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import { LIMITS } from "../constants";
+import { Logger } from "./logger";
 import { TemplateEngine } from "./templateEngine";
 
 interface SavedCommand {
@@ -266,6 +267,7 @@ export class CommandManager {
     this._recordUsage(command);
     await this.saveSavedCommands();
     if (this.createTab) {
+      Logger.info(`[cmd] Launching: command="${resolvedCommand}" cwd="${resolvedCwd ?? "(default)"}"`);
       this.createTab(resolvedCommand, resolvedCwd);
     }
   }
