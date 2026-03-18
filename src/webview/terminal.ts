@@ -282,39 +282,112 @@ export class TerminalInstance {
   /**
    * Set up file path link detection using xterm-link-provider library
    */
+  // Regex for file paths, directories, and URLs
+  // Three alternatives:
+  //   1. URLs: https://...
+  //   2. Absolute/explicit relative paths: /foo, ~/foo, ./foo, ../foo
+  //   3. Bare relative paths: src/index.ts, commands/project (must contain /)
+  //   4. File:line:col patterns: file.ts:10:5
+  // All path alternatives end with a non-slash character to prevent
+  // miscalculating link regions at line edges.
+  private static readonly LINK_REGEX = /https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-\.]/g;
+
   setupFilePathLinks() {
-    if (!this.terminal || !window.LinkProvider) return;
+    if (!this.terminal) return;
 
-    // Regex for file paths, directories, and URLs
-    // Three alternatives:
-    //   1. URLs: https://...
-    //   2. Absolute/explicit relative paths: /foo, ~/foo, ./foo, ../foo
-    //   3. Bare relative paths: src/index.ts, commands/project
-    // All path alternatives end with a non-slash character to prevent
-    // xterm-link-provider from miscalculating link regions at line edges.
-    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-\.])/;
+    const vscodeApi = this.vscode;
+    const terminalRef = this.terminal;
 
-    const handler = (event: MouseEvent, uri: string) => {
-      if (event && event.preventDefault) {
-        event.preventDefault();
-      }
-      if (!event.metaKey && !event.ctrlKey) {
-        return;
-      }
-      const isUrl = uri.startsWith('http://') || uri.startsWith('https://');
-      if (isUrl) {
-        this.vscode.postMessage({ command: "openUrl", url: uri });
-      } else {
-        this.vscode.postMessage({ command: "openFile", filePath: uri, terminalId: this.id });
-      }
+    const provider = {
+      provideLinks: (y: number, callback: (links: any[] | undefined) => void) => {
+        // Get the line text from the buffer, handling wrapped lines
+        let lineText = "";
+        let startLine = y - 1;
+
+        // Walk backwards to find the start of a wrapped sequence
+        while (startLine > 0) {
+          const line = terminalRef.buffer.active.getLine(startLine);
+          if (!line || !line.isWrapped) break;
+          startLine--;
+        }
+
+        // Walk forward to collect the full (possibly wrapped) line
+        let lineIdx = startLine;
+        const lineRanges: Array<{ start: number; lineY: number; cols: number }> = [];
+        do {
+          const line = terminalRef.buffer.active.getLine(lineIdx);
+          if (!line) break;
+          const text = line.translateToString(true);
+          lineRanges.push({ start: lineText.length, lineY: lineIdx + 1, cols: text.length });
+          lineText += text;
+          lineIdx++;
+          const nextLine = terminalRef.buffer.active.getLine(lineIdx);
+          if (!nextLine || !nextLine.isWrapped) break;
+        } while (true);
+
+        // Only process if our target line is in this wrapped range
+        if (y < startLine + 1 || y > lineIdx) {
+          callback(undefined);
+          return;
+        }
+
+        // Find all matches in the joined line text
+        const regex = new RegExp(TerminalInstance.LINK_REGEX.source, "g");
+        const links: any[] = [];
+        let match: RegExpExecArray | null;
+
+        while ((match = regex.exec(lineText)) !== null) {
+          const text = match[0];
+          const matchStart = match.index;
+          const matchEnd = matchStart + text.length - 1;
+
+          // Convert string offsets to buffer positions
+          const startPos = this._stringOffsetToBufferPos(lineRanges, matchStart);
+          const endPos = this._stringOffsetToBufferPos(lineRanges, matchEnd);
+
+          if (!startPos || !endPos) continue;
+
+          links.push({
+            range: { start: startPos, end: { x: endPos.x + 1, y: endPos.y } },
+            text,
+            activate: (event: MouseEvent, linkText: string) => {
+              if (!event.metaKey && !event.ctrlKey) return;
+              Logger.debug(`🔗 Link clicked: "${linkText}"`);
+              const isUrl = linkText.startsWith("http://") || linkText.startsWith("https://");
+              if (isUrl) {
+                vscodeApi.postMessage({ command: "openUrl", url: linkText });
+              } else {
+                vscodeApi.postMessage({ command: "openFile", filePath: linkText, terminalId: this.id });
+              }
+            },
+          });
+        }
+
+        callback(links.length > 0 ? links : undefined);
+      },
     };
 
     try {
-      const provider = new window.LinkProvider(this.terminal, linkRegex, handler);
       this.linkProviderDisposable = this.terminal.registerLinkProvider(provider);
     } catch (error) {
       console.error("Failed to register link provider:", error);
     }
+  }
+
+  /**
+   * Convert a string offset in a joined wrapped line to a buffer cell position.
+   */
+  private _stringOffsetToBufferPos(
+    lineRanges: Array<{ start: number; lineY: number; cols: number }>,
+    offset: number,
+  ): { x: number; y: number } | null {
+    for (let i = lineRanges.length - 1; i >= 0; i--) {
+      const range = lineRanges[i];
+      if (offset >= range.start) {
+        return { x: offset - range.start + 1, y: range.lineY };
+      }
+    }
+    return null;
   }
 
   /**
