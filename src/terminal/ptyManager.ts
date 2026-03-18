@@ -480,6 +480,9 @@ export class PtyManager {
         }
         break;
       }
+      case "checkProcesses":
+        this._checkChildProcesses(message.tabId);
+        break;
       default:
         // Return false to indicate this manager can't handle the message
         return;
@@ -492,6 +495,7 @@ export class PtyManager {
   private static readonly _ptyCommands = new Set([
     "createPty", "disposePty", "data", "resize",
     "sendFilePath", "sendFileData", "newTab", "closeTab", "clearBuffer",
+    "checkProcesses",
   ]);
 
   public canHandle(command: string): boolean {
@@ -972,6 +976,107 @@ export class PtyManager {
     } catch {
       // Process may have exited
     }
+  }
+
+  /**
+   * Check for child processes of a PTY's shell and respond to the webview.
+   * Used for close-tab protection: warns user if processes are still running.
+   * Enumerates ALL children (foreground + background), matching Terminal.app behavior.
+   */
+  private _checkChildProcesses(tabId: number): void {
+    // Get shell PID — direct mode or daemon mode
+    const ptyProcess = this._ptyProcesses.get(tabId);
+    const pid = ptyProcess?.pid;
+
+    if (!pid) {
+      // Daemon mode: query the daemon for PID
+      const ptyId = this._tabPtyIds.get(tabId);
+      if (ptyId && this._daemonClient?.connected) {
+        this._daemonClient.list().then((ptys) => {
+          const entry = ptys.find(p => p.ptyId === ptyId);
+          if (entry?.pid) {
+            this._getChildProcesses(entry.pid, (procs) => {
+              this._sendCheckProcessesResponse(tabId, procs);
+            });
+          } else {
+            this._sendCheckProcessesResponse(tabId, []);
+          }
+        }).catch(() => {
+          this._sendCheckProcessesResponse(tabId, []);
+        });
+        return;
+      }
+      // No PID available — allow close
+      this._sendCheckProcessesResponse(tabId, []);
+      return;
+    }
+
+    this._getChildProcesses(pid, (procs) => {
+      this._sendCheckProcessesResponse(tabId, procs);
+    });
+  }
+
+  /**
+   * Get all child processes of a given PID.
+   * Uses pgrep on Unix (lists ALL children, including background jobs).
+   */
+  private _getChildProcesses(
+    pid: number,
+    callback: (procs: Array<{ pid: number; name: string }>) => void,
+  ): void {
+    if (process.platform === "win32") {
+      // Windows: use wmic or tasklist — punt for now
+      callback([]);
+      return;
+    }
+
+    // pgrep -P <pid> lists direct child PIDs
+    execFile("pgrep", ["-P", String(pid)], { encoding: "utf8", timeout: 2000 }, (err, stdout) => {
+      if (err || !stdout.trim()) {
+        callback([]);
+        return;
+      }
+
+      const childPids = stdout.trim().split("\n").map(Number).filter(Boolean);
+      if (childPids.length === 0) {
+        callback([]);
+        return;
+      }
+
+      // Get process names for each child PID via ps
+      execFile("ps", ["-o", "pid=,comm=", "-p", childPids.join(",")], {
+        encoding: "utf8",
+        timeout: 2000,
+      }, (psErr, psStdout) => {
+        if (psErr || !psStdout.trim()) {
+          // Have PIDs but can't get names — report as unknown
+          callback(childPids.map(p => ({ pid: p, name: "unknown" })));
+          return;
+        }
+
+        const procs = psStdout.trim().split("\n").map(line => {
+          const trimmed = line.trim();
+          const spaceIdx = trimmed.indexOf(" ");
+          if (spaceIdx === -1) return null;
+          const cpid = parseInt(trimmed.substring(0, spaceIdx), 10);
+          const comm = path.basename(trimmed.substring(spaceIdx + 1).trim());
+          return cpid && comm ? { pid: cpid, name: comm } : null;
+        }).filter(Boolean) as Array<{ pid: number; name: string }>;
+
+        callback(procs);
+      });
+    });
+  }
+
+  private _sendCheckProcessesResponse(
+    tabId: number,
+    processes: Array<{ pid: number; name: string }>,
+  ): void {
+    this._alterminal?.webview.postMessage({
+      command: "checkProcessesResponse",
+      tabId,
+      processes,
+    });
   }
 
   /**

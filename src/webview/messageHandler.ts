@@ -38,6 +38,7 @@ export interface MessageHandlerCallbacks {
   resetActiveTerminal: () => void;
   handleProcessChange: (processName: string, tabId: number) => void;
   handleCwdChange: (cwd: string, tabId: number) => void;
+  handleCheckProcessesResponse: (tabId: number, processes: Array<{ pid: number; name: string }>) => void;
   handleUserVarChange: (vars: Record<string, string>, tabId: number) => void;
   scheduleSaveState: (reason: string) => void;
   
@@ -126,6 +127,10 @@ export class MessageHandler {
 
         case "processChange":
           this.callbacks.handleProcessChange(message.processName, message.tabId);
+          break;
+
+        case "checkProcessesResponse":
+          this.callbacks.handleCheckProcessesResponse(message.tabId, message.processes);
           break;
 
         case "cwdChange":

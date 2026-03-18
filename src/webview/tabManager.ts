@@ -52,6 +52,7 @@ export class TabManager {
   private _visibilityHandler: (() => void) | null = null;
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingTitleOpts = new Map<number, Record<string, any>>();
+  private _pendingCloseChecks = new Map<number, (procs: Array<{ pid: number; name: string }>) => void>();
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -161,6 +162,7 @@ export class TabManager {
       updateSaveButtonVisibility: (cmd, saved) => this.updateSaveButtonVisibility(cmd, saved),
       resetActiveTerminal: () => this.resetActiveTerminal(),
       handleProcessChange: (name, tabId) => this.handleProcessChange(name, tabId),
+      handleCheckProcessesResponse: (tabId, procs) => this._handleCheckProcessesResponse(tabId, procs),
       handleCwdChange: (cwd, tabId) => this.handleCwdChange(cwd, tabId),
       handleUserVarChange: (vars, tabId) => this.handleUserVarChange(vars, tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
@@ -212,7 +214,7 @@ export class TabManager {
       // No notification if user is focused on the originating terminal
       if (terminal.isActive) return;
 
-        this._tabUIManager.showNotification(id);
+      this._tabUIManager.showNotification(id);
 
       // Notify extension host (for window title indicator + toast)
       const t = this.terminals.get(id);
@@ -419,11 +421,77 @@ export class TabManager {
   }
 
   /**
-   * Close a specific tab
+   * Close a specific tab.
+   * Checks for running child processes first and prompts for confirmation.
    */
   closeTab(tabId) {
     if (this.terminals.size <= 1) return; // Don't close last tab
 
+    const terminal = this.terminals.get(tabId);
+    if (!terminal) return;
+
+    // Ask extension host for child processes before closing
+    this.vscode.postMessage({ command: "checkProcesses", tabId });
+    this._pendingCloseChecks.set(tabId, (procs) => {
+      if (procs.length > 0) {
+        const names = procs.map(p => p.name).join(", ");
+        this._showCloseConfirmation(tabId, names);
+      } else {
+        this._doCloseTab(tabId);
+      }
+    });
+  }
+
+  /**
+   * Show confirmation dialog before closing a tab with running processes.
+   */
+  private _showCloseConfirmation(tabId: number, processNames: string) {
+    // Use a simple modal overlay in the webview
+    const overlay = document.createElement("div");
+    overlay.className = "close-confirm-overlay";
+    overlay.innerHTML = `
+      <div class="close-confirm-dialog">
+        <div class="close-confirm-title">Terminate running processes?</div>
+        <div class="close-confirm-body">Closing this tab will terminate: <strong>${processNames}</strong></div>
+        <div class="close-confirm-actions">
+          <button class="close-confirm-cancel">Cancel</button>
+          <button class="close-confirm-terminate">Terminate</button>
+        </div>
+      </div>
+    `;
+
+    const cancel = overlay.querySelector(".close-confirm-cancel") as HTMLElement;
+    const terminate = overlay.querySelector(".close-confirm-terminate") as HTMLElement;
+
+    const dismiss = () => overlay.remove();
+
+    cancel.addEventListener("click", dismiss);
+    terminate.addEventListener("click", () => {
+      dismiss();
+      this._doCloseTab(tabId);
+    });
+
+    // Escape key cancels
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        dismiss();
+        document.removeEventListener("keydown", keyHandler);
+      } else if (e.key === "Enter") {
+        dismiss();
+        this._doCloseTab(tabId);
+        document.removeEventListener("keydown", keyHandler);
+      }
+    };
+    document.addEventListener("keydown", keyHandler);
+
+    document.body.appendChild(overlay);
+    terminate.focus();
+  }
+
+  /**
+   * Actually close the tab (after confirmation or when no processes are running).
+   */
+  private _doCloseTab(tabId: number) {
     const terminal = this.terminals.get(tabId);
     if (!terminal) return;
 
@@ -467,6 +535,17 @@ export class TabManager {
       this.scheduleSaveState("closeTab");
     } catch (e) {
       Logger.warn("Failed to schedule save after closeTab", e);
+    }
+  }
+
+  /**
+   * Handle checkProcessesResponse from extension host
+   */
+  private _handleCheckProcessesResponse(tabId: number, processes: Array<{ pid: number; name: string }>) {
+    const resolve = this._pendingCloseChecks.get(tabId);
+    if (resolve) {
+      this._pendingCloseChecks.delete(tabId);
+      resolve(processes);
     }
   }
 
