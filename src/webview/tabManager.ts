@@ -209,11 +209,12 @@ export class TabManager {
 
   private _wireBellHandler(terminal: TerminalInstance): void {
     terminal.onBellReceived = (id: number) => {
-      // Tab UI notification only for inactive tabs
-      if (!terminal.isActive) {
+      // No notification if user is focused on the originating terminal
+      if (terminal.isActive) return;
+
         this._tabUIManager.showNotification(id);
-      }
-      // Always notify extension host (for OS-level notification)
+
+      // Notify extension host (for window title indicator + toast)
       const t = this.terminals.get(id);
       this.vscode.postMessage({
         command: "playBellSound",

@@ -228,13 +228,18 @@ export class PtyManager {
     }
 
     if (this._onBell && this._bellDetector.detect(tabId, data)) {
-      const excerpt = data.length <= 200 ? data : data.substring(0, 200);
-      const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
-        const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
-        return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
-      });
-      Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
-      this._onBell(tabId);
+      // Only fire extension-host bell (toast/title) when panel is NOT visible.
+      // If the user is looking at the terminal, the webview handles bell UI
+      // and suppresses for the active tab.
+      if (!this._alterminal?.visible) {
+        const excerpt = data.length <= 200 ? data : data.substring(0, 200);
+        const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
+          const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
+          return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
+        });
+        Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
+        this._onBell(tabId);
+      }
     }
 
     const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
