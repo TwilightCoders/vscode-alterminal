@@ -52,7 +52,6 @@ export class TerminalInstance {
   public isActive: boolean;
   public whenOpened: Promise<any>;
   public onBellReceived?: (tabId: number) => void;
-  private _suppressBell = false;
 
   // Internal — passed to child managers but not accessed externally
   private vscode: any;
@@ -420,10 +419,9 @@ export class TerminalInstance {
       }, 50);
     });
 
-    // Set up bell handler - listen for terminal bell events
+    // Bell handler — \x07 is stripped before reaching xterm.js, so this
+    // should rarely fire. Kept as a safety net for edge cases.
     this.bellDisposable = this.terminal.onBell(() => {
-      if (this._suppressBell) return;
-      // Log to extension host (visible in Output panel as a warning)
       this.vscode.postMessage({
         command: "bellDiagnostic",
         tabId: this.id,
@@ -712,7 +710,7 @@ export class TerminalInstance {
     }
 
     try {
-      const serialized = this.serializeAddon.serialize({
+      let serialized = this.serializeAddon.serialize({
         scrollback: window.scrollbackLines || TERMINAL_DEFAULTS.SCROLLBACK,
         excludeAltBuffer: true,
         excludeModes: false,
@@ -738,15 +736,13 @@ export class TerminalInstance {
     }
 
     try {
-      // Suppress bell events during restore — replaying history should not
-      // trigger notifications (the buffer may contain BEL characters from
-      // past OSC sequences or legitimate bells that already fired).
-      this._suppressBell = true;
+      // Replace BEL (\x07) with ST (\x1b\\) in restored content.
+      // Saved buffers contain OSC 8 hyperlinks whose \x07 terminators
+      // would trigger xterm.js onBell during replay.
+      const cleanContent = serializedContent.replace(/\x07/g, "\x1b\\");
 
       // Write content directly - xterm.js 6.0.0 handles all sequences properly
-      this.terminal.write(serializedContent, () => {
-        this._suppressBell = false;
-      });
+      this.terminal.write(cleanContent, () => {});
 
       // Mark as dirty and cache the restored content so serialize() works immediately
       this._isDirty = false; // Content is already saved, mark as clean

@@ -163,6 +163,7 @@ export class TabManager {
       resetActiveTerminal: () => this.resetActiveTerminal(),
       handleProcessChange: (name, tabId) => this.handleProcessChange(name, tabId),
       handleCheckProcessesResponse: (tabId, procs) => this._handleCheckProcessesResponse(tabId, procs),
+      handleBell: (tabId) => this._handleBell(tabId),
       handleCwdChange: (cwd, tabId) => this.handleCwdChange(cwd, tabId),
       handleUserVarChange: (vars, tabId) => this.handleUserVarChange(vars, tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
@@ -210,20 +211,22 @@ export class TabManager {
   }
 
   private _wireBellHandler(terminal: TerminalInstance): void {
+    // xterm.js onBell is kept as a safety net but shouldn't fire
+    // since we strip \x07 before data reaches xterm.js.
     terminal.onBellReceived = (id: number) => {
-      // No notification if user is focused on the originating terminal
       if (terminal.isActive) return;
-
       this._tabUIManager.showNotification(id);
-
-      // Notify extension host (for window title indicator + toast)
-      const t = this.terminals.get(id);
-      this.vscode.postMessage({
-        command: "playBellSound",
-        tabId: id,
-        tabLabel: t?.label || `Tab ${id}`,
-      });
     };
+  }
+
+  /**
+   * Handle bell notification from extension host (BellDetector).
+   * Shows tab badge for inactive tabs.
+   */
+  private _handleBell(tabId: number): void {
+    const terminal = this.terminals.get(tabId);
+    if (!terminal || terminal.isActive) return;
+    this._tabUIManager.showNotification(tabId);
   }
 
   _findTabIdByCommand(cmd: string | null): number | null {
@@ -409,8 +412,9 @@ export class TabManager {
     this._tabUIManager.updateActiveTabUI(tabId);
     this.activeTabId = tabId;
 
-    // Clear notifications for the newly active tab
+    // Clear notifications for the newly active tab (local + extension host)
     this._tabUIManager.hideNotification(tabId);
+    this.vscode.postMessage({ command: "switchTab", tabId });
 
     // Schedule save reflecting activeTabId change
     try {

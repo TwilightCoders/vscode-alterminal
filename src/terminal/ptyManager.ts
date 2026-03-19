@@ -228,21 +228,23 @@ export class PtyManager {
     }
 
     if (this._onBell && this._bellDetector.detect(tabId, data)) {
-      // Only fire extension-host bell (toast/title) when panel is NOT visible.
-      // If the user is looking at the terminal, the webview handles bell UI
-      // and suppresses for the active tab.
-      if (!this._alterminal?.visible) {
-        const excerpt = data.length <= 200 ? data : data.substring(0, 200);
-        const escaped = excerpt.replace(/[\x00-\x1f]/g, (c: string) => {
-          const names: Record<number, string> = { 7: "\\a", 13: "\\r", 10: "\\n", 27: "\\e" };
-          return names[c.charCodeAt(0)] || `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
-        });
-        Logger.warn(`🔔 PTY bell [tab ${tabId}]: ${escaped}`);
-        this._onBell(tabId);
-      }
+      Logger.warn(`🔔 Bell detected [tab ${tabId}]`);
+      this._onBell(tabId);
+      // Notify webview so it can show tab badge (xterm.js won't fire
+      // onBell since we strip \x07 before it reaches the terminal).
+      this._alterminal?.webview.postMessage({
+        command: "bell",
+        tabId,
+      });
     }
 
-    const filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
+    let filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
+    // Always strip BEL from data sent to xterm.js — BellDetector already ran above.
+    // OSC sequences use \x07 as terminator, and data chunking can split them so
+    // xterm.js sees bare \x07 and fires onBell. Replace with ST (\x1b\\).
+    if (filteredData.indexOf("\x07") !== -1) {
+      filteredData = filteredData.replace(/\x07/g, "\x1b\\");
+    }
     if (!filteredData) return;
 
     if (this._alterminal?.visible) {

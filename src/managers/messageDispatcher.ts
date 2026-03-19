@@ -90,7 +90,11 @@ export class MessageDispatcher {
         Logger.debug("Received webviewReady message");
         this.onWebviewReady();
       },
-      switchTab: () => {}, // No-op - handled in webview
+      switchTab: (msg: any) => {
+        if (msg.tabId !== undefined) {
+          this.clearBellForTab(msg.tabId);
+        }
+      },
       bellDiagnostic: (msg: any) =>
         Logger.warn(`🔔 Webview bell [tab ${msg.tabId}] source: ${msg.source}`),
       playBellSound: (msg: any) => this.handleBellSound(msg.tabId, msg.tabLabel),
@@ -199,6 +203,13 @@ export class MessageDispatcher {
    * Defers if a bell fired very recently to avoid clearing before the user sees it.
    */
   public clearBellIndicator(): void {
+    // Cancel any pending toast — user is now looking at the panel
+    if (this._bellDebounceTimer) {
+      clearTimeout(this._bellDebounceTimer);
+      this._bellDebounceTimer = null;
+    }
+    this._pendingBells.clear();
+
     if (this._unreadBellTabs.size === 0) return;
 
     const elapsed = Date.now() - this._lastBellTime;
@@ -216,6 +227,14 @@ export class MessageDispatcher {
 
     this._unreadBellTabs.clear();
     this._bellNotifiedAt.clear();
+    this._updateTitleIndicator();
+  }
+
+  /** Clear pending bell for a specific tab (e.g. user switched to it). */
+  public clearBellForTab(tabId: number): void {
+    this._pendingBells.delete(tabId);
+    this._unreadBellTabs.delete(tabId);
+    this._bellNotifiedAt.delete(tabId);
     this._updateTitleIndicator();
   }
 
