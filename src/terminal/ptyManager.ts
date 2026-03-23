@@ -984,11 +984,17 @@ export class PtyManager {
    * Check for child processes of a PTY's shell and respond to the webview.
    * Used for close-tab protection: warns user if processes are still running.
    * Enumerates ALL children (foreground + background), matching Terminal.app behavior.
+   * Filters out processes that are the same as the root shell (e.g., zsh forking
+   * for job control) — only warns about genuinely different programs.
    */
   private _checkChildProcesses(tabId: number): void {
-    // Get shell PID — direct mode or daemon mode
+    // Get shell PID — direct mode or daemon mode.
+    // Use the ORIGINAL shell name (from SHELL env or spawn command),
+    // not ptyProcess.process which returns the current foreground process.
     const ptyProcess = this._ptyProcesses.get(tabId);
     const pid = ptyProcess?.pid;
+    const shellName = process.env.SHELL ? path.basename(process.env.SHELL) : undefined;
+    Logger.info(`[close-guard] tabId=${tabId} pid=${pid ?? "none"} shell=${shellName ?? "?"} hasPty=${!!ptyProcess} daemonPtyId=${this._tabPtyIds.get(tabId) ?? "none"}`);
 
     if (!pid) {
       // Daemon mode: query the daemon for PID
@@ -997,7 +1003,8 @@ export class PtyManager {
         this._daemonClient.list().then((ptys) => {
           const entry = ptys.find(p => p.ptyId === ptyId);
           if (entry?.pid) {
-            this._getChildProcesses(entry.pid, (procs) => {
+            const daemonShellName = path.basename(entry.processName || "");
+            this._getChildProcesses(entry.pid, daemonShellName, (procs) => {
               this._sendCheckProcessesResponse(tabId, procs);
             });
           } else {
@@ -1013,7 +1020,7 @@ export class PtyManager {
       return;
     }
 
-    this._getChildProcesses(pid, (procs) => {
+    this._getChildProcesses(pid, shellName, (procs) => {
       this._sendCheckProcessesResponse(tabId, procs);
     });
   }
@@ -1021,9 +1028,11 @@ export class PtyManager {
   /**
    * Get all child processes of a given PID.
    * Uses pgrep on Unix (lists ALL children, including background jobs).
+   * Filters out processes matching the root shell name (shell forks for job control).
    */
   private _getChildProcesses(
     pid: number,
+    shellName: string | undefined,
     callback: (procs: Array<{ pid: number; name: string }>) => void,
   ): void {
     if (process.platform === "win32") {
@@ -1034,6 +1043,7 @@ export class PtyManager {
 
     // pgrep -P <pid> lists direct child PIDs
     execFile("pgrep", ["-P", String(pid)], { encoding: "utf8", timeout: 2000 }, (err, stdout) => {
+      Logger.info(`[close-guard] pgrep -P ${pid}: err=${err?.message ?? "none"} stdout="${stdout?.trim() ?? ""}"`);
       if (err || !stdout.trim()) {
         callback([]);
         return;
@@ -1065,7 +1075,15 @@ export class PtyManager {
           return cpid && comm ? { pid: cpid, name: comm } : null;
         }).filter(Boolean) as Array<{ pid: number; name: string }>;
 
-        callback(procs);
+        // Filter out child processes that match the root shell — these are
+        // shell forks for job control, not user-launched programs.
+        const shellBase = shellName ? path.basename(shellName) : "";
+        const nonShell = shellBase
+          ? procs.filter(p => p.name !== shellBase)
+          : procs;
+
+        Logger.info(`[close-guard] children: ${JSON.stringify(procs)} shell="${shellBase}" → nonShell: ${JSON.stringify(nonShell)}`);
+        callback(nonShell);
       });
     });
   }

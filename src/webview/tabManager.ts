@@ -434,9 +434,17 @@ export class TabManager {
     const terminal = this.terminals.get(tabId);
     if (!terminal) return;
 
-    // Ask extension host for child processes before closing
+    // Ask extension host for child processes before closing.
+    // Timeout after 2s — if check hangs, still show confirmation dialog.
     this.vscode.postMessage({ command: "checkProcesses", tabId });
+    const timeout = setTimeout(() => {
+      if (this._pendingCloseChecks.has(tabId)) {
+        this._pendingCloseChecks.delete(tabId);
+        this._showCloseConfirmation(tabId, "unknown process");
+      }
+    }, 2000);
     this._pendingCloseChecks.set(tabId, (procs) => {
+      clearTimeout(timeout);
       if (procs.length > 0) {
         const names = procs.map(p => p.name).join(", ");
         this._showCloseConfirmation(tabId, names);
