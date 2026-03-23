@@ -2,7 +2,7 @@ import * as assert from 'assert';
 
 suite('Link Detection', () => {
   // Must match the regex in terminal.ts (TerminalInstance.LINK_REGEX)
-  const LINK_REGEX = /https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-\.]/g;
+  const LINK_REGEX = /https?:\/\/[^\s"'`()[\]{}]+[^\s"'`()[\]{}.,:;!?]|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/.,;:!?]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-]/g;
 
   function findLinks(text: string): string[] {
     const regex = new RegExp(LINK_REGEX.source, 'g');
@@ -100,6 +100,27 @@ suite('Link Detection', () => {
       assert.deepStrictEqual(
         findLinks('  at Object.<anonymous> (src/test.ts:42:15)'),
         ['src/test.ts'],
+      );
+    });
+
+    test('should exclude trailing period from path at end of sentence', () => {
+      assert.deepStrictEqual(
+        findLinks('The plan is at cli/.claude/docs/REFACTOR_PLAN.md.'),
+        ['cli/.claude/docs/REFACTOR_PLAN.md'],
+      );
+    });
+
+    test('should exclude trailing comma from path in list', () => {
+      assert.deepStrictEqual(
+        findLinks('See src/file.ts, and lib/util.js.'),
+        ['src/file.ts', 'lib/util.js'],
+      );
+    });
+
+    test('should exclude trailing punctuation from URLs', () => {
+      assert.deepStrictEqual(
+        findLinks('Visit https://example.com/path.'),
+        ['https://example.com/path'],
       );
     });
   });

@@ -291,7 +291,7 @@ export class TerminalInstance {
     //   3. Bare relative paths: src/index.ts, commands/project (must contain /)
     // All path alternatives end with a non-slash character to prevent
     // xterm-link-provider from miscalculating link regions at line edges.
-    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-\.])/;
+    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+[^\s"'`()[\]{}.,:;!?]|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/.,;:!?]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-])/;
 
     const handler = (event: MouseEvent, uri: string) => {
       if (event && event.preventDefault) {
