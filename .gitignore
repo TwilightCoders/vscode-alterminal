@@ -54,3 +54,5 @@ Thumbs.db
 
 # Working directory and backups
 working/
+vendor/
+scrap/

@@ -47,6 +47,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // PTY Daemon: persistent PTY processes that survive window reloads.
   // Awaited so daemon is ready before webview restore triggers createPty.
   const daemonEnabled = vscode.workspace.getConfiguration("alterminal").get<boolean>("ptyDaemon.enabled", false);
+  Logger.info(`[daemon] ptyDaemon.enabled = ${daemonEnabled}`);
   if (daemonEnabled) {
     const daemonManager = new DaemonManager(context, context.extensionUri.fsPath);
     _daemonManager = daemonManager;

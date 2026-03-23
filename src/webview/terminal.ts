@@ -452,8 +452,19 @@ export class TerminalInstance {
   write(data) {
     if (!this.terminal) return;
     try {
+      const buf = this.terminal.buffer?.active;
+      const ydispBefore = buf?.viewportY ?? -1;
       this.terminal.write(data);
       this._isDirty = true;
+      // Detect viewport snap — log if ydisp changes unexpectedly
+      const ydispAfter = buf?.viewportY ?? -1;
+      if (ydispBefore !== -1 && ydispAfter !== ydispBefore) {
+        const ybase = buf?.baseY ?? -1;
+        const wasScrolledUp = ydispBefore < ybase;
+        if (wasScrolledUp) {
+          Logger.warn(`[scroll-snap] tab ${this.id}: ydisp ${ydispBefore}→${ydispAfter} (ybase=${ybase})`);
+        }
+      }
     } catch (error) {
       Logger.error(`Failed to write to terminal ${this.id}:`, error);
     }
@@ -609,11 +620,16 @@ export class TerminalInstance {
           } catch (e) {
             // Performance timing is non-critical, ignore failures
           }
-          // Debounce fit to avoid cascading calls during activation
+          // Debounce fit to avoid cascading calls during activation.
+          // Send a nudge resize first (cols-1) to guarantee SIGWINCH,
+          // which forces apps to redraw (especially after daemon reattach).
           Debouncer.debounce(
             `term-activate-fit-${this.id}`,
             50,
             () => {
+              if (this.terminal && this.terminal.cols > 1) {
+                this.sendResizeToPty(this.terminal.cols - 1, this.terminal.rows);
+              }
               this.fit();
             },
             { maxWait: 100 },
