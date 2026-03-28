@@ -45,6 +45,12 @@ import { BellDetector } from "./bellDetector";
 import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
 import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
+import {
+  filterVSCodeSequences,
+  extractCwdFromOsc7,
+  extractUserVars,
+  replaceBelWithST,
+} from "./dataPipeline";
 
 export class PtyManager {
   private _ptyProcesses = new Map<number, pty.IPty>();
@@ -80,19 +86,9 @@ export class PtyManager {
   private _outputBuffer = new Map<number, string[]>();
   private _maxBufferSize = 10000; // Maximum lines to buffer per terminal
 
-  // Combined pattern for escape sequences to filter out in a single pass:
-  // - OSC 633: VS Code shell integration protocol
-  // - OSC 133: FinalTerm shell integration (VS Code also responds to this)
-  // - OSC 7: Current working directory (can trigger VS Code behavior)
-  // - OSC 9;9: ConEmu/Cmder CWD (Windows, VS Code responds)
-  // - OSC 1337: iTerm2 protocol (sometimes used by tools)
-  // - DEC private mode ?1004: Focus reporting (in/out events VS Code may intercept)
-  private static readonly FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9;9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
-
-  // Extraction patterns (separate from filter because we need capture groups)
-  private static readonly CWD_OSC_PATTERN = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
-  // iTerm2 SetUserVar: \x1b]1337;SetUserVar=name=base64value\x07
-  private static readonly USER_VAR_PATTERN = /\x1b\]1337;SetUserVar=([A-Za-z0-9_]+)=([A-Za-z0-9+/=]*?)(?:\x07|\x1b\\)/g;
+  // Data pipeline functions (filterVSCodeSequences, extractCwdFromOsc7,
+  // extractUserVars, replaceBelWithST) and regex constants are in
+  // ./dataPipeline.ts for testability.
 
   constructor() {
     // No callbacks needed - will use webview directly
@@ -205,7 +201,7 @@ export class PtyManager {
    * These include VS Code shell integration sequences and focus reporting mode
    */
   private _filterVSCodeSequences(data: string): string {
-    return data.replace(PtyManager.FILTER_PATTERN, '');
+    return filterVSCodeSequences(data);
   }
 
   /**
@@ -239,12 +235,9 @@ export class PtyManager {
     }
 
     let filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
-    // Always strip BEL from data sent to xterm.js — BellDetector already ran above.
-    // OSC sequences use \x07 as terminator, and data chunking can split them so
-    // xterm.js sees bare \x07 and fires onBell. Replace with ST (\x1b\\).
-    if (filteredData.indexOf("\x07") !== -1) {
-      filteredData = filteredData.replace(/\x07/g, "\x1b\\");
-    }
+    // Replace BEL with ST so xterm.js doesn't fire onBell for OSC terminators.
+    // BellDetector already ran above on the raw data.
+    filteredData = replaceBelWithST(filteredData);
     if (!filteredData) return;
 
     if (this._alterminal?.visible) {
@@ -280,39 +273,14 @@ export class PtyManager {
    * OSC 7 format: \x1b]7;file://hostname/path\x07
    */
   private _extractCwdFromOsc7(data: string): string | null {
-    PtyManager.CWD_OSC_PATTERN.lastIndex = 0;
-    let lastUrl: string | null = null;
-    let m: RegExpExecArray | null;
-    while ((m = PtyManager.CWD_OSC_PATTERN.exec(data)) !== null) {
-      lastUrl = m[1]; // capture group has the URL directly
-    }
-    if (!lastUrl) return null;
-    try {
-      return decodeURIComponent(new URL(lastUrl).pathname);
-    } catch {
-      return null;
-    }
+    return extractCwdFromOsc7(data);
   }
 
   /**
    * Extract SetUserVar key-value pairs from OSC 1337 sequences in data
    */
   private _extractUserVars(data: string): Map<string, string> | null {
-    let result: Map<string, string> | null = null;
-    PtyManager.USER_VAR_PATTERN.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = PtyManager.USER_VAR_PATTERN.exec(data)) !== null) {
-      const key = match[1];
-      const base64Value = match[2];
-      try {
-        const value = Buffer.from(base64Value, "base64").toString("utf-8");
-        if (!result) result = new Map();
-        result.set(key, value);
-      } catch {
-        // Skip invalid base64
-      }
-    }
-    return result;
+    return extractUserVars(data);
   }
 
   /**
