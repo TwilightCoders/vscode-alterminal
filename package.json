@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.0-dev.1",
+  "version": "0.2.0-dev.5",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -10,7 +10,9 @@
     "type": "git",
     "url": "https://github.com/twilightcoders/vscode-alterminal"
   },
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "engines": {
     "vscode": "^1.108.0"
   },
@@ -358,7 +360,8 @@
     "compile:tests": "node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.tests.json",
     "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
     "watch:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -watch -p ./",
-    "test": "node -e \"require('fs').rmSync('out/test', {recursive:true, force:true});\" && npm run compile:tests && node ./out/test/test/runTest.js"
+    "test": "node -e \"require('fs').rmSync('out/test', {recursive:true, force:true});\" && npm run compile:tests && node ./out/test/test/runTest.js",
+    "dev:install": "bash scripts/dev-install.sh"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

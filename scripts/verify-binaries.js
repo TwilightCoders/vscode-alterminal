@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 const fs = require('fs');
 
+// Skip verification for local dev builds
+if (process.env.ALTERMINAL_DEV_BUILD) {
+  console.log('⏭  Skipping binary verification (dev build)');
+  process.exit(0);
+}
+
 const requiredBinaries = [
   'node_modules/@lydell/node-pty',
   'node_modules/@lydell/node-pty-darwin-x64',
