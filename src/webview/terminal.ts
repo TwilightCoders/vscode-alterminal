@@ -77,6 +77,7 @@ export class TerminalInstance {
   private bellDisposable: any;
   private renderDisposable: any;
   private titleChangeDisposable: any;
+  private osc52Disposable: any;
 
   // State tracking (internal)
   public shellPath: string | null;
@@ -281,17 +282,19 @@ export class TerminalInstance {
   /**
    * Set up file path link detection using xterm-link-provider library
    */
+  // Link regex for file paths, directories, and URLs.
+  // Used by both the library provider (single-line) and our cross-line wrapper.
+  private static readonly LINK_REGEX_SRC =
+    'https?:\\/\\/[^\\s"\'`()\\[\\]{}]+[^\\s"\'`()\\[\\]{}.,:;!?]' +
+    '|(?:~|\\.\\..?)?\\/[^\\s"\'`()\\[\\]{}]*[^\\s"\'`()\\[\\]{}\\/.,;:!?]' +
+    '|[a-zA-Z0-9_\\-\\.]+\\/[a-zA-Z0-9_\\-\\.\\/]*[a-zA-Z0-9_\\-]';
+
   setupFilePathLinks() {
     if (!this.terminal || !window.LinkProvider) return;
 
-    // Regex for file paths, directories, and URLs
-    // Three alternatives:
-    //   1. URLs: https://...
-    //   2. Absolute/explicit relative paths: /foo, ~/foo, ./foo, ../foo
-    //   3. Bare relative paths: src/index.ts, commands/project (must contain /)
-    // All path alternatives end with a non-slash character to prevent
-    // xterm-link-provider from miscalculating link regions at line edges.
-    const linkRegex = /(https?:\/\/[^\s"'`()[\]{}]+[^\s"'`()[\]{}.,:;!?]|(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/.,;:!?]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-])/;
+    const linkRegex = new RegExp(`(${TerminalInstance.LINK_REGEX_SRC})`);
+    const terminal = this.terminal;
+    const cols = terminal.cols;
 
     const handler = (event: MouseEvent, uri: string) => {
       if (event && event.preventDefault) {
@@ -309,9 +312,86 @@ export class TerminalInstance {
       }
     };
 
+    // Base provider from the library (handles single-line links)
+    const baseProvider = new window.LinkProvider(terminal, linkRegex, handler);
+
+    // Wrapping provider that also detects links split across hard-wrapped lines.
+    // Claude Code (via Ink) inserts \r\n at terminal width, splitting URLs/paths.
+    // We detect when a match ends at the terminal width and the next line
+    // continues with valid URL/path characters (no leading whitespace/escapes).
+    const crossLineProvider = {
+      provideLinks: (y: number, callback: (links: any[] | undefined) => void) => {
+        // First, get the library's single-line results
+        baseProvider.provideLinks(y, (baseLinks: any[] | undefined) => {
+          if (!baseLinks || baseLinks.length === 0) {
+            callback(baseLinks);
+            return;
+          }
+
+          const enhanced: any[] = [];
+          for (const link of baseLinks) {
+            const endX = link.range.end.x;
+            const endY = link.range.end.y;
+
+            // Check if link ends near terminal width
+            if (endX >= cols - 2) {
+              // Peek at next line(s) for continuation
+              let joinedText = link.text;
+              let lastY = endY;
+
+              while (true) {
+                const nextLine = terminal.buffer.active.getLine(lastY); // 0-based = lastY (since lastY is 1-based row)
+                if (!nextLine || nextLine.isWrapped) break; // isWrapped lines are already handled by the library
+
+                const nextText = nextLine.translateToString(true);
+                // Continuation: no leading whitespace or escape sequences
+                if (!nextText || /^[\s\x1b]/.test(nextText)) break;
+
+                // Match valid URL/path continuation chars at start of line
+                const contMatch = nextText.match(/^[^\s"'`()[\]{},;:!?]+/);
+                if (!contMatch) break;
+
+                joinedText += contMatch[0];
+                lastY++;
+
+                // If continuation doesn't fill the line, stop
+                if (contMatch[0].length < nextText.trimEnd().length - 2) break;
+              }
+
+              if (lastY > endY) {
+                // Validate joined text
+                const validationRe = new RegExp(TerminalInstance.LINK_REGEX_SRC);
+                const validated = validationRe.exec(joinedText);
+                if (validated && validated[0].length > link.text.length) {
+                  // Find where the continuation ends on the last line
+                  const lastLine = terminal.buffer.active.getLine(lastY - 1);
+                  const lastLineText = lastLine?.translateToString(true) || '';
+                  const contOnLastLine = lastLineText.match(/^[^\s"'`()[\]{},;:!?]+/);
+                  const endXOnLastLine = contOnLastLine ? contOnLastLine[0].length : 1;
+
+                  enhanced.push({
+                    range: {
+                      start: link.range.start,
+                      end: { x: endXOnLastLine + 1, y: lastY },
+                    },
+                    text: validated[0],
+                    activate: handler,
+                  });
+                  continue;
+                }
+              }
+            }
+
+            enhanced.push(link);
+          }
+
+          callback(enhanced.length > 0 ? enhanced : undefined);
+        });
+      },
+    };
+
     try {
-      const provider = new window.LinkProvider(this.terminal, linkRegex, handler);
-      this.linkProviderDisposable = this.terminal.registerLinkProvider(provider);
+      this.linkProviderDisposable = terminal.registerLinkProvider(crossLineProvider);
     } catch (error) {
       console.error("Failed to register link provider:", error);
     }
@@ -372,6 +452,31 @@ export class TerminalInstance {
             window.tabManager.handleOscTitleChange(this.id, title);
           }
         });
+      });
+    }
+
+    // OSC 52 — clipboard. Programs send \x1b]52;c;<base64>\x07 to copy text.
+    // The webview has clipboard access, so we handle it directly here.
+    if (this.terminal.parser?.registerOscHandler) {
+      this.osc52Disposable = this.terminal.parser.registerOscHandler(52, (data: string) => {
+        // Format: "c;<base64>" or ";<base64>" — the first field selects clipboard
+        // buffer (c=clipboard, p=primary, etc.). We always target the system clipboard.
+        const semiIdx = data.indexOf(';');
+        if (semiIdx === -1) return false;
+
+        const payload = data.substring(semiIdx + 1);
+        if (!payload || payload === '?') return false; // '?' is a read request — skip
+
+        try {
+          const text = atob(payload);
+          // Use the extension host's clipboard API (works in tunnel mode too)
+          this.vscode.postMessage({ command: 'clipboardCopy', text });
+          Logger.debug(`📋 OSC 52 clipboard copy (${text.length} chars)`);
+        } catch (e) {
+          Logger.warn('OSC 52 decode failed:', e);
+          return false;
+        }
+        return true;
       });
     }
 
@@ -497,10 +602,21 @@ export class TerminalInstance {
       return;
     }
 
+    const prevCols = this.terminal.cols;
+    const prevRows = this.terminal.rows;
+
     try {
       this.fitAddon.fit();
     } catch (error) {
       Logger.error(`Failed to fit terminal ${this.id}:`, error);
+      return;
+    }
+
+    // When dimensions change, clear the visible screen so full-screen TUI
+    // apps (Ink/Claude Code) redraw cleanly after SIGWINCH. Without this,
+    // cursor-positioned content from the old layout remains as ghost artifacts.
+    if (this.terminal.cols !== prevCols || this.terminal.rows !== prevRows) {
+      this.terminal.write('\x1b[2J');
     }
   }
 
@@ -783,6 +899,7 @@ export class TerminalInstance {
     this.resizeDisposable = this.disposeEventHandler(this.resizeDisposable);
     this.bellDisposable = this.disposeEventHandler(this.bellDisposable);
     this.titleChangeDisposable = this.disposeEventHandler(this.titleChangeDisposable);
+    this.osc52Disposable = this.disposeEventHandler(this.osc52Disposable);
     this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
 
     // Dispose link providers

@@ -333,4 +333,173 @@ suite('Link Detection', () => {
       }
     });
   });
+
+  suite('Cross-line link joining (hard-wrapped URLs)', () => {
+    // Claude Code (via Ink) hard-wraps long lines by inserting \r\n at
+    // the terminal width. This splits URLs/paths across buffer lines.
+    // xterm-link-provider sees them as separate lines (isWrapped=false).
+    // Alterminal needs to detect and rejoin these.
+
+    /**
+     * Simulates the cross-line join logic.
+     * Given adjacent lines from the buffer, detects when a URL or path
+     * is split at the terminal width and joins them.
+     *
+     * Rules:
+     * - A link candidate ends at or near column `cols` (within 2 chars)
+     * - The next line starts with continuation chars (no leading whitespace,
+     *   no \e[ cursor positioning — raw text continues the URL/path)
+     * - The continuation matches valid URL/path characters
+     */
+    /**
+     * Detect and rejoin links split across hard-wrapped lines.
+     *
+     * Algorithm:
+     * 1. Find link matches on each line
+     * 2. If a match ends at or near `cols` (the terminal width), check
+     *    if the next line is a plausible continuation
+     * 3. Continuation criteria: next line does NOT start with whitespace
+     *    or escape sequences, and its leading chars are valid URL/path chars
+     * 4. Join the match text and re-validate against the regex
+     */
+    function joinCrossLineLinks(
+      lines: string[],
+      cols: number,
+      regex: RegExp,
+    ): Array<{ text: string; startLine: number; startCol: number }> {
+      const results: Array<{ text: string; startLine: number; startCol: number }> = [];
+      const consumedLines = new Set<number>(); // lines consumed as continuations
+
+      for (let i = 0; i < lines.length; i++) {
+        if (consumedLines.has(i)) continue;
+
+        const line = lines[i];
+        const trimmedLine = line.replace(/\s+$/, ''); // trim trailing whitespace for length check
+        const re = new RegExp(regex.source, 'g');
+        let match: RegExpExecArray | null;
+
+        while ((match = re.exec(trimmedLine)) !== null) {
+          let fullText = match[0];
+          const startCol = match.index;
+          const matchEnd = startCol + fullText.length;
+
+          // Does this match reach near the terminal width?
+          // Only try to join if the line actually fills the terminal
+          // (original line length, not trimmed — padded lines count).
+          if (line.length >= cols - 2 && matchEnd >= trimmedLine.length - 2) {
+            // Try to join with subsequent lines
+            let joinLine = i;
+            while (joinLine + 1 < lines.length) {
+              const nextLine = lines[joinLine + 1];
+              // Continuation: must NOT start with whitespace or escape sequences
+              if (!nextLine || /^[\s\x1b]/.test(nextLine)) break;
+
+              // Find how much of the next line continues valid URL/path chars
+              const contMatch = nextLine.match(/^[^\s"'`()[\]{},;:!?]+/);
+              if (!contMatch) break;
+
+              fullText += contMatch[0];
+              joinLine++;
+              consumedLines.add(joinLine);
+
+              // If this continuation doesn't fill the line, stop
+              const contTrimmed = nextLine.replace(/\s+$/, '');
+              if (contMatch[0].length < contTrimmed.length - 2) break;
+            }
+          }
+
+          // Re-validate the joined text against the regex
+          const validationRe = new RegExp(regex.source);
+          const validated = validationRe.exec(fullText);
+          if (validated) {
+            results.push({
+              text: validated[0],
+              startLine: i,
+              startCol: startCol + validated.index,
+            });
+          }
+        }
+      }
+      return results;
+    }
+
+    const URL_REGEX = /https?:\/\/[^\s"'`()[\]{}]+[^\s"'`()[\]{}.,:;!?]/;
+    const PATH_REGEX = /(?:~|\.\.?)?\/[^\s"'`()[\]{}]*[^\s"'`()[\]{}\/.,;:!?]|[a-zA-Z0-9_\-\.]+\/[a-zA-Z0-9_\-\.\/]*[a-zA-Z0-9_\-]/;
+    const COMBINED = new RegExp(`${URL_REGEX.source}|${PATH_REGEX.source}`);
+
+    test('should join URL split across two lines at terminal width', () => {
+      // 80-col terminal, URL wraps after "task"
+      const lines = [
+        'MR is up: https://gitlab.example.com/org/app/post-hire-verify-tasks',  // 68 chars + url fills to col 80
+        '/-/merge_requests/194',
+      ];
+      // Pad first line to exactly 80 cols
+      const paddedLine = lines[0].padEnd(80);
+      const result = joinCrossLineLinks([paddedLine, lines[1]], 80, COMBINED);
+
+      assert.ok(result.length >= 1);
+      const urlLink = result.find(r => r.text.includes('merge_requests'));
+      assert.ok(urlLink, `Should find joined URL, got: ${JSON.stringify(result)}`);
+      assert.ok(
+        urlLink!.text.includes('post-hire-verify-tasks/-/merge_requests/194'),
+        `Joined URL should contain full path, got: "${urlLink!.text}"`,
+      );
+    });
+
+    test('should not join when next line has leading whitespace', () => {
+      const lines = [
+        'See https://example.com/very-long-path-that-fills'.padEnd(80),
+        '  /continued-path',  // has leading spaces — new content, not continuation
+      ];
+      const result = joinCrossLineLinks(lines, 80, COMBINED);
+
+      // The URL from line 1 should NOT include /continued-path
+      const mainLink = result.find(r => r.startLine === 0 && r.text.startsWith('https://'));
+      assert.ok(mainLink, 'Should find the URL on line 1');
+      assert.ok(
+        !mainLink!.text.includes('continued-path'),
+        `URL should not include continuation: "${mainLink!.text}"`,
+      );
+    });
+
+    test('should not join when next line starts with escape sequence', () => {
+      const lines = [
+        'See https://example.com/path-that-fills-the-line'.padEnd(80),
+        '\x1b[2C/next-section',  // cursor move — Claude Code indentation
+      ];
+      const result = joinCrossLineLinks(lines, 80, COMBINED);
+
+      // The URL from line 1 should NOT include /next-section
+      const mainLink = result.find(r => r.startLine === 0 && r.text.startsWith('https://'));
+      assert.ok(mainLink, 'Should find the URL on line 1');
+      assert.ok(
+        !mainLink!.text.includes('next-section'),
+        `URL should not include continuation: "${mainLink!.text}"`,
+      );
+    });
+
+    test('should not join when match does not end near terminal width', () => {
+      const lines = [
+        'Short: https://example.com/path',  // ends well before col 80
+        'unrelated-text',
+      ];
+      const result = joinCrossLineLinks(lines, 80, COMBINED);
+
+      // Only the URL should be found, not joined with unrelated-text
+      const urlLink = result.find(r => r.text.startsWith('https://'));
+      assert.ok(urlLink);
+      assert.strictEqual(urlLink!.text, 'https://example.com/path');
+    });
+
+    test('should join file path split across lines', () => {
+      const lines = [
+        '/Users/dale/Workspace/TwilightCoders/vscode/alterminal/src/terminal/ptyManage'.padEnd(80),
+        'r.ts',
+      ];
+      const result = joinCrossLineLinks(lines, 80, COMBINED);
+
+      const pathLink = result.find(r => r.text.includes('ptyManager.ts'));
+      assert.ok(pathLink, `Should find joined path, got: ${JSON.stringify(result)}`);
+    });
+  });
 });
