@@ -2,6 +2,28 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.0-dev.12] — 2026-03-30
+
+### New Features
+
+- **Daemon hot-restart with FD handoff**: `Alterminal: Restart PTY Daemon` command. New daemon inherits PTY master file descriptors via stdio inheritance, so shells survive daemon restarts without interruption.
+- **OSC 52 clipboard support**: Programs can copy text to the system clipboard via `\x1b]52;c;<base64>\x07`. Works in tunnel mode.
+- **Cross-line link detection**: URLs and file paths split across hard-wrapped lines (e.g., by Claude Code/Ink) are joined into a single clickable link.
+- **Dev install workflow**: `npm run dev:install` auto-increments the build number, compiles, packages, and installs locally.
+
+### Fixes
+
+- **Stale PTY entries block spawn**: Daemon no longer rejects PTY creation when a dead entry exists for the same UUID. Dead entries are cleaned up automatically.
+- **Session ID mismatch after reboot**: PTYs reattach across reboots when the session ID changes but the UUID persists. `listPtys` returns all PTYs regardless of session. `attachPty` reassigns session ownership.
+- **Resize ghost artifacts**: Screen cleared on dimension change to prevent stale content from TUI apps.
+- **Error logging**: Daemon spawn failures now log the actual error message instead of `{}`.
+
+### Technical
+
+- **Data pipeline extracted**: `filterVSCodeSequences`, `extractCwdFromOsc7`, `extractUserVars`, `replaceBelWithST` moved to standalone `dataPipeline.ts` module for testability.
+- **3-tier test suite**: 127 tests across unit, integration, and real PTY tiers with MockWebview and PtyTestHarness helpers.
+- **FocusGuard cleaned up**: Removed unnecessary event listeners, added 8 timing logic tests.
+
 ## [0.1.36]
 
 ### New Features
