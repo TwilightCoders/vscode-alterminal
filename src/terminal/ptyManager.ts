@@ -648,7 +648,7 @@ export class PtyManager {
       ).then(() => {
         // Spawn succeeded — nothing else to do
       }).catch((err) => {
-        Logger.error(`Daemon spawn failed for tab ${tabId}, falling back to direct:`, err);
+        Logger.error(`Daemon spawn failed for tab ${tabId}, falling back to direct: ${(err as Error)?.message || err}`);
         // Clean up daemon mappings and fall back to direct mode
         this._tabPtyIds.delete(tabId);
         this._ptyIdToTab.delete(uuid);
