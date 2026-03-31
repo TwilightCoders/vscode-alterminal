@@ -91,6 +91,12 @@ export class PtyDaemonClient extends EventEmitter {
     });
   }
 
+  /** Request a graceful daemon restart with PTY handoff. */
+  async handoff(): Promise<void> {
+    const id = this._nextId();
+    await this._request({ type: "handoff", id });
+  }
+
   /** Gracefully disconnect from the daemon. */
   disconnect(): void {
     if (this._socket && !this._socket.destroyed) {

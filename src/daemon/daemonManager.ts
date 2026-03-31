@@ -114,6 +114,50 @@ export class DaemonManager {
     }
   }
 
+  /**
+   * Restart the daemon with a graceful handoff.
+   * The old daemon passes its PTY FDs to the new one, so existing
+   * shells survive. The client reconnects automatically.
+   */
+  async restart(): Promise<PtyDaemonClient | null> {
+    if (!this._client?.connected) {
+      Logger.info("No daemon to restart — starting fresh");
+      return this.connect();
+    }
+
+    Logger.info("Requesting daemon handoff...");
+
+    try {
+      // Send handoff message to old daemon
+      await this._client.handoff();
+    } catch (err) {
+      Logger.warn("Handoff request failed:", err);
+    }
+
+    // Old daemon spawns replacement and exits.
+    // Disconnect our client (socket will close).
+    this._client.disconnect();
+    this._client = null;
+
+    // Wait for the new daemon to start (it writes a new lockfile)
+    await this._sleep(1000);
+
+    // Connect to the new daemon
+    for (let i = 0; i < MAX_CONNECT_ATTEMPTS; i++) {
+      Logger.info(`[daemon] Restart reconnect attempt ${i + 1}/${MAX_CONNECT_ATTEMPTS}...`);
+      const client = await this._tryConnect();
+      if (client) {
+        Logger.info("Reconnected to restarted daemon");
+        return client;
+      }
+      Logger.info(`[daemon] Restart reconnect attempt ${i + 1} failed`);
+      await this._sleep(RETRY_DELAY_MS);
+    }
+
+    Logger.error("Failed to reconnect after daemon restart");
+    return null;
+  }
+
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
@@ -123,6 +167,7 @@ export class DaemonManager {
     const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
     const lockInfo = readLockfile(lockPath);
     if (!lockInfo || !isProcessAlive(lockInfo.pid)) {
+      Logger.info(`[daemon] _tryConnect: lockInfo=${!!lockInfo} alive=${lockInfo ? isProcessAlive(lockInfo.pid) : 'n/a'}`);
       // Clean up stale lockfile
       if (lockInfo) {
         removeLockfile(lockPath);

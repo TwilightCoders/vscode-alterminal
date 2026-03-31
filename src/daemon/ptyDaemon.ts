@@ -10,12 +10,15 @@
 
 import * as net from "net";
 import * as fs from "fs";
-import { execFileSync } from "child_process";
+import * as path from "path";
+import * as os from "os";
+import { execFileSync, spawn as cpSpawn } from "child_process";
 import * as pty from "@lydell/node-pty";
 import {
   type ClientMessage,
   type DaemonMessage,
   type DaemonLockfile,
+  type HandoffState,
   type PtyInfo,
   encodeMessage,
   FrameDecoder,
@@ -39,13 +42,24 @@ const INACTIVITY_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 interface PtyEntry {
   ptyId: string;
   sessionId: string;
-  process: pty.IPty;
+  process: pty.IPty | null; // null for adopted PTYs
   buffer: string[];
   bufferSize: number;
   cwd: string;
   cols: number;
   rows: number;
+  // Adopted PTY fields (set when process is null)
+  adopted?: {
+    masterFd: number;
+    slavePath: string;
+    pid: number;
+    reader: net.Socket;
+    exitPollTimer: ReturnType<typeof setInterval>;
+  };
 }
+
+/** Starting FD index for inherited PTY masters in handoff. */
+const HANDOFF_FD_START = 3;
 
 // ---------------------------------------------------------------------------
 // Client connection
@@ -70,11 +84,15 @@ let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 // Args
 // ---------------------------------------------------------------------------
 
-const [, , lockPath, sockPath, secret] = process.argv;
+const [, , lockPath, sockPath, secret, ...extraArgs] = process.argv;
 if (!lockPath || !sockPath || !secret) {
-  process.stderr.write("Usage: node ptyDaemon.js <lockfilePath> <socketPath> <secret>\n");
+  process.stderr.write("Usage: node ptyDaemon.js <lockfilePath> <socketPath> <secret> [--adopt <stateFile>]\n");
   process.exit(1);
 }
+
+// Check for --adopt flag (hot restart with inherited FDs)
+const adoptIndex = extraArgs.indexOf("--adopt");
+const adoptStateFile = adoptIndex >= 0 ? extraArgs[adoptIndex + 1] : null;
 
 // ---------------------------------------------------------------------------
 // Inactivity management
@@ -94,10 +112,12 @@ function resetInactivityTimer(): void {
 
 function shutdown(): void {
   for (const entry of ptys.values()) {
-    try {
-      entry.process.kill();
-    } catch {
-      // already dead
+    if (entry.process) {
+      try { entry.process.kill(); } catch { /* already dead */ }
+    } else if (entry.adopted) {
+      try { process.kill(entry.adopted.pid, "SIGTERM"); } catch { /* already dead */ }
+      entry.adopted.reader.destroy();
+      clearInterval(entry.adopted.exitPollTimer);
     }
   }
   ptys.clear();
@@ -227,10 +247,12 @@ function spawnPty(msg: ClientMessage & { type: "spawn" }, client: ClientConnecti
       pid: proc.pid,
     });
   } catch (err) {
+    const errMsg = `Failed to spawn PTY: ${(err as Error).message}`;
+    process.stderr.write(`[daemon] ${errMsg}\n`);
     send(client, {
       type: "error",
       id: msg.id,
-      message: `Failed to spawn PTY: ${(err as Error).message}`,
+      message: errMsg,
     });
   }
 }
@@ -242,10 +264,10 @@ function attachPty(msg: ClientMessage & { type: "attach" }, client: ClientConnec
     return;
   }
 
-  // Only the owning session can reattach
+  // Reassign to the requesting session (session IDs change across reboots,
+  // but UUIDs are the true PTY identity).
   if (entry.sessionId !== msg.sessionId) {
-    send(client, { type: "error", id: msg.id, message: `PTY ${msg.ptyId} belongs to another session` });
-    return;
+    entry.sessionId = msg.sessionId;
   }
 
   // Replay buffered output
@@ -263,16 +285,19 @@ function attachPty(msg: ClientMessage & { type: "attach" }, client: ClientConnec
 function listPtys(msg: ClientMessage & { type: "list" }, client: ClientConnection): void {
   const infos: PtyInfo[] = [];
   for (const entry of ptys.values()) {
-    if (entry.sessionId === msg.sessionId) {
-      infos.push({
-        ptyId: entry.ptyId,
-        pid: entry.process.pid,
-        processName: entry.process.process || "",
-        cwd: entry.cwd,
-        cols: entry.cols,
-        rows: entry.rows,
-      });
-    }
+    // Return all PTYs — UUIDs are globally unique, so the client
+    // can match by ptyId regardless of session. Session IDs change
+    // across reboots but UUIDs persist in workspaceState.
+    const pid = entry.process?.pid ?? entry.adopted?.pid ?? 0;
+    const processName = entry.process?.process || "";
+    infos.push({
+      ptyId: entry.ptyId,
+      pid,
+      processName,
+      cwd: entry.cwd,
+      cols: entry.cols,
+      rows: entry.rows,
+    });
   }
   send(client, { type: "ptyList", id: msg.id, ptys: infos });
 }
@@ -301,35 +326,18 @@ function handleMessage(msg: ClientMessage, client: ClientConnection): void {
       break;
 
     case "write": {
-      const entry = ptys.get(msg.ptyId);
-      if (entry) {
-        entry.process.write(msg.data);
-      }
+      writeToPty(msg.ptyId, msg.data);
       break;
     }
 
     case "resize": {
-      const entry = ptys.get(msg.ptyId);
-      if (entry) {
-        entry.process.resize(msg.cols, msg.rows);
-        entry.cols = msg.cols;
-        entry.rows = msg.rows;
-      }
+      resizePty(msg.ptyId, msg.cols, msg.rows);
       break;
     }
 
-    case "kill": {
-      const entry = ptys.get(msg.ptyId);
-      if (entry) {
-        try {
-          entry.process.kill();
-        } catch {
-          // already dead
-        }
-        ptys.delete(msg.ptyId);
-      }
+    case "kill":
+      killPty(msg.ptyId);
       break;
-    }
 
     case "list":
       listPtys(msg, client);
@@ -357,7 +365,265 @@ function handleMessage(msg: ClientMessage, client: ClientConnection): void {
     case "ping":
       send(client, { type: "pong", id: msg.id });
       break;
+
+    case "handoff":
+      handleHandoff(msg, client);
+      break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Handoff — graceful daemon restart with PTY FD inheritance
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle a handoff request: serialize PTY state, spawn a new daemon that
+ * inherits the master FDs, then shut down this process.
+ */
+function handleHandoff(msg: ClientMessage & { type: "handoff" }, client: ClientConnection): void {
+  const entries = Array.from(ptys.values());
+
+  if (entries.length === 0) {
+    send(client, { type: "pong", id: msg.id }); // ACK with empty handoff
+    // No PTYs to hand off — just shut down so a fresh daemon can start
+    server.close();
+    removeLockfile(lockPath);
+    removeStaleSocket(sockPath);
+    process.exit(0);
+  }
+
+  // Build handoff state and collect master FDs
+  const masterFds: number[] = [];
+  const state: HandoffState = { ptys: [] };
+
+  for (const entry of entries) {
+    let masterFd: number;
+    let slavePath: string;
+
+    if (entry.adopted) {
+      masterFd = entry.adopted.masterFd;
+      slavePath = entry.adopted.slavePath;
+    } else if (entry.process) {
+      masterFd = (entry.process as any)._fd;
+      slavePath = (entry.process as any)._pty || "";
+    } else {
+      continue; // skip entries with no FD
+    }
+
+    state.ptys.push({
+      ptyId: entry.ptyId,
+      sessionId: entry.sessionId,
+      pid: entry.adopted?.pid ?? entry.process?.pid ?? 0,
+      slavePath,
+      cwd: entry.cwd,
+      cols: entry.cols,
+      rows: entry.rows,
+      buffer: entry.buffer,
+      fdIndex: masterFds.length,
+    });
+    masterFds.push(masterFd);
+  }
+
+  // Write state to temp file
+  const stateFile = path.join(os.tmpdir(), `alterminal-handoff-${process.pid}.json`);
+  fs.writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
+
+  // Build stdio array: [ignore, ignore, ignore, ...masterFds]
+  const stdio: Array<"ignore" | number> = ["ignore", "ignore", "ignore"];
+  for (const fd of masterFds) {
+    stdio.push(fd);
+  }
+
+  // ACK the handoff before shutting down
+  send(client, { type: "pong", id: msg.id });
+
+  // Disconnect all clients gracefully
+  for (const c of clients) {
+    try { c.socket.end(); } catch { /* ignore */ }
+  }
+
+  // Detach our onData/onExit listeners so PTY processes aren't affected
+  for (const entry of entries) {
+    if (entry.adopted?.reader) {
+      entry.adopted.reader.destroy();
+      clearInterval(entry.adopted.exitPollTimer);
+    }
+  }
+
+  // Close server and remove socket BEFORE spawning replacement,
+  // so the new daemon can bind to the same socket path.
+  server.close(() => {
+    removeStaleSocket(sockPath);
+
+    // Spawn replacement daemon with inherited FDs
+    const daemonScript = process.argv[1];
+    const child = cpSpawn(
+      process.execPath,
+      [daemonScript, lockPath, sockPath, secret, "--adopt", stateFile],
+      { detached: true, stdio },
+    );
+    child.unref();
+
+    // Exit after a brief delay to let the spawn complete
+    setTimeout(() => process.exit(0), 200);
+  });
+}
+
+/**
+ * Adopt PTYs from a handoff state file. Called when the daemon starts
+ * with --adopt <stateFile>. Inherited FDs start at index HANDOFF_FD_START (3).
+ */
+function adoptFromHandoff(stateFile: string): void {
+  let state: HandoffState;
+  try {
+    state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+    fs.unlinkSync(stateFile); // clean up
+  } catch (err) {
+    process.stderr.write(`Failed to read handoff state: ${(err as Error).message}\n`);
+    return;
+  }
+
+  for (const ptyState of state.ptys) {
+    const masterFd = HANDOFF_FD_START + ptyState.fdIndex;
+
+    // Verify the FD is alive
+    try {
+      fs.fstatSync(masterFd);
+    } catch {
+      process.stderr.write(`Handoff: FD ${masterFd} for ${ptyState.ptyId} is invalid, skipping\n`);
+      continue;
+    }
+
+    // Create a readable stream from the master FD
+    const reader = new net.Socket({ fd: masterFd, readable: true, writable: false });
+
+    // Poll for child process exit (since we don't have node-pty's native watcher)
+    const exitPollTimer = setInterval(() => {
+      try {
+        process.kill(ptyState.pid, 0); // test if alive
+      } catch {
+        // Process exited
+        clearInterval(exitPollTimer);
+        reader.destroy();
+        broadcast(ptyState.sessionId, {
+          type: "exit",
+          ptyId: ptyState.ptyId,
+          exitCode: -1,
+          signal: 0,
+        });
+        ptys.delete(ptyState.ptyId);
+      }
+    }, 1000);
+    exitPollTimer.unref();
+
+    const entry: PtyEntry = {
+      ptyId: ptyState.ptyId,
+      sessionId: ptyState.sessionId,
+      process: null,
+      buffer: ptyState.buffer || [],
+      bufferSize: (ptyState.buffer || []).reduce((sum, s) => sum + s.length, 0),
+      cwd: ptyState.cwd,
+      cols: ptyState.cols,
+      rows: ptyState.rows,
+      adopted: {
+        masterFd,
+        slavePath: ptyState.slavePath,
+        pid: ptyState.pid,
+        reader,
+        exitPollTimer,
+      },
+    };
+
+    // Read PTY output
+    reader.on("data", (data: Buffer) => {
+      const str = data.toString("utf-8");
+
+      // Extract CWD from OSC 7 if present
+      const osc7Match = str.match(/\x1b\]7;file:\/\/[^/]*([^\x07\x1b]*)/);
+      if (osc7Match) {
+        try {
+          entry.cwd = decodeURIComponent(osc7Match[1]);
+        } catch { /* ignore */ }
+      }
+
+      if (hasConnectedClient(entry.sessionId)) {
+        broadcast(entry.sessionId, { type: "data", ptyId: entry.ptyId, data: str });
+      } else {
+        entry.buffer.push(str);
+        entry.bufferSize += str.length;
+        while (entry.bufferSize > MAX_BUFFER_SIZE && entry.buffer.length > 0) {
+          const removed = entry.buffer.shift()!;
+          entry.bufferSize -= removed.length;
+        }
+      }
+    });
+
+    reader.on("error", () => {
+      // FD closed or PTY died
+      clearInterval(exitPollTimer);
+      ptys.delete(entry.ptyId);
+    });
+
+    ptys.set(ptyState.ptyId, entry);
+    process.stderr.write(`Handoff: adopted PTY ${ptyState.ptyId} (pid ${ptyState.pid}, fd ${masterFd})\n`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update write/resize/kill to handle adopted PTYs
+// ---------------------------------------------------------------------------
+
+function writeToPty(ptyId: string, data: string): void {
+  const entry = ptys.get(ptyId);
+  if (!entry) return;
+
+  if (entry.process) {
+    entry.process.write(data);
+  } else if (entry.adopted) {
+    try {
+      fs.writeSync(entry.adopted.masterFd, data);
+    } catch { /* FD may have closed */ }
+  }
+}
+
+function resizePty(ptyId: string, cols: number, rows: number): void {
+  const entry = ptys.get(ptyId);
+  if (!entry) return;
+
+  entry.cols = cols;
+  entry.rows = rows;
+
+  if (entry.process) {
+    entry.process.resize(cols, rows);
+  } else if (entry.adopted) {
+    // Use stty on the slave PTY to set dimensions
+    try {
+      const fd = fs.openSync(entry.adopted.slavePath, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
+      try {
+        execFileSync("stty", ["rows", String(rows), "cols", String(cols)], {
+          stdio: [fd, "pipe", "pipe"],
+        });
+        // Send SIGWINCH to the child process
+        process.kill(entry.adopted.pid, "SIGWINCH");
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch { /* stty failed or process dead */ }
+  }
+}
+
+function killPty(ptyId: string): void {
+  const entry = ptys.get(ptyId);
+  if (!entry) return;
+
+  if (entry.process) {
+    try { entry.process.kill(); } catch { /* already dead */ }
+  } else if (entry.adopted) {
+    try { process.kill(entry.adopted.pid, "SIGTERM"); } catch { /* already dead */ }
+    entry.adopted.reader.destroy();
+    clearInterval(entry.adopted.exitPollTimer);
+  }
+  ptys.delete(ptyId);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +674,11 @@ server.listen(sockPath, () => {
     startedAt: Date.now(),
   };
   writeLockfile(lockPath, info);
+
+  // If started with --adopt, inherit PTYs from the previous daemon
+  if (adoptStateFile) {
+    adoptFromHandoff(adoptStateFile);
+  }
 
   // Lockfile written — parent polls for it to detect readiness.
 });

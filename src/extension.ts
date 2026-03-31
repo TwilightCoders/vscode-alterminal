@@ -162,6 +162,19 @@ export async function activate(context: vscode.ExtensionContext) {
         "alterminal",
       );
     }),
+    vscode.commands.registerCommand("alterminal.restartDaemon", async () => {
+      if (!_daemonManager) {
+        vscode.window.showWarningMessage("PTY daemon is not enabled");
+        return;
+      }
+      const client = await _daemonManager.restart();
+      if (client) {
+        ptyManager.setDaemonClient(client);
+        vscode.window.showInformationMessage("PTY daemon restarted — shells preserved");
+      } else {
+        vscode.window.showErrorMessage("Failed to restart PTY daemon");
+      }
+    }),
     vscode.commands.registerCommand("alterminal.debugState", async () => {
       const metadata = provider.getStateManager().getMetadata();
 

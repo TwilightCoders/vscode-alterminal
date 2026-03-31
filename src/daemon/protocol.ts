@@ -19,7 +19,8 @@ export type ClientMessage =
   | AttachMessage
   | DetachMessage
   | ClearBufferMessage
-  | PingMessage;
+  | PingMessage
+  | HandoffMessage;
 
 /** Daemon → Client */
 export type DaemonMessage =
@@ -91,6 +92,27 @@ export interface ClearBufferMessage {
 export interface PingMessage {
   type: "ping";
   id: number;
+}
+
+export interface HandoffMessage {
+  type: "handoff";
+  id: number;
+}
+
+/** Serialized PTY state for daemon handoff (written to temp file). */
+export interface HandoffState {
+  ptys: Array<{
+    ptyId: string;
+    sessionId: string;
+    pid: number;
+    slavePath: string;
+    cwd: string;
+    cols: number;
+    rows: number;
+    buffer: string[];
+    /** Index in the inherited FD array (offset from FD_START). */
+    fdIndex: number;
+  }>;
 }
 
 // --- Daemon → Client -------------------------------------------------------
