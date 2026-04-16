@@ -483,7 +483,7 @@ export class PtyDaemonClient extends EventEmitter {
 }
 
 /** Shell-escape a value for use in `env KEY=VALUE` command prefix. */
-function shellEscape(s: string): string {
+export function shellEscape(s: string): string {
   if (/^[a-zA-Z0-9_\-./=:@]+$/.test(s)) {
     return s;
   }
