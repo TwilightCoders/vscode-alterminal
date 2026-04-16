@@ -48,7 +48,7 @@ export class TemplateUtils {
       "@xterm/addon-serialize/lib/addon-serialize.js",
     );
     const unicodeAddonUri = getNodeModuleUri(
-      "@xterm/addon-unicode11/lib/addon-unicode11.js",
+      "@xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.js",
     );
     const linkProviderUri = getNodeModuleUri(
       "xterm-link-provider/lib/esm/index.js",

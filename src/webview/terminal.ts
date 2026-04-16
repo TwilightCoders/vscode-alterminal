@@ -234,7 +234,7 @@ export class TerminalInstance {
       });
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
-      this.unicodeAddon = new (window as any).Unicode11Addon.Unicode11Addon();
+      this.unicodeAddon = new (window as any).UnicodeGraphemesAddon.UnicodeGraphemesAddon();
       // Use WebGL renderer for best performance, fallback to DOM if unsupported
       try {
         this.webglAddon = new WebglAddon.WebglAddon();
@@ -263,7 +263,7 @@ export class TerminalInstance {
       });
       this.lifecycleManager.initialize();
       this.setupFilePathLinks();
-      if (this.terminal.unicode) this.terminal.unicode.activeVersion = "11";
+      if (this.terminal.unicode) this.terminal.unicode.activeVersion = "15-graphemes";
     } catch (e) {
       Logger.error("Terminal init failed", e);
     }
