@@ -9,6 +9,7 @@
  */
 
 import * as net from "net";
+import * as tty from "tty";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -53,7 +54,7 @@ interface PtyEntry {
     masterFd: number;
     slavePath: string;
     pid: number;
-    reader: net.Socket;
+    reader: tty.ReadStream;
     exitPollTimer: ReturnType<typeof setInterval>;
   };
 }
@@ -442,11 +443,17 @@ function handleHandoff(msg: ClientMessage & { type: "handoff" }, client: ClientC
     try { c.socket.end(); } catch { /* ignore */ }
   }
 
-  // Detach our onData/onExit listeners so PTY processes aren't affected
+  // Detach node-pty's internal readers so FDs are free for the new daemon.
+  // For node-pty entries, destroy the internal _socket (tty.ReadStream)
+  // but NOT the process — the child process must survive.
   for (const entry of entries) {
     if (entry.adopted?.reader) {
       entry.adopted.reader.destroy();
       clearInterval(entry.adopted.exitPollTimer);
+    } else if (entry.process) {
+      // Destroy node-pty's internal reader without killing the child
+      const socket = (entry.process as any)._socket;
+      if (socket) socket.destroy();
     }
   }
 
@@ -464,9 +471,12 @@ function handleHandoff(msg: ClientMessage & { type: "handoff" }, client: ClientC
     );
     child.unref();
 
-    // Exit after a brief delay to let the spawn complete
-    setTimeout(() => process.exit(0), 200);
+    // Force exit — don't wait for event loop to drain
+    setTimeout(() => process.exit(0), 500);
   });
+
+  // Failsafe: exit even if server.close callback doesn't fire
+  setTimeout(() => process.exit(0), 2000);
 }
 
 /**
@@ -494,8 +504,10 @@ function adoptFromHandoff(stateFile: string): void {
       continue;
     }
 
-    // Create a readable stream from the master FD
-    const reader = new net.Socket({ fd: masterFd, readable: true, writable: false });
+    // Create a tty.ReadStream from the master FD (same approach as node-pty)
+    const reader = new tty.ReadStream(masterFd);
+    reader.setEncoding("utf8");
+    reader.resume();
 
     // Poll for child process exit (since we don't have node-pty's native watcher)
     const exitPollTimer = setInterval(() => {
@@ -535,8 +547,8 @@ function adoptFromHandoff(stateFile: string): void {
     };
 
     // Read PTY output
-    reader.on("data", (data: Buffer) => {
-      const str = data.toString("utf-8");
+    reader.on("data", (data: string) => {
+      const str = data;
 
       // Extract CWD from OSC 7 if present
       const osc7Match = str.match(/\x1b\]7;file:\/\/[^/]*([^\x07\x1b]*)/);
@@ -573,17 +585,59 @@ function adoptFromHandoff(stateFile: string): void {
 // Update write/resize/kill to handle adopted PTYs
 // ---------------------------------------------------------------------------
 
+/**
+ * Max bytes per PTY write chunk.
+ *
+ * The kernel PTY buffer is typically 4096 bytes. We use a larger chunk
+ * to reduce overhead while still yielding frequently enough to prevent
+ * deadlocks. Each chunk is written via the stream, then we yield to
+ * libuv's I/O poll phase before writing the next.
+ */
+const WRITE_CHUNK_SIZE = 4096;
+
 function writeToPty(ptyId: string, data: string): void {
   const entry = ptys.get(ptyId);
   if (!entry) return;
 
-  if (entry.process) {
-    entry.process.write(data);
-  } else if (entry.adopted) {
-    try {
-      fs.writeSync(entry.adopted.masterFd, data);
-    } catch { /* FD may have closed */ }
+  const target = entry.process || entry.adopted?.reader;
+  if (!target) return;
+
+  // Small writes go directly — no chunking overhead
+  if (data.length <= WRITE_CHUNK_SIZE) {
+    try { target.write(data); } catch { /* FD may have closed */ }
+    return;
   }
+
+  // Large writes are chunked with yields between chunks.
+  //
+  // PTY (TTY) streams do not support Node.js backpressure — write()
+  // always returns true regardless of kernel buffer state. Without
+  // yielding, writing a large paste fills the input buffer while the
+  // event loop never processes output reads, deadlocking when the
+  // slave-side program blocks on stdout.
+  //
+  // We use fs.write() on the raw master FD for each chunk. Its async
+  // callback fires after libuv's I/O poll phase, naturally yielding
+  // to PTY output reads between chunks.
+  const masterFd = entry.process
+    ? (entry.process as any)._fd as number
+    : entry.adopted?.masterFd;
+  if (masterFd === undefined) return;
+
+  let offset = 0;
+
+  function writeNextChunk(): void {
+    if (offset >= data.length) return;
+    const chunk = data.slice(offset, offset + WRITE_CHUNK_SIZE);
+    offset += chunk.length;
+    fs.write(masterFd!, chunk, (err) => {
+      if (err) return;
+      if (offset < data.length) {
+        writeNextChunk();
+      }
+    });
+  }
+  writeNextChunk();
 }
 
 function resizePty(ptyId: string, cols: number, rows: number): void {

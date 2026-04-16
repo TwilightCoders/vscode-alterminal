@@ -11,5 +11,5 @@
     "test/**/*",
     "src/**/*"
   ],
-  "exclude": ["node_modules", ".vscode-test", "vendor", "src/webview/**/*"]
+  "exclude": ["node_modules", ".vscode-test", "vendor", "src/webview/**/*", "src/daemon/ptyDaemon.ts"]
 }

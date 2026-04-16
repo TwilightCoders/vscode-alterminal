@@ -121,18 +121,6 @@ export class PtyManager {
         this._cleanupProcess(tabId);
       });
 
-      client.on("replayStart", (ptyId: string) => {
-        const tabId = this._ptyIdToTab.get(ptyId);
-        if (tabId === undefined) return;
-        Logger.info(`Replay starting for tab ${tabId} (ptyId ${ptyId})`);
-      });
-
-      client.on("replayEnd", (ptyId: string) => {
-        const tabId = this._ptyIdToTab.get(ptyId);
-        if (tabId === undefined) return;
-        Logger.info(`Replay complete for tab ${tabId} (ptyId ${ptyId})`);
-      });
-
       // Pre-fetch live PTYs so createPtyProcess can reattach on restore.
       // Stored as a promise so createPtyProcess can await it (avoids race).
       Logger.info("[daemon] Fetching live PTY list from daemon...");
@@ -722,14 +710,16 @@ export class PtyManager {
   }
 
   public writeToPty(data: string, tabId: number): void {
-    // Daemon mode
+    // Daemon mode — chunking happens in the daemon process
     const ptyId = this._tabPtyIds.get(tabId);
     if (ptyId && this._daemonClient?.connected) {
       this._daemonClient.write(ptyId, data);
       return;
     }
     // Direct mode
-    this._ptyProcesses.get(tabId)?.write(data);
+    const proc = this._ptyProcesses.get(tabId);
+    if (!proc) return;
+    proc.write(data);
   }
 
   public resizePty(cols: number, rows: number, tabId: number): void {

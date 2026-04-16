@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.0-dev.12",
+  "version": "0.2.0-dev.19",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -359,7 +359,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile && node scripts/verify-binaries.js",
     "verify-binaries": "node scripts/verify-binaries.js",
-    "compile": "node ./node_modules/typescript/lib/tsc.js -p ./ && node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
+    "compile": "bash scripts/build-daemon.sh && node ./node_modules/typescript/lib/tsc.js -p ./ && node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
     "compile:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./ && NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.webview.json",
     "compile:tests": "node ./node_modules/typescript/lib/tsc.js -p ./tsconfig.tests.json",
     "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
@@ -380,10 +380,12 @@
     "@vscode/codicons": "^0.0.44",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/addon-unicode-graphemes": "^0.4.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "koffi": "^2.15.2",
     "xterm-link-provider": "TwilightCoders/xterm-link-provider#5373841"
   },
   "optionalDependencies": {

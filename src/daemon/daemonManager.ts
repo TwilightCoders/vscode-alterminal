@@ -1,9 +1,9 @@
 /**
  * Daemon Manager — handles spawning, discovering, and connecting to
- * the PTY daemon process from the extension host.
+ * the alterminald daemon process from the extension host.
  *
  * Uses a single global daemon shared by all VS Code windows.
- * Session IDs partition PTYs so each window only sees its own.
+ * Session names (UUIDs) are globally unique so no partitioning is needed.
  * Spawn lock (O_EXCL) prevents races when multiple windows activate
  * simultaneously after a reboot.
  */
@@ -16,9 +16,13 @@ import { PtyDaemonClient } from "./ptyDaemonClient";
 import {
   lockfilePath,
   socketPath,
+  secretPath,
   generateSecret,
   readLockfile,
+  readSecret,
+  writeSecret,
   removeLockfile,
+  removeSecret,
   removeStaleSocket,
   isProcessAlive,
   acquireSpawnLock,
@@ -139,8 +143,9 @@ export class DaemonManager {
     this._client.disconnect();
     this._client = null;
 
-    // Wait for the new daemon to start (it writes a new lockfile)
-    await this._sleep(1000);
+    // Wait for the new daemon to start (old daemon closes server, spawns
+    // replacement, new daemon adopts FDs and starts listening)
+    await this._sleep(2000);
 
     // Connect to the new daemon
     for (let i = 0; i < MAX_CONNECT_ATTEMPTS; i++) {
@@ -167,7 +172,7 @@ export class DaemonManager {
     const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
     const lockInfo = readLockfile(lockPath);
     if (!lockInfo || !isProcessAlive(lockInfo.pid)) {
-      Logger.info(`[daemon] _tryConnect: lockInfo=${!!lockInfo} alive=${lockInfo ? isProcessAlive(lockInfo.pid) : 'n/a'}`);
+      Logger.info(`[daemon] _tryConnect: lockInfo=${!!lockInfo} alive=${lockInfo ? isProcessAlive(lockInfo.pid) : "n/a"}`);
       // Clean up stale lockfile
       if (lockInfo) {
         removeLockfile(lockPath);
@@ -176,8 +181,14 @@ export class DaemonManager {
       return null;
     }
 
+    const secret = readSecret(secretPath(GLOBAL_DAEMON_ID));
+    if (!secret) {
+      Logger.info("[daemon] _tryConnect: lockfile exists but no secret file");
+      return null;
+    }
+
     try {
-      const client = new PtyDaemonClient(this._sessionId, lockInfo.secret);
+      const client = new PtyDaemonClient(this._sessionId, secret);
       await client.connect(lockInfo.socketPath);
       const alive = await client.ping();
       if (alive) {
@@ -194,6 +205,7 @@ export class DaemonManager {
 
     // Clean up after failed connection
     removeLockfile(lockPath);
+    removeSecret(secretPath(GLOBAL_DAEMON_ID));
     removeStaleSocket(socketPath(GLOBAL_DAEMON_ID));
     return null;
   }
@@ -205,6 +217,7 @@ export class DaemonManager {
 
     // Clean up any leftover state
     removeLockfile(lockPath);
+    removeSecret(secretPath(GLOBAL_DAEMON_ID));
     removeStaleSocket(sockPath);
 
     try {
@@ -230,23 +243,37 @@ export class DaemonManager {
     });
   }
 
+  /**
+   * Spawn the alterminald daemon binary.
+   * alterminald forks and daemonizes internally, printing the child PID
+   * on stdout before the parent exits. The daemon writes a lockfile when
+   * its control socket is ready.
+   */
   private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
     const secret = generateSecret();
-    const daemonScript = path.join(this._extensionPath, "out", "daemon", "ptyDaemon.js");
-
-    // Use system node (not process.execPath which is the Electron binary).
-    // VS Code kills processes launched via its own binary on window close.
-    // Spawned detached with stdio:ignore so the daemon is fully independent.
-    const nodeBin = await this._findNode();
+    const binary = await this._findAlterminald();
 
     return new Promise((resolve, reject) => {
-      const child = cp.spawn(nodeBin, [daemonScript, lockPath, sockPath, secret], {
+      const args = [
+        "--socket", sockPath,
+        "--secret", secret,
+        "--lockfile", lockPath,
+      ];
+
+      Logger.info(`[daemon] Spawning: ${binary} ${args.join(" ")}`);
+
+      const child = cp.spawn(binary, args, {
         detached: true,
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env },
       });
 
-      // Fully detach — daemon must survive extension host restarts
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
       child.unref();
 
       const timeout = setTimeout(() => {
@@ -254,43 +281,67 @@ export class DaemonManager {
         try { child.kill(); } catch {}
       }, 10000);
 
-      // Poll for lockfile to appear (daemon writes it when server is ready)
-      const pollInterval = 100;
-      const poll = setInterval(() => {
-        const info = readLockfile(lockPath);
-        if (info && info.secret === secret) {
-          clearInterval(poll);
+      // alterminald prints child PID on stdout, then parent exits.
+      // Poll for lockfile to confirm daemon is ready.
+      child.on("exit", (code) => {
+        if (code !== 0) {
           clearTimeout(timeout);
-          resolve(secret);
+          reject(new Error(`alterminald exited with code ${code}: ${stderr.trim()}`));
+          return;
         }
-      }, pollInterval);
 
-      child.on("error", (err) => {
-        clearInterval(poll);
-        clearTimeout(timeout);
-        reject(err);
+        Logger.info(`[daemon] alterminald parent exited, daemon PID: ${stdout.trim()}`);
+
+        // Poll for lockfile (daemon writes it when control socket is ready)
+        const pollInterval = 100;
+        const poll = setInterval(() => {
+          const info = readLockfile(lockPath);
+          if (info) {
+            // Persist the secret so other windows can reconnect
+            writeSecret(secretPath(GLOBAL_DAEMON_ID), secret);
+            clearInterval(poll);
+            clearTimeout(timeout);
+            resolve(secret);
+          }
+        }, pollInterval);
       });
 
-      child.on("exit", (code) => {
-        clearInterval(poll);
+      child.on("error", (err) => {
         clearTimeout(timeout);
-        if (code !== null && code !== 0) {
-          reject(new Error(`Daemon exited with code ${code}`));
-        }
+        reject(err);
       });
     });
   }
 
-  /** Find the system node binary. Falls back to process.execPath (Electron). */
-  private _findNode(): Promise<string> {
-    return new Promise((resolve) => {
-      cp.execFile("which", ["node"], (err, stdout) => {
+  /**
+   * Find the alterminald binary.
+   * Search order:
+   *   1. Extension's bin/ directory (bundled for production)
+   *   2. System PATH
+   */
+  private _findAlterminald(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      // Check extension bundle first
+      const bundled = path.join(this._extensionPath, "bin", "alterminald");
+      try {
+        const stat = require("fs").statSync(bundled);
+        if (stat.isFile()) {
+          resolve(bundled);
+          return;
+        }
+      } catch {
+        // Not bundled — fall through to PATH search
+      }
+
+      // Search PATH
+      cp.execFile("which", ["alterminald"], (err, stdout) => {
         if (!err && stdout.trim()) {
           resolve(stdout.trim());
         } else {
-          // Fallback: use Electron binary (may not survive window close)
-          Logger.warn("[daemon] System node not found, falling back to process.execPath");
-          resolve(process.execPath);
+          reject(new Error(
+            "alterminald not found. Install it or place it in the extension's bin/ directory. " +
+            "Build from: https://github.com/twilightcoders/loompty",
+          ));
         }
       });
     });

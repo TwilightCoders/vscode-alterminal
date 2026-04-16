@@ -1,16 +1,20 @@
 /**
- * IPC protocol for extension <-> PTY daemon communication.
+ * IPC protocol for extension <-> alterminald (loompty) communication.
  *
  * Wire format: 4-byte big-endian length prefix + UTF-8 JSON payload.
- * This avoids delimiter issues since PTY output can contain arbitrary bytes.
+ *
+ * After an "attach" command, the connection transitions to raw mode:
+ * the daemon sends one framed JSON "attached" response, then all
+ * subsequent data on that socket is raw PTY output (and writes go
+ * directly to PTY stdin).
  */
 
 // ---------------------------------------------------------------------------
-// Message types
+// Client → Daemon
 // ---------------------------------------------------------------------------
 
-/** Client → Daemon */
 export type ClientMessage =
+  | AuthMessage
   | SpawnMessage
   | WriteMessage
   | ResizeMessage
@@ -22,71 +26,57 @@ export type ClientMessage =
   | PingMessage
   | HandoffMessage;
 
-/** Daemon → Client */
-export type DaemonMessage =
-  | DataMessage
-  | ExitMessage
-  | SpawnedMessage
-  | PtyListMessage
-  | ReplayStartMessage
-  | ReplayEndMessage
-  | PongMessage
-  | ErrorMessage;
-
-// --- Client → Daemon -------------------------------------------------------
+export interface AuthMessage {
+  type: "auth";
+  secret: string;
+}
 
 export interface SpawnMessage {
   type: "spawn";
   id: number;
-  sessionId: string;
-  ptyId: string;
-  shell: string;
-  args: string[];
+  name: string;
+  command: string;
   cwd: string;
-  env: Record<string, string>;
   cols: number;
   rows: number;
 }
 
 export interface WriteMessage {
   type: "write";
-  ptyId: string;
+  name: string;
   data: string;
 }
 
 export interface ResizeMessage {
   type: "resize";
-  ptyId: string;
+  name: string;
   cols: number;
   rows: number;
 }
 
 export interface KillMessage {
   type: "kill";
-  ptyId: string;
+  name: string;
 }
 
 export interface ListMessage {
   type: "list";
   id: number;
-  sessionId: string;
 }
 
 export interface AttachMessage {
   type: "attach";
   id: number;
-  sessionId: string;
-  ptyId: string;
+  name: string;
 }
 
 export interface DetachMessage {
   type: "detach";
-  sessionId: string;
 }
 
 export interface ClearBufferMessage {
   type: "clearBuffer";
-  ptyId: string;
+  name: string;
 }
 
 export interface PingMessage {
@@ -99,67 +89,70 @@ export interface HandoffMessage {
   id: number;
 }
 
-/** Serialized PTY state for daemon handoff (written to temp file). */
-export interface HandoffState {
-  ptys: Array<{
-    ptyId: string;
-    sessionId: string;
-    pid: number;
-    slavePath: string;
-    cwd: string;
-    cols: number;
-    rows: number;
-    buffer: string[];
-    /** Index in the inherited FD array (offset from FD_START). */
-    fdIndex: number;
-  }>;
-}
+// ---------------------------------------------------------------------------
+// Daemon → Client
+// ---------------------------------------------------------------------------
 
-// --- Daemon → Client -------------------------------------------------------
+export type DaemonMessage =
+  | AuthOkMessage
+  | DataMessage
+  | ExitMessage
+  | BellMessage
+  | SpawnedMessage
+  | PtyListMessage
+  | AttachedMessage
+  | PongMessage
+  | ErrorMessage;
+
+export interface AuthOkMessage {
+  type: "auth_ok";
+}
 
 export interface DataMessage {
   type: "data";
-  ptyId: string;
+  name: string;
   data: string;
 }
 
 export interface ExitMessage {
   type: "exit";
-  ptyId: string;
+  name: string;
   exitCode: number;
   signal?: number;
+}
+
+export interface BellMessage {
+  type: "bell";
+  name: string;
 }
 
 export interface SpawnedMessage {
   type: "spawned";
   id: number;
-  ptyId: string;
+  name: string;
   pid: number;
 }
 
-export interface PtyInfo {
-  ptyId: string;
+export interface PtyListSession {
+  name: string;
   pid: number;
-  processName: string;
   cwd: string;
   cols: number;
   rows: number;
+  alive: boolean;
 }
 
 export interface PtyListMessage {
   type: "ptyList";
   id: number;
-  ptys: PtyInfo[];
+  sessions: PtyListSession[];
 }
 
-export interface ReplayStartMessage {
-  type: "replayStart";
-  ptyId: string;
-}
-
-export interface ReplayEndMessage {
-  type: "replayEnd";
-  ptyId: string;
+export interface AttachedMessage {
+  type: "attached";
+  id: number;
+  name: string;
+  scrollbackBytes: number;
 }
 
 export interface PongMessage {
@@ -174,6 +167,19 @@ export interface ErrorMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Public types (used by ptyManager — uses "ptyId" terminology)
+// ---------------------------------------------------------------------------
+
+export interface PtyInfo {
+  ptyId: string;
+  pid: number;
+  processName: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+}
+
+// ---------------------------------------------------------------------------
 // Lockfile
 // ---------------------------------------------------------------------------
 
@@ -181,8 +187,6 @@ export interface DaemonLockfile {
   pid: number;
   socketPath: string;
   version: string;
-  secret: string;
-  startedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +242,43 @@ export class FrameDecoder {
     }
 
     return messages;
+  }
+
+  /**
+   * Append raw data to the internal buffer without parsing frames.
+   * Use with consumeAttachResponse() during the attach handshake.
+   */
+  feed(chunk: Buffer): void {
+    this._buffer = Buffer.concat([this._buffer, chunk]);
+  }
+
+  /**
+   * Consume the attached response frame and return any trailing raw bytes.
+   * Used during the attach handshake — after the framed "attached" JSON
+   * response, remaining bytes are raw PTY data (not framed).
+   * Call feed() first to append data, then this to extract the response.
+   */
+  consumeAttachResponse(): { message: DaemonMessage | null; trailing: Buffer } {
+    if (this._buffer.length < HEADER_SIZE) {
+      return { message: null, trailing: Buffer.alloc(0) };
+    }
+    const payloadLen = this._buffer.readUInt32BE(0);
+    if (payloadLen > MAX_PAYLOAD_SIZE) {
+      this._buffer = Buffer.alloc(0);
+      return { message: null, trailing: Buffer.alloc(0) };
+    }
+    const totalLen = HEADER_SIZE + payloadLen;
+    if (this._buffer.length < totalLen) {
+      return { message: null, trailing: Buffer.alloc(0) };
+    }
+    const json = this._buffer.subarray(HEADER_SIZE, totalLen).toString("utf8");
+    const trailing = Buffer.from(this._buffer.subarray(totalLen));
+    this._buffer = Buffer.alloc(0);
+    try {
+      return { message: JSON.parse(json), trailing };
+    } catch {
+      return { message: null, trailing };
+    }
   }
 
   reset(): void {

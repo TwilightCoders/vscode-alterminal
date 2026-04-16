@@ -2,7 +2,7 @@
  * Lockfile utilities for daemon discovery.
  *
  * The lockfile is a JSON file at a deterministic path per workspace,
- * containing the daemon's PID, socket path, version, and a shared secret.
+ * containing the daemon's PID, socket path, and version.
  */
 
 import * as crypto from "crypto";
@@ -55,12 +55,42 @@ export function readLockfile(lockPath: string): DaemonLockfile | null {
   try {
     const raw = fs.readFileSync(lockPath, "utf8");
     const data = JSON.parse(raw);
-    if (!data.pid || !data.socketPath || !data.secret) {
+    if (!data.pid || !data.socketPath) {
       return null;
     }
     return data as DaemonLockfile;
   } catch {
     return null;
+  }
+}
+
+/** Path to the secret credential file (sibling of the lockfile). */
+export function secretPath(wsHash: string): string {
+  return path.join(runtimeDir(), `alterminal-daemon-${wsHash}.secret`);
+}
+
+/** Write the daemon secret atomically with owner-only permissions. */
+export function writeSecret(secretFilePath: string, secret: string): void {
+  const tmp = secretFilePath + ".tmp";
+  fs.writeFileSync(tmp, secret, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tmp, secretFilePath);
+}
+
+/** Read the daemon secret, returning null if missing. */
+export function readSecret(secretFilePath: string): string | null {
+  try {
+    return fs.readFileSync(secretFilePath, "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Delete the secret file. */
+export function removeSecret(secretFilePath: string): void {
+  try {
+    fs.unlinkSync(secretFilePath);
+  } catch {
+    // already gone
   }
 }
 
