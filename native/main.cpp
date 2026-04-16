@@ -110,8 +110,7 @@ int main(int argc, char* argv[]) {
 
     loom_launch_opts opts = {};
     opts.socket_path   = socket_path;
-    opts.ws_port       = 0;
-    opts.ws_token      = secret;
+    opts.secret        = secret;
     opts.log_path      = log_path;
     opts.scrollback    = scrollback;
     opts.pid_file      = nullptr;
