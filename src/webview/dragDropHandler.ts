@@ -127,6 +127,12 @@ export class DragDropHandler {
     this.clearVisualFeedback();
   this.dragDepth = 0;
 
+    // Focus the active terminal so subsequent typing goes to it
+    if (this.tabManager) {
+      const activeTerminal = this.tabManager.getActiveTerminal();
+      if (activeTerminal) activeTerminal.focus();
+    }
+
     if (e.dataTransfer.files.length > 0) {
       // Get the active terminal ID from TabManager
       const activeTabId = this.tabManager ? this.tabManager.activeTabId : 1;
