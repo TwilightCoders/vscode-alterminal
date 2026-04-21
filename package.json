@@ -251,160 +251,167 @@
         }
       ]
     },
-    "configuration": {
-      "title": "Alterminal",
-      "properties": {
-        "alterminal.ptyDaemon.enabled": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Keep terminal processes alive across window reloads. When enabled, PTY processes are managed by a background daemon that persists independently of the VS Code extension host. **Experimental.**"
-        },
-        "alterminal.tabLayout": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "horizontal",
-            "vertical"
-          ],
-          "default": "auto",
-          "description": "Tab layout orientation",
-          "enumDescriptions": [
-            "Automatically switch between horizontal and vertical based on panel size",
-            "Always use horizontal tabs (tabs on top)",
-            "Always use vertical tabs (tabs on left side)"
-          ]
-        },
-        "alterminal.tabTitle.template": {
-          "type": "string",
-          "default": "{base}{p? • {p}}",
-          "description": "Template for tab titles using tokens like {n} (name), {base} (base name), {p} (process), {title} (OSC terminal title), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
-        },
-        "alterminal.tabTitle.maxLength": {
-          "type": "number",
-          "default": 50,
-          "minimum": 10,
-          "maximum": 100,
-          "description": "Maximum length for tab titles before truncation"
-        },
-        "alterminal.tabTitle.truncateMode": {
-          "type": "string",
-          "enum": [
-            "start",
-            "middle",
-            "end"
-          ],
-          "default": "end",
-          "description": "How to truncate long tab titles",
-          "enumDescriptions": [
-            "Truncate from the beginning: …end-of-title",
-            "Truncate from the middle: start…end",
-            "Truncate from the end: start-of-title…"
-          ]
-        },
-        "alterminal.terminal.scrollback": {
-          "type": "number",
-          "minimum": 100,
-          "maximum": 50000,
-          "markdownDescription": "Number of lines to keep in terminal scrollback buffer. Inherits from `#terminal.integrated.scrollback#` when unset."
-        },
-        "alterminal.fontFamily": {
-          "type": "string",
-          "markdownDescription": "Terminal font family. Inherits from `#terminal.integrated.fontFamily#` when unset."
-        },
-        "alterminal.fontSize": {
-          "type": "number",
-          "markdownDescription": "Terminal font size in pixels. Inherits from `#terminal.integrated.fontSize#` when unset."
-        },
-        "alterminal.fontWeight": {
-          "type": "string",
-          "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
-          "markdownDescription": "Terminal font weight for normal text. Inherits from `#terminal.integrated.fontWeight#` when unset."
-        },
-        "alterminal.fontWeightBold": {
-          "type": "string",
-          "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
-          "markdownDescription": "Terminal font weight for bold text. Inherits from `#terminal.integrated.fontWeightBold#` when unset."
-        },
-        "alterminal.lineHeight": {
-          "type": "number",
-          "markdownDescription": "Terminal line height as a multiplier of font size. Inherits from `#terminal.integrated.lineHeight#` when unset."
-        },
-        "alterminal.letterSpacing": {
-          "type": "number",
-          "markdownDescription": "Terminal letter spacing in pixels. Inherits from `#terminal.integrated.letterSpacing#` when unset."
-        },
-        "alterminal.cursorStyle": {
-          "type": "string",
-          "enum": ["block", "line", "underline"],
-          "markdownDescription": "Terminal cursor style. Inherits from `#terminal.integrated.cursorStyle#` when unset."
-        },
-        "alterminal.cursorBlinking": {
-          "type": "boolean",
-          "markdownDescription": "Blink the terminal cursor. Inherits from `#terminal.integrated.cursorBlinking#` when unset."
-        },
-        "alterminal.copyOnSelection": {
-          "type": "boolean",
-          "markdownDescription": "Automatically copy terminal selection to the clipboard. Inherits from `#terminal.integrated.copyOnSelection#` when unset."
-        },
-        "alterminal.smoothScrolling": {
-          "type": "boolean",
-          "markdownDescription": "Animate terminal scrolling. Inherits from `#terminal.integrated.smoothScrolling#` when unset."
-        },
-        "alterminal.minimumContrastRatio": {
-          "type": "number",
-          "markdownDescription": "Minimum contrast ratio for text — adjusts colors to meet WCAG. Inherits from `#terminal.integrated.minimumContrastRatio#` when unset."
-        },
-        "alterminal.wordSeparators": {
-          "type": "string",
-          "markdownDescription": "Characters treated as word boundaries for double-click word selection. Inherits from `#terminal.integrated.wordSeparators#` when unset."
-        },
-        "alterminal.clearSelectionOnCopy": {
-          "type": "boolean",
-          "default": true,
-          "description": "Clear the text selection after copying to clipboard. Disable to keep text selected after Cmd/Ctrl+C."
-        },
-        "alterminal.alwaysShowTabs": {
-          "type": "boolean",
-          "default": false,
-          "description": "Always show the tab bar, even when there is only one terminal tab"
-        },
-        "alterminal.bellIndicator": {
-          "type": "string",
-          "default": "🔔",
-          "markdownDescription": "Text shown in the window title when a background terminal has unread bell activity. Add `${bell}` to your `#window.title#` setting to enable. Set to empty string to disable."
-        },
-        "alterminal.savedCommands": {
-          "type": "array",
-          "default": [],
-          "markdownDescription": "Saved terminal commands for quick launching. Commands support template variables that expand at launch time:\n\n| Token | Value |\n|-------|-------|\n| `{workspace}` | Workspace folder name |\n| `{workspacePath}` | Full workspace folder path |\n| `{user}` | OS username |\n| `{platform}` | `process.platform` (darwin, linux, win32) |\n| `{env.VAR}` | Environment variable `VAR` |\n| `{i:prompt}` | Interactive — prompts user at launch time |\n\nSupports conditionals: `{workspace:default}`, `{workspace?then:else}`. Unknown tokens are left as-is. Use `{i:prompt}` in `cwd` for a folder picker or in `command` for an input box.",
-          "items": {
-            "type": "object",
-            "properties": {
-              "command": {
-                "type": "string",
-                "description": "The command to execute"
-              },
-              "label": {
-                "type": "string",
-                "description": "Display label for the command"
-              },
-              "count": {
-                "type": "number",
-                "description": "Usage count"
-              },
-              "lastUsed": {
-                "type": "string",
-                "description": "Last used timestamp"
-              },
-              "cwd": {
-                "type": "string",
-                "description": "Working directory. Supports {i:prompt}, {workspace}, {workspacePath}, {env.VAR}."
+    "configuration": [
+      {
+        "title": "Alterminal",
+        "order": 1,
+        "properties": {
+          "alterminal.ptyDaemon.enabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Keep terminal processes alive across window reloads. When enabled, PTY processes are managed by a background daemon that persists independently of the VS Code extension host. **Experimental.**"
+          },
+          "alterminal.tabLayout": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "horizontal",
+              "vertical"
+            ],
+            "default": "auto",
+            "description": "Tab layout orientation",
+            "enumDescriptions": [
+              "Automatically switch between horizontal and vertical based on panel size",
+              "Always use horizontal tabs (tabs on top)",
+              "Always use vertical tabs (tabs on left side)"
+            ]
+          },
+          "alterminal.alwaysShowTabs": {
+            "type": "boolean",
+            "default": false,
+            "description": "Always show the tab bar, even when there is only one terminal tab"
+          },
+          "alterminal.tabTitle.template": {
+            "type": "string",
+            "default": "{base}{p? • {p}}",
+            "description": "Template for tab titles using tokens like {n} (name), {base} (base name), {p} (process), {title} (OSC terminal title), {cwd} (directory). Supports conditionals: {p?text} and defaults: {p:shell}"
+          },
+          "alterminal.tabTitle.maxLength": {
+            "type": "number",
+            "default": 50,
+            "minimum": 10,
+            "maximum": 100,
+            "description": "Maximum length for tab titles before truncation"
+          },
+          "alterminal.tabTitle.truncateMode": {
+            "type": "string",
+            "enum": [
+              "start",
+              "middle",
+              "end"
+            ],
+            "default": "end",
+            "description": "How to truncate long tab titles",
+            "enumDescriptions": [
+              "Truncate from the beginning: …end-of-title",
+              "Truncate from the middle: start…end",
+              "Truncate from the end: start-of-title…"
+            ]
+          },
+          "alterminal.clearSelectionOnCopy": {
+            "type": "boolean",
+            "default": true,
+            "description": "Clear the text selection after copying to clipboard. Disable to keep text selected after Cmd/Ctrl+C."
+          },
+          "alterminal.bellIndicator": {
+            "type": "string",
+            "default": "🔔",
+            "markdownDescription": "Text shown in the window title when a background terminal has unread bell activity. Add `${bell}` to your `#window.title#` setting to enable. Set to empty string to disable."
+          },
+          "alterminal.savedCommands": {
+            "type": "array",
+            "default": [],
+            "markdownDescription": "Saved terminal commands for quick launching. Commands support template variables that expand at launch time:\n\n| Token | Value |\n|-------|-------|\n| `{workspace}` | Workspace folder name |\n| `{workspacePath}` | Full workspace folder path |\n| `{user}` | OS username |\n| `{platform}` | `process.platform` (darwin, linux, win32) |\n| `{env.VAR}` | Environment variable `VAR` |\n| `{i:prompt}` | Interactive — prompts user at launch time |\n\nSupports conditionals: `{workspace:default}`, `{workspace?then:else}`. Unknown tokens are left as-is. Use `{i:prompt}` in `cwd` for a folder picker or in `command` for an input box.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "The command to execute"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Display label for the command"
+                },
+                "count": {
+                  "type": "number",
+                  "description": "Usage count"
+                },
+                "lastUsed": {
+                  "type": "string",
+                  "description": "Last used timestamp"
+                },
+                "cwd": {
+                  "type": "string",
+                  "description": "Working directory. Supports {i:prompt}, {workspace}, {workspacePath}, {env.VAR}."
+                }
               }
             }
           }
         }
+      },
+      {
+        "title": "Alterminal: Terminal Appearance",
+        "order": 2,
+        "properties": {
+          "alterminal.terminal.scrollback": {
+            "type": "number",
+            "markdownDescription": "Number of lines to keep in terminal scrollback buffer. Inherits from `#terminal.integrated.scrollback#` when unset."
+          },
+          "alterminal.fontFamily": {
+            "type": "string",
+            "markdownDescription": "Terminal font family. Inherits from `#terminal.integrated.fontFamily#` when unset."
+          },
+          "alterminal.fontSize": {
+            "type": "number",
+            "markdownDescription": "Terminal font size in pixels. Inherits from `#terminal.integrated.fontSize#` when unset."
+          },
+          "alterminal.fontWeight": {
+            "type": "string",
+            "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+            "markdownDescription": "Terminal font weight for normal text. Inherits from `#terminal.integrated.fontWeight#` when unset."
+          },
+          "alterminal.fontWeightBold": {
+            "type": "string",
+            "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+            "markdownDescription": "Terminal font weight for bold text. Inherits from `#terminal.integrated.fontWeightBold#` when unset."
+          },
+          "alterminal.lineHeight": {
+            "type": "number",
+            "markdownDescription": "Terminal line height as a multiplier of font size. Inherits from `#terminal.integrated.lineHeight#` when unset."
+          },
+          "alterminal.letterSpacing": {
+            "type": "number",
+            "markdownDescription": "Terminal letter spacing in pixels. Inherits from `#terminal.integrated.letterSpacing#` when unset."
+          },
+          "alterminal.cursorStyle": {
+            "type": "string",
+            "enum": ["block", "line", "underline"],
+            "markdownDescription": "Terminal cursor style. Inherits from `#terminal.integrated.cursorStyle#` when unset."
+          },
+          "alterminal.cursorBlinking": {
+            "type": "boolean",
+            "markdownDescription": "Blink the terminal cursor. Inherits from `#terminal.integrated.cursorBlinking#` when unset."
+          },
+          "alterminal.copyOnSelection": {
+            "type": "boolean",
+            "markdownDescription": "Automatically copy terminal selection to the clipboard. Inherits from `#terminal.integrated.copyOnSelection#` when unset."
+          },
+          "alterminal.smoothScrolling": {
+            "type": "boolean",
+            "markdownDescription": "Animate terminal scrolling. Inherits from `#terminal.integrated.smoothScrolling#` when unset."
+          },
+          "alterminal.minimumContrastRatio": {
+            "type": "number",
+            "markdownDescription": "Minimum contrast ratio for text — adjusts colors to meet WCAG. Inherits from `#terminal.integrated.minimumContrastRatio#` when unset."
+          },
+          "alterminal.wordSeparators": {
+            "type": "string",
+            "markdownDescription": "Characters treated as word boundaries for double-click word selection. Inherits from `#terminal.integrated.wordSeparators#` when unset."
+          }
+        }
       }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile && node scripts/verify-binaries.js",
