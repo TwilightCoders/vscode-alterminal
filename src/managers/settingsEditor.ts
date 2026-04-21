@@ -279,16 +279,18 @@ export class SettingsEditor {
       padding: 1px 4px;
       border-radius: 2px;
     }
-    .effective a.setting-link {
+    a.setting-link {
       color: var(--vscode-textLink-foreground);
       background: var(--vscode-textCodeBlock-background);
       padding: 1px 4px;
       border-radius: 2px;
       text-decoration: none;
       font-family: var(--vscode-editor-font-family);
+      font-size: 0.9em;
       cursor: pointer;
+      font-weight: normal;
     }
-    .effective a.setting-link:hover {
+    a.setting-link:hover {
       text-decoration: underline;
       color: var(--vscode-textLink-activeForeground);
     }
@@ -340,10 +342,20 @@ export class SettingsEditor {
 
     function render() {
       el.innerHTML = state.groups.map(group => \`
-        <h2>\${escape(group.title)}</h2>
+        <h2>\${linkifySettingRefs(group.title)}</h2>
         \${group.items.map(renderItem).join("")}
       \`).join("");
       wireInputs();
+    }
+
+    // Replace terminal.integrated references in prose with clickable links
+    // that open the VS Code Settings UI filtered to them. Strips a trailing
+    // ".*" since VS Code's settings search matches by prefix, not glob.
+    function linkifySettingRefs(text) {
+      return escape(text).replace(/terminal\\.integrated(?:\\.(?:\\*|[a-zA-Z][\\w.]*))?/g, (match) => {
+        const key = match.endsWith('.*') ? match.slice(0, -2) : match;
+        return '<a class="setting-link" href="#" data-openset="' + escape(key) + '">' + match + '</a>';
+      });
     }
 
     function renderItem(item) {
