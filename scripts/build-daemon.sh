@@ -24,8 +24,25 @@ fi
 # Build loomptyd (brings in libloom as a dependency)
 cmake --build "$LOOM_DIR/build" --target loomptyd >/dev/null 2>&1
 
-# Copy to bin/
+# Copy to bin/ only when the source is newer. A spurious copy invalidates
+# macOS's in-kernel code signature cache for bin/loomptyd, causing
+# "EXC_CRASH (SIGKILL (Code Signature Invalid))" on the next exec. We
+# compare mtimes rather than bytes because we re-sign after copying
+# (which makes byte-comparison falsely indicate "different").
 mkdir -p bin
-cp "$LOOM_DIR/build/loomptyd" bin/loomptyd
-
-echo "✅ bin/loomptyd built"
+SRC="$LOOM_DIR/build/loomptyd"
+DST="bin/loomptyd"
+SRC_MTIME=$(stat -f %m "$SRC" 2>/dev/null || echo 0)
+DST_MTIME=$(stat -f %m "$DST" 2>/dev/null || echo 0)
+if [[ ! -f "$DST" || "$SRC_MTIME" -gt "$DST_MTIME" ]]; then
+  cp "$SRC" "$DST"
+  # Re-sign ad-hoc so the kernel accepts the new inode immediately.
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "$DST" 2>/dev/null || true
+  fi
+  # Touch dst to mtime = now so subsequent runs skip unless cmake rebuilt.
+  touch "$DST"
+  echo "✅ bin/loomptyd updated"
+else
+  echo "✅ bin/loomptyd up to date"
+fi
