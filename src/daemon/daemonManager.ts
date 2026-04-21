@@ -263,24 +263,37 @@ export class DaemonManager {
 
       Logger.info(`[daemon] Spawning: ${binary} ${args.join(" ")}`);
 
+      // Capture early stderr (spawn failures etc.) to a temp file, then
+      // fully detach. Keeping stderr as a pipe to us means when the
+      // extension host dies, closed pipes could signal the daemon.
+      const stderrPath = path.join(path.dirname(lockPath), `.${path.basename(lockPath)}.stderr`);
+      const stderrFd = require("fs").openSync(stderrPath, "w");
+
       const child = cp.spawn(binary, args, {
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "ignore", stderrFd],
         env: { ...process.env },
       });
 
-      let stderr = "";
-      child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-      child.stdout!.resume(); // drain to prevent backpressure
-
+      require("fs").closeSync(stderrFd);
       child.unref();
+
+      const readStderr = () => {
+        try { return require("fs").readFileSync(stderrPath, "utf8").trim(); }
+        catch { return ""; }
+      };
 
       // loomptyd detaches via setsid (no fork) and keeps running as the
       // daemon itself. We detect readiness by polling for the lockfile.
+      const cleanup = () => {
+        try { require("fs").unlinkSync(stderrPath); } catch {}
+      };
+
       const timeout = setTimeout(() => {
         clearInterval(poll);
-        reject(new Error(`Daemon startup timed out: ${stderr.trim()}`));
+        reject(new Error(`Daemon startup timed out: ${readStderr()}`));
         try { child.kill(); } catch {}
+        cleanup();
       }, 10000);
 
       const poll = setInterval(() => {
@@ -290,6 +303,7 @@ export class DaemonManager {
           clearInterval(poll);
           clearTimeout(timeout);
           Logger.info(`[daemon] loomptyd ready, PID ${info.pid}`);
+          cleanup();
           resolve(secret);
         }
       }, 100);
@@ -300,14 +314,16 @@ export class DaemonManager {
           clearInterval(poll);
           clearTimeout(timeout);
           reject(new Error(
-            `loomptyd exited before ready (code=${code}, signal=${signal}): ${stderr.trim()}`,
+            `loomptyd exited before ready (code=${code}, signal=${signal}): ${readStderr()}`,
           ));
+          cleanup();
         }
       });
 
       child.on("error", (err) => {
         clearInterval(poll);
         clearTimeout(timeout);
+        cleanup();
         reject(err);
       });
     });
