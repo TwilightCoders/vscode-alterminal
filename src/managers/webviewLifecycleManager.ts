@@ -130,26 +130,43 @@ export class WebViewLifecycleManager {
     }
 
     // Send configuration to webview
-    const config = this.configurationWatcher.getConfiguration();
     webview.postMessage({
       command: "updateConfig",
-      config: {
-        alwaysShowTabs: config.alwaysShowTabs,
-        clearSelectionOnCopy: config.clearSelectionOnCopy,
-        scrollback: config.scrollback,
-      },
+      config: this._buildWebviewConfig(),
     });
   }
 
   /**
    * Handle configuration changes
    */
-  public handleConfigChange(webview: vscode.Webview, config: { alwaysShowTabs: boolean; clearSelectionOnCopy: boolean; scrollback: number }): void {
+  public handleConfigChange(webview: vscode.Webview, _config: unknown): void {
     webview.postMessage({
       command: "updateConfig",
-      config,
+      config: this._buildWebviewConfig(),
     });
+  }
 
+  private _buildWebviewConfig() {
+    const c = this.configurationWatcher.getConfiguration();
+    return {
+      alwaysShowTabs: c.alwaysShowTabs,
+      clearSelectionOnCopy: c.clearSelectionOnCopy,
+      scrollback: c.scrollback,
+      terminalAppearance: {
+        fontFamily: c.fontFamily,
+        fontSize: c.fontSize,
+        fontWeight: c.fontWeight,
+        fontWeightBold: c.fontWeightBold,
+        lineHeight: c.lineHeight,
+        letterSpacing: c.letterSpacing,
+        cursorStyle: c.cursorStyle,
+        cursorBlinking: c.cursorBlinking,
+        copyOnSelection: c.copyOnSelection,
+        smoothScrolling: c.smoothScrolling,
+        minimumContrastRatio: c.minimumContrastRatio,
+        wordSeparators: c.wordSeparators,
+      },
+    };
   }
 
   /**

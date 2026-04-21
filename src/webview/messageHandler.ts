@@ -51,6 +51,7 @@ export interface MessageHandlerCallbacks {
   setAlwaysShowTabs: (val: boolean) => void;
   findTabIdByCommand: (cmd: string) => number | null;
   reportPerformance: () => void;
+  applyTerminalAppearance?: (appearance: Record<string, unknown>) => void;
 }
 
 /**
@@ -407,6 +408,13 @@ export class MessageHandler {
       }
       if (typeof message.config.scrollback === "number") {
         (window as any).scrollbackLines = message.config.scrollback;
+      }
+      // Terminal appearance settings — stash on window for terminal.ts
+      // to pick up on next terminal construction, and push live to any
+      // existing terminals.
+      (window as any).terminalAppearance = message.config.terminalAppearance ?? {};
+      if (typeof this.callbacks.applyTerminalAppearance === "function") {
+        this.callbacks.applyTerminalAppearance((window as any).terminalAppearance);
       }
     }
   }

@@ -115,16 +115,9 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.focusGuard = new FocusGuard();
 
     // Listen for configuration changes
-    this.configurationWatcher.onConfigChanged((config) => {
+    this.configurationWatcher.onConfigChanged(() => {
       if (this._view) {
-        this.webviewLifecycleManager.handleConfigChange(
-          this._view.webview,
-          {
-            alwaysShowTabs: config.alwaysShowTabs,
-            clearSelectionOnCopy: config.clearSelectionOnCopy,
-            scrollback: config.scrollback,
-          },
-        );
+        this.webviewLifecycleManager.handleConfigChange(this._view.webview, null);
       }
       // Reload saved commands so manual settings.json edits take effect
       this._commandManager.loadSavedCommands();

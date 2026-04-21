@@ -201,25 +201,29 @@ export class TerminalInstance {
         if (possible && possible.Terminal) XTerminal = possible.Terminal;
         else throw new Error("Terminal constructor not found");
       }
+      const appearance = ((window as any).terminalAppearance ?? {}) as Record<string, any>;
+      const fallbackFontSize =
+        parseInt(
+          this.getThemeColor("--vscode-editor-font-size", String(TERMINAL_DEFAULTS.FONT_SIZE)).replace("px", ""),
+        ) || TERMINAL_DEFAULTS.FONT_SIZE;
+      const fallbackFontFamily = this.getThemeColor(
+        "--vscode-editor-font-family",
+        "Consolas, Monaco, Menlo, monospace",
+      );
+
       this.terminal = new XTerminal({
-        cursorBlink: true,
-        cursorStyle: 'block',
-        cursorInactiveStyle: 'none',
+        cursorBlink: appearance.cursorBlinking ?? true,
+        cursorStyle: appearance.cursorStyle ?? "block",
+        cursorInactiveStyle: "none",
         overviewRulerWidth: 0,
         scrollOnUserInput: true,
         reflowCursorLine: true,
-        fontSize:
-          parseInt(
-            this.getThemeColor("--vscode-editor-font-size", String(TERMINAL_DEFAULTS.FONT_SIZE)).replace(
-              "px",
-              "",
-            ),
-          ) || TERMINAL_DEFAULTS.FONT_SIZE,
-        fontFamily: this.getThemeColor(
-          "--vscode-editor-font-family",
-          "Consolas, Monaco, Menlo, monospace",
-        ),
-        lineHeight: 1.0,
+        fontSize: appearance.fontSize || fallbackFontSize,
+        fontFamily: appearance.fontFamily || fallbackFontFamily,
+        fontWeight: appearance.fontWeight || "normal",
+        fontWeightBold: appearance.fontWeightBold || "bold",
+        lineHeight: appearance.lineHeight || 1.0,
+        letterSpacing: appearance.letterSpacing ?? 0,
         theme: this.terminalTheme,
         scrollback: window.scrollbackLines || TERMINAL_DEFAULTS.SCROLLBACK,
         sendFocus: true,
@@ -229,8 +233,10 @@ export class TerminalInstance {
         convertEol: true,
         disableStdin: false,
         scrollSensitivity: 1,
+        smoothScrollDuration: appearance.smoothScrolling ? 125 : 0,
         drawBoldTextInBrightColors: false,
-        minimumContrastRatio: 1,
+        minimumContrastRatio: appearance.minimumContrastRatio ?? 1,
+        wordSeparator: appearance.wordSeparators || undefined,
       });
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
