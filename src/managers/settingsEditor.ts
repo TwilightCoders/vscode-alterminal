@@ -132,6 +132,11 @@ export class SettingsEditor {
       case "openJson":
         vscode.commands.executeCommand("workbench.action.openSettingsJson");
         return;
+      case "openSetting":
+        if (typeof msg.key === "string") {
+          vscode.commands.executeCommand("workbench.action.openSettings", msg.key);
+        }
+        return;
     }
   }
 
@@ -274,6 +279,19 @@ export class SettingsEditor {
       padding: 1px 4px;
       border-radius: 2px;
     }
+    .effective a.setting-link {
+      color: var(--vscode-textLink-foreground);
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 4px;
+      border-radius: 2px;
+      text-decoration: none;
+      font-family: var(--vscode-editor-font-family);
+      cursor: pointer;
+    }
+    .effective a.setting-link:hover {
+      text-decoration: underline;
+      color: var(--vscode-textLink-activeForeground);
+    }
     .badge {
       display: inline-block;
       font-size: 0.75em;
@@ -338,11 +356,14 @@ export class SettingsEditor {
       const reset = isOverridden
         ? \`<button class="reset" data-reset="\${escape(item.key)}">Reset to inherited</button>\`
         : '';
+      const inheritLink = item.inheritedFrom
+        ? \`<a class="setting-link" href="#" data-openset="\${escape(item.inheritedFrom)}">\${escape(item.inheritedFrom)}</a>\`
+        : '';
       const effectiveLine = item.inheritsFrom
         ? \`<div class="effective">effective: <code>\${fmt(item.effective)}</code>\${
             isOverridden
-              ? \` · inherited would be <code>\${fmt(item.inheritedValue)}</code> from <code>\${escape(item.inheritsFrom)}</code>\`
-              : \` · from <code>\${escape(item.inheritsFrom)}</code>\`
+              ? \` · inherited would be <code>\${fmt(item.inheritedValue)}</code> from \${inheritLink}\`
+              : \` · from \${inheritLink}\`
           }</div>\`
         : \`<div class="effective">effective: <code>\${fmt(item.effective)}</code></div>\`;
 
@@ -430,6 +451,13 @@ export class SettingsEditor {
 
       document.getElementById('openJson').addEventListener('click', () => {
         vscode.postMessage({ command: 'openJson' });
+      });
+
+      document.querySelectorAll('[data-openset]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          vscode.postMessage({ command: 'openSetting', key: el.dataset.openset });
+        });
       });
     }
 
