@@ -1,5 +1,5 @@
 /**
- * IPC protocol for extension <-> alterminald (loompty) communication.
+ * IPC protocol for extension <-> loomptyd (loompty's PTY daemon) communication.
  *
  * Wire format: 4-byte big-endian length prefix + UTF-8 JSON payload.
  *

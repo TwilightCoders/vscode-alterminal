@@ -1,6 +1,6 @@
 /**
  * Daemon Manager — handles spawning, discovering, and connecting to
- * the alterminald daemon process from the extension host.
+ * the loomptyd daemon process from the extension host.
  *
  * Uses a single global daemon shared by all VS Code windows.
  * Session names (UUIDs) are globally unique so no partitioning is needed.
@@ -244,14 +244,14 @@ export class DaemonManager {
   }
 
   /**
-   * Spawn the alterminald daemon binary.
-   * alterminald forks and daemonizes internally, printing the child PID
+   * Spawn the loomptyd daemon binary.
+   * loomptyd forks and daemonizes internally, printing the child PID
    * on stdout before the parent exits. The daemon writes a lockfile when
    * its control socket is ready.
    */
   private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
     const secret = generateSecret();
-    const binary = await this._findAlterminald();
+    const binary = await this._findLoomptyd();
 
     return new Promise((resolve, reject) => {
       const args = [
@@ -281,16 +281,16 @@ export class DaemonManager {
         try { child.kill(); } catch {}
       }, 10000);
 
-      // alterminald prints child PID on stdout, then parent exits.
+      // loomptyd prints child PID on stdout, then parent exits.
       // Poll for lockfile to confirm daemon is ready.
       child.on("exit", (code) => {
         if (code !== 0) {
           clearTimeout(timeout);
-          reject(new Error(`alterminald exited with code ${code}: ${stderr.trim()}`));
+          reject(new Error(`loomptyd exited with code ${code}: ${stderr.trim()}`));
           return;
         }
 
-        Logger.info(`[daemon] alterminald parent exited, daemon PID: ${stdout.trim()}`);
+        Logger.info(`[daemon] loomptyd parent exited, daemon PID: ${stdout.trim()}`);
 
         // Poll for lockfile (daemon writes it when control socket is ready)
         const pollInterval = 100;
@@ -314,15 +314,15 @@ export class DaemonManager {
   }
 
   /**
-   * Find the alterminald binary.
+   * Find the loomptyd binary.
    * Search order:
    *   1. Extension's bin/ directory (bundled for production)
    *   2. System PATH
    */
-  private _findAlterminald(): Promise<string> {
+  private _findLoomptyd(): Promise<string> {
     return new Promise((resolve, reject) => {
       // Check extension bundle first
-      const bundled = path.join(this._extensionPath, "bin", "alterminald");
+      const bundled = path.join(this._extensionPath, "bin", "loomptyd");
       try {
         const stat = require("fs").statSync(bundled);
         if (stat.isFile()) {
@@ -334,12 +334,12 @@ export class DaemonManager {
       }
 
       // Search PATH
-      cp.execFile("which", ["alterminald"], (err, stdout) => {
+      cp.execFile("which", ["loomptyd"], (err, stdout) => {
         if (!err && stdout.trim()) {
           resolve(stdout.trim());
         } else {
           reject(new Error(
-            "alterminald not found. Install it or place it in the extension's bin/ directory. " +
+            "loomptyd not found. Install it or place it in the extension's bin/ directory. " +
             "Build from: https://github.com/twilightcoders/loompty",
           ));
         }

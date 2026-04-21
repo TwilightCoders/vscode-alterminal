@@ -6,7 +6,6 @@ node_modules/
 .vscode-test/
 build/
 bin/
-native/build/
 
 # TypeScript
 *.js.map

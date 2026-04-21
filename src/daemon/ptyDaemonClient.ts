@@ -1,5 +1,5 @@
 /**
- * PTY Daemon Client — communicates with alterminald (loompty-based daemon)
+ * PTY Daemon Client — communicates with loomptyd (loompty's reference daemon)
  * over Unix domain sockets.
  *
  * Architecture:
