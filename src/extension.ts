@@ -8,6 +8,7 @@ import { Logger } from "./utils/logger";
 import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 import { MessageDispatcher } from "./managers/messageDispatcher";
 import { DaemonManager } from "./daemon/daemonManager";
+import { SettingsEditor } from "./managers/settingsEditor";
 
 export async function activate(context: vscode.ExtensionContext) {
   // Determine dev mode - enable for development, NODE_ENV, or preview versions
@@ -160,10 +161,7 @@ export async function activate(context: vscode.ExtensionContext) {
       );
     }),
     vscode.commands.registerCommand("alterminal.openSettings", () => {
-      vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        "alterminal",
-      );
+      _settingsEditor.open();
     }),
     vscode.commands.registerCommand("alterminal.restartDaemon", async () => {
       if (!_daemonManager) {
@@ -325,8 +323,9 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 }
 
-// Module-level reference for deactivate() to access
+// Module-level references for deactivate() to access
 let _daemonManager: DaemonManager | null = null;
+const _settingsEditor = new SettingsEditor();
 
 export function deactivate() {
   Logger.info("Alterminal extension is being deactivated");
