@@ -204,7 +204,9 @@ export class SettingsEditor {
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
       padding: 1.5rem 2rem;
-      margin: 0;
+      margin: 0 auto;
+      max-width: 1100px;
+      box-sizing: border-box;
     }
     h1 {
       font-size: 1.4em;
