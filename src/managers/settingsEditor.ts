@@ -32,34 +32,52 @@ const SETTINGS: Array<{ title: string; items: SettingDescriptor[] }> = [
   {
     title: "Alterminal",
     items: [
-      { key: "ptyDaemon.enabled", label: "PTY daemon (experimental)", type: "boolean" },
-      { key: "alwaysShowTabs", label: "Always show tabs", type: "boolean" },
-      { key: "tabLayout", label: "Tab layout", type: "enum", enumValues: ["auto", "horizontal", "vertical"] },
-      { key: "clearSelectionOnCopy", label: "Clear selection on copy", type: "boolean" },
-      { key: "bellIndicator", label: "Bell indicator (window title)", type: "string" },
+      { key: "ptyDaemon.enabled", label: "PTY daemon (experimental)", type: "boolean",
+        description: "Keep terminal processes alive across window reloads. PTY processes are managed by a background daemon that persists independently of the VS Code extension host." },
+      { key: "alwaysShowTabs", label: "Always show tabs", type: "boolean",
+        description: "Always show the tab bar, even when there is only one terminal tab." },
+      { key: "tabLayout", label: "Tab layout", type: "enum", enumValues: ["auto", "horizontal", "vertical"],
+        description: "Tab bar orientation. 'Auto' switches between horizontal and vertical based on panel size." },
+      { key: "clearSelectionOnCopy", label: "Clear selection on copy", type: "boolean",
+        description: "Clear the text selection after copying to the clipboard. Disable to keep text selected after Cmd/Ctrl+C." },
+      { key: "bellIndicator", label: "Bell indicator (window title)", type: "string",
+        description: "Text shown in the window title when a background terminal has unread bell activity. Add ${bell} to your window.title to enable. Leave empty to disable." },
     ],
   },
   {
     title: "Terminal Appearance (inherits from terminal.integrated.*)",
     items: [
-      { key: "terminal.scrollback", label: "Scrollback lines", type: "number", inheritsFrom: "scrollback" },
-      { key: "fontFamily", label: "Font family", type: "string", inheritsFrom: "fontFamily" },
-      { key: "fontSize", label: "Font size", type: "number", inheritsFrom: "fontSize" },
+      { key: "terminal.scrollback", label: "Scrollback lines", type: "number", inheritsFrom: "scrollback",
+        description: "Number of lines to keep in the scrollback buffer. Higher values use more memory but preserve more history." },
+      { key: "fontFamily", label: "Font family", type: "string", inheritsFrom: "fontFamily",
+        description: "CSS font-family stack. Supports multiple fallbacks: \"Fira Code, Menlo, monospace\"." },
+      { key: "fontSize", label: "Font size", type: "number", inheritsFrom: "fontSize",
+        description: "Font size in pixels." },
       { key: "fontWeight", label: "Font weight", type: "enum",
         enumValues: ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
-        inheritsFrom: "fontWeight" },
+        inheritsFrom: "fontWeight",
+        description: "Font weight for regular (non-bold) text." },
       { key: "fontWeightBold", label: "Font weight (bold)", type: "enum",
         enumValues: ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
-        inheritsFrom: "fontWeightBold" },
-      { key: "lineHeight", label: "Line height", type: "number", inheritsFrom: "lineHeight" },
-      { key: "letterSpacing", label: "Letter spacing", type: "number", inheritsFrom: "letterSpacing" },
+        inheritsFrom: "fontWeightBold",
+        description: "Font weight for bold text." },
+      { key: "lineHeight", label: "Line height", type: "number", inheritsFrom: "lineHeight",
+        description: "Line height as a multiplier of font size. 1.0 is exact; 1.2 gives each line 20% more vertical space." },
+      { key: "letterSpacing", label: "Letter spacing", type: "number", inheritsFrom: "letterSpacing",
+        description: "Extra horizontal space between characters in pixels. 0 is default." },
       { key: "cursorStyle", label: "Cursor style", type: "enum",
-        enumValues: ["block", "line", "underline"], inheritsFrom: "cursorStyle" },
-      { key: "cursorBlinking", label: "Cursor blinking", type: "boolean", inheritsFrom: "cursorBlinking" },
-      { key: "copyOnSelection", label: "Copy on selection", type: "boolean", inheritsFrom: "copyOnSelection" },
-      { key: "smoothScrolling", label: "Smooth scrolling", type: "boolean", inheritsFrom: "smoothScrolling" },
-      { key: "minimumContrastRatio", label: "Minimum contrast ratio", type: "number", inheritsFrom: "minimumContrastRatio" },
-      { key: "wordSeparators", label: "Word separators", type: "string", inheritsFrom: "wordSeparators" },
+        enumValues: ["block", "line", "underline"], inheritsFrom: "cursorStyle",
+        description: "Cursor shape: solid block, vertical line, or underline." },
+      { key: "cursorBlinking", label: "Cursor blinking", type: "boolean", inheritsFrom: "cursorBlinking",
+        description: "Blink the cursor. Disable if you find it distracting." },
+      { key: "copyOnSelection", label: "Copy on selection", type: "boolean", inheritsFrom: "copyOnSelection",
+        description: "Automatically copy to the clipboard when you select text — no Cmd/Ctrl+C needed." },
+      { key: "smoothScrolling", label: "Smooth scrolling", type: "boolean", inheritsFrom: "smoothScrolling",
+        description: "Animate scroll movements with interpolation instead of jumping." },
+      { key: "minimumContrastRatio", label: "Minimum contrast ratio", type: "number", inheritsFrom: "minimumContrastRatio",
+        description: "Minimum WCAG contrast ratio between text and background. Colors are adjusted when a combination falls below this threshold. 1 = no adjustment, 4.5 = WCAG AA." },
+      { key: "wordSeparators", label: "Word separators", type: "string", inheritsFrom: "wordSeparators",
+        description: "Characters that divide words for double-click selection. Whitespace is always a separator." },
     ],
   },
 ];
@@ -214,11 +232,21 @@ export class SettingsEditor {
     }
     .setting {
       display: grid;
-      grid-template-columns: minmax(200px, 1fr) minmax(320px, 2fr);
+      grid-template-columns: minmax(180px, 1.1fr) minmax(260px, 1.5fr) minmax(240px, 1.4fr);
       gap: 1.25em;
       padding: 0.9em 0;
       border-bottom: 1px solid var(--vscode-panel-border);
       align-items: start;
+    }
+    @media (max-width: 760px) {
+      .setting {
+        grid-template-columns: 1fr;
+      }
+    }
+    .description {
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.9em;
+      line-height: 1.45;
     }
     .setting:last-child { border-bottom: none; }
     .label { font-weight: 500; }
@@ -316,6 +344,9 @@ export class SettingsEditor {
           }</div>\`
         : \`<div class="effective">effective: <code>\${fmt(item.effective)}</code></div>\`;
 
+      const description = item.description
+        ? \`<div class="description">\${escape(item.description)}</div>\`
+        : '';
       return \`
         <div class="setting">
           <div>
@@ -326,6 +357,7 @@ export class SettingsEditor {
             <div class="control">\${renderControl(item)}\${reset}</div>
             \${effectiveLine}
           </div>
+          \${description}
         </div>
       \`;
     }
