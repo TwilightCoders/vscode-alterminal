@@ -253,47 +253,35 @@ export class DaemonManager {
   private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
     const secret = generateSecret();
     const binary = await this._findLoomptyd();
+    const launcher = path.join(this._extensionPath, "scripts", "spawn-loomptyd.js");
 
     return new Promise((resolve, reject) => {
-      const args = [
-        "--socket", sockPath,
-        "--secret", secret,
-        "--lockfile", lockPath,
-      ];
+      // Route through a short-lived Node launcher that spawns loomptyd
+      // and exits. VS Code's ext host tracks child processes by PID and
+      // kills them directly on close — which kills loomptyd even with
+      // setsid. The launcher breaks this tracking: VS Code only knows
+      // about the launcher (which dies immediately), while loomptyd is
+      // a grandchild orphaned to launchd.
+      const launcherArgs = [launcher, binary, sockPath, secret, lockPath];
 
-      Logger.info(`[daemon] Spawning: ${binary} ${args.join(" ")}`);
+      Logger.info(`[daemon] Spawning via launcher: node ${launcherArgs.join(" ")}`);
 
-      // Capture early stderr (spawn failures etc.) to a temp file, then
-      // fully detach. Keeping stderr as a pipe to us means when the
-      // extension host dies, closed pipes could signal the daemon.
-      const stderrPath = path.join(path.dirname(lockPath), `.${path.basename(lockPath)}.stderr`);
-      const stderrFd = require("fs").openSync(stderrPath, "w");
-
-      const child = cp.spawn(binary, args, {
+      const launcherStderr: string[] = [];
+      const launcherProc = cp.spawn(process.execPath, launcherArgs, {
         detached: true,
-        stdio: ["ignore", "ignore", stderrFd],
+        stdio: ["ignore", "ignore", "pipe"],
         env: { ...process.env },
       });
+      launcherProc.stderr!.on("data", (chunk: Buffer) => {
+        launcherStderr.push(chunk.toString());
+      });
+      launcherProc.unref();
 
-      require("fs").closeSync(stderrFd);
-      child.unref();
-
-      const readStderr = () => {
-        try { return require("fs").readFileSync(stderrPath, "utf8").trim(); }
-        catch { return ""; }
-      };
-
-      // loomptyd detaches via setsid (no fork) and keeps running as the
-      // daemon itself. We detect readiness by polling for the lockfile.
-      const cleanup = () => {
-        try { require("fs").unlinkSync(stderrPath); } catch {}
-      };
+      const readStderr = () => launcherStderr.join("").trim();
 
       const timeout = setTimeout(() => {
         clearInterval(poll);
         reject(new Error(`Daemon startup timed out: ${readStderr()}`));
-        try { child.kill(); } catch {}
-        cleanup();
       }, 10000);
 
       const poll = setInterval(() => {
@@ -303,27 +291,25 @@ export class DaemonManager {
           clearInterval(poll);
           clearTimeout(timeout);
           Logger.info(`[daemon] loomptyd ready, PID ${info.pid}`);
-          cleanup();
           resolve(secret);
         }
       }, 100);
 
-      // If it exits before the lockfile appears, that's a startup failure.
-      child.on("exit", (code, signal) => {
-        if (!readLockfile(lockPath)) {
+      // Launcher exits quickly after spawning loomptyd. If it exits
+      // non-zero before the lockfile appears, the spawn itself failed.
+      launcherProc.on("exit", (code, signal) => {
+        if (code !== 0 && code !== null && !readLockfile(lockPath)) {
           clearInterval(poll);
           clearTimeout(timeout);
           reject(new Error(
-            `loomptyd exited before ready (code=${code}, signal=${signal}): ${readStderr()}`,
+            `launcher failed (code=${code}, signal=${signal}): ${readStderr()}`,
           ));
-          cleanup();
         }
       });
 
-      child.on("error", (err) => {
+      launcherProc.on("error", (err) => {
         clearInterval(poll);
         clearTimeout(timeout);
-        cleanup();
         reject(err);
       });
     });
