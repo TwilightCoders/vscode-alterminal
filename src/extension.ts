@@ -35,9 +35,12 @@ export async function activate(context: vscode.ExtensionContext) {
     isDebugMode,
   );
 
-  // Register window title variable for bell indicator
-  // Users can add ${alterminalBell} to their window.title setting
+  // Register window title variables. Users can add these to their
+  // window.title setting:
+  //   ${bell}   — bell icon + unread count across background tabs
+  //   ${remote} — "SSH", "WSL", "TUNNEL", "CODESPACES", ..., or "LOCAL"
   MessageDispatcher.registerTitleVariable();
+  registerRemoteTitleVariable();
 
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
@@ -332,4 +335,29 @@ export function deactivate() {
     _daemonManager = null;
   }
   Logger.dispose();
+}
+
+/**
+ * Register a `${remote}` window title variable.
+ *
+ * Resolves to an uppercase label for the current remote context ("SSH",
+ * "WSL", "CODESPACES", "TUNNEL", "DEV-CONTAINER", ...) or "LOCAL" when
+ * running locally. VS Code's built-in `${remoteName}` exposes only the
+ * raw authority string (e.g. "ssh-remote"), with no way to get a clean
+ * label independent of `${rootName}`. We fill that gap.
+ *
+ * Registered unconditionally — static per window, no cost to leave on.
+ */
+function registerRemoteTitleVariable(): void {
+  const REMOTE_CONTEXT_KEY = "alterminal:remote";
+  const remoteName = vscode.env.remoteName;
+  const label = remoteName
+    ? remoteName.replace(/-remote$/i, "").toUpperCase()
+    : "LOCAL";
+  vscode.commands.executeCommand("setContext", REMOTE_CONTEXT_KEY, label);
+  vscode.commands.executeCommand(
+    "registerWindowTitleVariable",
+    "remote",
+    REMOTE_CONTEXT_KEY,
+  );
 }

@@ -248,7 +248,7 @@ export class MessageDispatcher {
   }
 
   /**
-   * Register the window title variable. Call once at activation.
+   * Register the `${bell}` window title variable. Call once at activation.
    */
   public static registerTitleVariable(): void {
     vscode.commands.executeCommand(
@@ -258,7 +258,7 @@ export class MessageDispatcher {
     );
     vscode.commands.executeCommand(
       "registerWindowTitleVariable",
-      "alterminalBell",
+      "bell",
       MessageDispatcher.TITLE_CONTEXT_KEY,
     );
   }

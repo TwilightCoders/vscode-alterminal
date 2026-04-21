@@ -321,7 +321,7 @@
         "alterminal.bellIndicator": {
           "type": "string",
           "default": "🔔",
-          "markdownDescription": "Text shown in the window title when a background terminal has unread bell activity. Add `${alterminalBell}` to your `#window.title#` setting to enable. Set to empty string to disable."
+          "markdownDescription": "Text shown in the window title when a background terminal has unread bell activity. Add `${bell}` to your `#window.title#` setting to enable. Set to empty string to disable."
         },
         "alterminal.savedCommands": {
           "type": "array",
