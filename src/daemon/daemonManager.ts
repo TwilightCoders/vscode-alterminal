@@ -245,9 +245,10 @@ export class DaemonManager {
 
   /**
    * Spawn the loomptyd daemon binary.
-   * loomptyd forks and daemonizes internally, printing the child PID
-   * on stdout before the parent exits. The daemon writes a lockfile when
-   * its control socket is ready.
+   * loomptyd daemonizes via setsid (no fork), so the spawned process IS
+   * the daemon — it keeps running rather than parent-exiting. We detect
+   * readiness by polling for the lockfile it writes once the control
+   * socket is bound.
    */
   private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
     const secret = generateSecret();
@@ -268,45 +269,44 @@ export class DaemonManager {
         env: { ...process.env },
       });
 
-      let stdout = "";
       let stderr = "";
-
-      child.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
       child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.stdout!.resume(); // drain to prevent backpressure
 
       child.unref();
 
+      // loomptyd detaches via setsid (no fork) and keeps running as the
+      // daemon itself. We detect readiness by polling for the lockfile.
       const timeout = setTimeout(() => {
-        reject(new Error("Daemon startup timed out"));
+        clearInterval(poll);
+        reject(new Error(`Daemon startup timed out: ${stderr.trim()}`));
         try { child.kill(); } catch {}
       }, 10000);
 
-      // loomptyd prints child PID on stdout, then parent exits.
-      // Poll for lockfile to confirm daemon is ready.
-      child.on("exit", (code) => {
-        if (code !== 0) {
+      const poll = setInterval(() => {
+        const info = readLockfile(lockPath);
+        if (info) {
+          writeSecret(secretPath(GLOBAL_DAEMON_ID), secret);
+          clearInterval(poll);
           clearTimeout(timeout);
-          reject(new Error(`loomptyd exited with code ${code}: ${stderr.trim()}`));
-          return;
+          Logger.info(`[daemon] loomptyd ready, PID ${info.pid}`);
+          resolve(secret);
         }
+      }, 100);
 
-        Logger.info(`[daemon] loomptyd parent exited, daemon PID: ${stdout.trim()}`);
-
-        // Poll for lockfile (daemon writes it when control socket is ready)
-        const pollInterval = 100;
-        const poll = setInterval(() => {
-          const info = readLockfile(lockPath);
-          if (info) {
-            // Persist the secret so other windows can reconnect
-            writeSecret(secretPath(GLOBAL_DAEMON_ID), secret);
-            clearInterval(poll);
-            clearTimeout(timeout);
-            resolve(secret);
-          }
-        }, pollInterval);
+      // If it exits before the lockfile appears, that's a startup failure.
+      child.on("exit", (code, signal) => {
+        if (!readLockfile(lockPath)) {
+          clearInterval(poll);
+          clearTimeout(timeout);
+          reject(new Error(
+            `loomptyd exited before ready (code=${code}, signal=${signal}): ${stderr.trim()}`,
+          ));
+        }
       });
 
       child.on("error", (err) => {
+        clearInterval(poll);
         clearTimeout(timeout);
         reject(err);
       });
