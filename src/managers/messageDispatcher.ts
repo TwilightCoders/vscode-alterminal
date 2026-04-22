@@ -5,6 +5,10 @@ import { FileOperationHandler } from "./fileOperationHandler";
 import { TabContextMenuHandler } from "./tabContextMenuHandler";
 import { StateManager } from "./stateManager";
 import { Logger } from "../utils/logger";
+import {
+  BellNotificationService,
+  createBellNotificationHost,
+} from "./bellNotificationService";
 
 export interface PerformanceData {
   count: number;
@@ -19,18 +23,7 @@ export interface PerformanceData {
  * Responsibility: Route messages from webview to appropriate handlers
  */
 export class MessageDispatcher {
-  private _bellDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private _pendingBells: Map<number, string> = new Map();
-  private _unreadBellTabs: Set<number> = new Set();
-  private _lastBellTime: number = 0;
-  private _clearBellTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Per-tab timestamp of last notification — suppresses repeated alerts. */
-  private _bellNotifiedAt: Map<number, number> = new Map();
-  private static readonly BELL_DEBOUNCE_MS = 3000;
-  private static readonly BELL_CLEAR_GRACE_MS = 2000;
-  /** After notifying for a tab, suppress further notifications for this long. */
-  private static readonly BELL_COOLDOWN_MS = 30_000;
-  private static readonly TITLE_CONTEXT_KEY = "alterminal:bellIndicator";
+  private readonly bellNotifications: BellNotificationService;
 
   constructor(
     private readonly ptyManager: PtyManager,
@@ -44,7 +37,11 @@ export class MessageDispatcher {
     private readonly onWebviewReady: () => void,
     private readonly serializerHandleMessage?: (msg: any) => void,
     private readonly onInteraction?: () => void,
-  ) {}
+  ) {
+    this.bellNotifications = new BellNotificationService(
+      createBellNotificationHost(this.getWebview, this.openTerminal),
+    );
+  }
 
   /**
    * Set up message routing for webview
@@ -92,13 +89,14 @@ export class MessageDispatcher {
       },
       switchTab: (msg: any) => {
         if (msg.tabId !== undefined) {
-          this.clearBellForTab(msg.tabId);
+          this.bellNotifications.clearBellForTab(msg.tabId);
         }
       },
       bellDiagnostic: (msg: any) =>
         Logger.warn(`🔔 Webview bell [tab ${msg.tabId}] source: ${msg.source}`),
-      playBellSound: (msg: any) => this.handleBellSound(msg.tabId, msg.tabLabel),
-      panelFocused: () => this.clearBellIndicator(),
+      playBellSound: (msg: any) =>
+        this.bellNotifications.handleBellSound(msg.tabId, msg.tabLabel),
+      panelFocused: () => this.bellNotifications.clearBellIndicator(),
       setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
       setDeveloperMode: () => {}, // Handled in webview
@@ -167,35 +165,7 @@ export class MessageDispatcher {
   }
 
   public handleBellSound(tabId: number, tabLabel: string): void {
-    Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
-
-    // Suppress notification spam: if we already notified for this tab
-    // recently, only update the title indicator (no toast).
-    const lastNotified = this._bellNotifiedAt.get(tabId) ?? 0;
-    const inCooldown = (Date.now() - lastNotified) < MessageDispatcher.BELL_COOLDOWN_MS;
-
-    if (!inCooldown) {
-      this._pendingBells.set(tabId, tabLabel || `Tab ${tabId}`);
-    }
-
-    // Update window title bell indicator (Set deduplicates PTY + webview calls)
-    this._unreadBellTabs.add(tabId);
-    this._lastBellTime = Date.now();
-    // Cancel any pending clear so the indicator stays visible
-    if (this._clearBellTimer) {
-      clearTimeout(this._clearBellTimer);
-      this._clearBellTimer = null;
-    }
-    this._updateTitleIndicator();
-
-    if (this._bellDebounceTimer) {
-      clearTimeout(this._bellDebounceTimer);
-    }
-
-    this._bellDebounceTimer = setTimeout(() => {
-      this._bellDebounceTimer = null;
-      this._showBellNotification();
-    }, MessageDispatcher.BELL_DEBOUNCE_MS);
+    this.bellNotifications.handleBellSound(tabId, tabLabel);
   }
 
   /**
@@ -203,121 +173,25 @@ export class MessageDispatcher {
    * Defers if a bell fired very recently to avoid clearing before the user sees it.
    */
   public clearBellIndicator(): void {
-    // Cancel any pending toast — user is now looking at the panel
-    if (this._bellDebounceTimer) {
-      clearTimeout(this._bellDebounceTimer);
-      this._bellDebounceTimer = null;
-    }
-    this._pendingBells.clear();
-
-    if (this._unreadBellTabs.size === 0) return;
-
-    const elapsed = Date.now() - this._lastBellTime;
-    if (elapsed < MessageDispatcher.BELL_CLEAR_GRACE_MS) {
-      // Bell fired very recently — defer the clear so user sees it
-      if (this._clearBellTimer) return; // already scheduled
-      this._clearBellTimer = setTimeout(() => {
-        this._clearBellTimer = null;
-        this._unreadBellTabs.clear();
-        this._bellNotifiedAt.clear();
-        this._updateTitleIndicator();
-      }, MessageDispatcher.BELL_CLEAR_GRACE_MS - elapsed);
-      return;
-    }
-
-    this._unreadBellTabs.clear();
-    this._bellNotifiedAt.clear();
-    this._updateTitleIndicator();
+    this.bellNotifications.clearBellIndicator();
   }
 
   /** Clear pending bell for a specific tab (e.g. user switched to it). */
   public clearBellForTab(tabId: number): void {
-    this._pendingBells.delete(tabId);
-    this._unreadBellTabs.delete(tabId);
-    this._bellNotifiedAt.delete(tabId);
-    this._updateTitleIndicator();
+    this.bellNotifications.clearBellForTab(tabId);
   }
 
   /**
    * Clean up bell tracking state for a closed tab.
    */
   public handleTabClosed(tabId: number): void {
-    this._pendingBells.delete(tabId);
-    this._unreadBellTabs.delete(tabId);
-    this._bellNotifiedAt.delete(tabId);
+    this.bellNotifications.handleTabClosed(tabId);
   }
 
   /**
    * Register the `${bell}` window title variable. Call once at activation.
    */
   public static registerTitleVariable(): void {
-    vscode.commands.executeCommand(
-      "setContext",
-      MessageDispatcher.TITLE_CONTEXT_KEY,
-      "",
-    );
-    vscode.commands.executeCommand(
-      "registerWindowTitleVariable",
-      "bell",
-      MessageDispatcher.TITLE_CONTEXT_KEY,
-    );
-  }
-
-  private _updateTitleIndicator(): void {
-    const icon = vscode.workspace.getConfiguration("alterminal").get<string>("bellIndicator", "\u{1F514}");
-    if (!icon) {
-      // Empty string = disabled
-      vscode.commands.executeCommand("setContext", MessageDispatcher.TITLE_CONTEXT_KEY, "");
-      return;
-    }
-    const count = this._unreadBellTabs.size;
-    const value = count > 0
-      ? count === 1 ? icon : `${icon}${count}`
-      : "";
-    vscode.commands.executeCommand(
-      "setContext",
-      MessageDispatcher.TITLE_CONTEXT_KEY,
-      value,
-    );
-  }
-
-  private _showBellNotification(): void {
-    const bells = new Map(this._pendingBells);
-    this._pendingBells.clear();
-
-    if (bells.size === 0) return;
-
-    // Mark all notified tabs with the current timestamp for cooldown
-    const now = Date.now();
-    for (const tabId of bells.keys()) {
-      this._bellNotifiedAt.set(tabId, now);
-    }
-
-    const labels = Array.from(bells.values());
-    const body = bells.size === 1
-      ? labels[0]
-      : `${bells.size} terminals: ${labels.join(", ")}`;
-    const lastTabId = Array.from(bells.keys()).pop();
-
-    Logger.info(`Bell notification: ${body}`);
-
-    // Local notification — no URI routing to avoid focus stealing.
-    // Cross-window visibility is provided by the window title bell indicator.
-    vscode.window
-      .showInformationMessage(`${body}`, "Go to Terminal")
-      .then(async (selection) => {
-        if (selection !== "Go to Terminal") return;
-        this.clearBellIndicator();
-        await this.openTerminal();
-        setTimeout(() => {
-          const webview = this.getWebview();
-          if (webview && lastTabId !== undefined) {
-            webview.postMessage({
-              command: "switchToTab",
-              tabId: Number(lastTabId),
-            });
-          }
-        }, 200);
-      });
+    BellNotificationService.registerTitleVariable();
   }
 }
