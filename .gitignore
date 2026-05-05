@@ -57,6 +57,8 @@ Thumbs.db
 working/
 vendor/
 scrap/
+.Codex/
+buffer-with-snap.txt
 
 # Dev build counter and generated files
 .vscode/dev-counter
