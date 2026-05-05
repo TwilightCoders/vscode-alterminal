@@ -29,6 +29,11 @@ suite("Data Pipeline", () => {
       assert.strictEqual(filterVSCodeSequences(data), "helloworld");
     });
 
+    test("should remove plain OSC 9 (Windows Terminal notifications)", () => {
+      const data = "hello\x1b]9;Build complete\x07world";
+      assert.strictEqual(filterVSCodeSequences(data), "helloworld");
+    });
+
     test("should remove OSC 1337 (iTerm2 protocol)", () => {
       const data = "hello\x1b]1337;SetUserVar=foo=YmFy\x07world";
       assert.strictEqual(filterVSCodeSequences(data), "helloworld");

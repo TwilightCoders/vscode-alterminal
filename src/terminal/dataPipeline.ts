@@ -10,10 +10,11 @@
 // - OSC 633: VS Code shell integration protocol
 // - OSC 133: FinalTerm shell integration (VS Code also responds to this)
 // - OSC 7: Current working directory (can trigger VS Code behavior)
-// - OSC 9;9: ConEmu/Cmder CWD (Windows, VS Code responds)
+// - OSC 9: Windows Terminal notifications + ConEmu/Cmder CWD (9;9). VS Code's
+//   integrated terminal listens for these and steals focus when seen.
 // - OSC 1337: iTerm2 protocol (sometimes used by tools)
 // - DEC private mode ?1004: Focus reporting (in/out events VS Code may intercept)
-export const FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9;9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
+export const FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
 
 // Extraction patterns (separate from filter because we need capture groups)
 export const CWD_OSC_PATTERN = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;

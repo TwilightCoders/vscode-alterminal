@@ -115,13 +115,19 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.focusGuard = new FocusGuard();
 
     // Listen for configuration changes
-    this.configurationWatcher.onConfigChanged(() => {
+    this.configurationWatcher.onConfigChanged((config) => {
       if (this._view) {
         this.webviewLifecycleManager.handleConfigChange(this._view.webview, null);
       }
+      this._ptyManager.setSuppressFocusStealing(config.suppressFocusStealingSequences);
       // Reload saved commands so manual settings.json edits take effect
       this._commandManager.loadSavedCommands();
     });
+
+    // Apply current config to PtyManager before watcher starts firing
+    this._ptyManager.setSuppressFocusStealing(
+      this.configurationWatcher.getConfiguration().suppressFocusStealingSequences,
+    );
 
     // Start watching configuration
     this.configurationWatcher.startWatching();

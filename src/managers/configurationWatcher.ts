@@ -67,6 +67,7 @@ export class ConfigurationWatcher {
       // Alterminal-specific (no VS Code counterpart)
       alwaysShowTabs: config.get<boolean>("alwaysShowTabs", false),
       clearSelectionOnCopy: config.get<boolean>("clearSelectionOnCopy", true),
+      suppressFocusStealingSequences: config.get<boolean>("suppressFocusStealingSequences", true),
       tabLayout: config.get<string>("tabLayout", "auto"),
       tabTitleTemplate: config.get<string>("tabTitle.template", "{base}{p? • {p}}"),
       tabTitleMaxLength: config.get<number>("tabTitle.maxLength", 50),
@@ -112,6 +113,7 @@ export interface AlterminalConfig {
   // Alterminal-specific
   alwaysShowTabs: boolean;
   clearSelectionOnCopy: boolean;
+  suppressFocusStealingSequences: boolean;
   tabLayout: string;
   tabTitleTemplate: string;
   tabTitleMaxLength: number;

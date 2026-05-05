@@ -313,6 +313,11 @@
             "default": true,
             "description": "Clear the text selection after copying to clipboard. Disable to keep text selected after Cmd/Ctrl+C."
           },
+          "alterminal.suppressFocusStealingSequences": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Strip escape sequences from PTY output that VS Code (or other apps) react to by stealing focus to their own terminal. Covers OSC 7 (CWD), OSC 9 (notifications/CWD), OSC 133 (FinalTerm), OSC 633 (VS Code shell integration), OSC 1337 (iTerm2), and DEC ?1004 (focus reporting). Disable if you rely on these sequences passing through to other tooling."
+          },
           "alterminal.bellIndicator": {
             "type": "string",
             "default": "🔔",

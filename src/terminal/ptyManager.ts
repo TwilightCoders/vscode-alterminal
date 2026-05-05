@@ -65,6 +65,7 @@ export class PtyManager {
   private _extensionPath: string = "";
   private _expandCommand: ((cmd: string) => string) | null = null;
   private _onBell: ((tabId: number) => void) | null = null;
+  private _suppressFocusStealing: boolean = true;
 
   // Daemon mode: routes PTY operations through a persistent daemon process
   private _daemonClient: PtyDaemonClient | null = null;
@@ -185,6 +186,14 @@ export class PtyManager {
   }
 
   /**
+   * Toggle stripping of OSC sequences known to make VS Code steal focus.
+   * Defaults to true; can be turned off via alterminal.suppressFocusStealingSequences.
+   */
+  public setSuppressFocusStealing(value: boolean): void {
+    this._suppressFocusStealing = value;
+  }
+
+  /**
    * Filter out escape sequences that can cause VS Code to steal focus
    * These include VS Code shell integration sequences and focus reporting mode
    */
@@ -222,7 +231,7 @@ export class PtyManager {
       });
     }
 
-    let filteredData = hasEsc ? this._filterVSCodeSequences(data) : data;
+    let filteredData = (hasEsc && this._suppressFocusStealing) ? this._filterVSCodeSequences(data) : data;
     // Replace BEL with ST so xterm.js doesn't fire onBell for OSC terminators.
     // BellDetector already ran above on the raw data.
     filteredData = replaceBelWithST(filteredData);
