@@ -63,6 +63,10 @@ export class TemplateUtils {
     } catch (error) {
       console.warn("Could not read package.json version:", error);
     }
+    try {
+      const { DEV_BUILD_NUMBER } = require("../generated/buildInfo");
+      if (DEV_BUILD_NUMBER) { version = version.replace(/-dev\.\d+$/, "") + `-dev.${DEV_BUILD_NUMBER}`; }
+    } catch {}
 
     // Shared constants module (ES6 version for webview import map)
     const constantsUri = webview.asWebviewUri(

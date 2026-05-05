@@ -57,3 +57,7 @@ Thumbs.db
 working/
 vendor/
 scrap/
+
+# Dev build counter and generated files
+.vscode/dev-counter
+src/generated/

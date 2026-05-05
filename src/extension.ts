@@ -109,7 +109,13 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.StatusBarAlignment.Right,
     1000,
   );
-  statusBarItem.text = "$(terminal) Alterminal";
+  let devBuildNumber = 0;
+  if (isDebugMode) {
+    try { devBuildNumber = require('./generated/buildInfo').DEV_BUILD_NUMBER || 0; } catch {}
+  }
+  statusBarItem.text = isDebugMode
+    ? `$(terminal) Alterminal dev.${devBuildNumber}`
+    : "$(terminal) Alterminal";
   statusBarItem.tooltip = "Open Alterminal";
   statusBarItem.command = "alterminal.openTerminal";
   statusBarItem.backgroundColor = new vscode.ThemeColor(
