@@ -300,7 +300,6 @@ export class TerminalInstance {
 
     const linkRegex = new RegExp(`(${TerminalInstance.LINK_REGEX_SRC})`);
     const terminal = this.terminal;
-    const cols = terminal.cols;
 
     const handler = (event: MouseEvent, uri: string) => {
       if (event && event.preventDefault) {
@@ -336,11 +335,35 @@ export class TerminalInstance {
 
           const enhanced: any[] = [];
           for (const link of baseLinks) {
+            const startY = link.range.start.y;
             const endX = link.range.end.x;
             const endY = link.range.end.y;
 
-            // Check if link ends near terminal width
-            if (endX >= cols - 2) {
+            // Case 1: library joined soft-wrapped rows (isWrapped = true on next line).
+            // Re-validate against the first row only — prevents "alterminalLoading"-style
+            // false matches when a path line ends exactly at terminal width.
+            if (startY !== endY) {
+              const startX0 = link.range.start.x - 1; // 0-based cell column
+              // link.text spans rows; the first-row portion is at most (cols - startX0) chars
+              const firstRowPortion = link.text.substring(0, terminal.cols - startX0);
+              const singleRe = new RegExp('^(?:' + TerminalInstance.LINK_REGEX_SRC + ')');
+              const m = singleRe.exec(firstRowPortion);
+              if (m) {
+                enhanced.push({
+                  ...link,
+                  range: {
+                    start: link.range.start,
+                    end: { x: startX0 + m[0].length, y: startY },
+                  },
+                  text: m[0],
+                  activate: handler,
+                });
+              }
+              continue;
+            }
+
+            // Case 2: single-row link — check for hard-wrap (cross-line) continuation
+            if (endX >= terminal.cols - 2) {
               // Peek at next line(s) for continuation
               let joinedText = link.text;
               let lastY = endY;
@@ -376,6 +399,7 @@ export class TerminalInstance {
                   const endXOnLastLine = contOnLastLine ? contOnLastLine[0].length : 1;
 
                   enhanced.push({
+                    ...link,
                     range: {
                       start: link.range.start,
                       end: { x: endXOnLastLine + 1, y: lastY },
