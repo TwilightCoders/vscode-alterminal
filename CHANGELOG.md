@@ -2,6 +2,31 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.0-dev.20] — 2026-05-03
+
+### New Features
+
+- **`${bell}` and `${remote}` window title variables**: Add `${bell}` to your `window.title` to see an icon (and unread count) when background tabs ring; add `${remote}` for an uppercase remote-context label (`SSH`, `WSL`, `LOCAL`, ...).
+- **Inherit VS Code's `terminal.integrated.*` settings**: Fonts, cursor, scrollback, smooth scrolling, word separators, contrast ratio, copy-on-selection — all flow through automatically. `alterminal.*` keys override only when explicitly set.
+- **Custom settings editor**: Dedicated webview with inherited-value indicators, Alterminal-unique vs. Terminal Appearance sections, clickable `terminal.integrated.*` references that jump to VS Code's settings UI, and a description column.
+- **`alterminal.suppressFocusStealingSequences` toggle**: Default on. Strips OSC sequences (633, 133, 7, 9, 1337, DEC ?1004) that make VS Code or other apps steal focus to their own terminal. Disable if your tooling depends on these sequences passing through.
+- **Per-compile dev build counter**: Each compile increments a build number visible in the webview title strip and status bar (`Alterminal dev.N`).
+
+### Fixes
+
+- **Link underline wrapping**: When a path/URL line ended exactly at terminal width, xterm-link-provider concatenated the soft-wrapped continuation row, causing underlines to extend across two rows and false matches like `alterminal` + `Loading` → `alterminalLoading`. Multi-row library matches are now clipped to the first row.
+- **OSC 9 notifications**: Filter widened from `9;9` only (ConEmu CWD) to any `9;<payload>`, catching Windows Terminal-style notifications that some tools (e.g. Claude Code) emit and VS Code reacts to.
+- **Drop focus**: Dropping a file/folder onto a terminal now focuses that terminal so subsequent typing lands there.
+
+### Technical
+
+- **Migrated to loomptyd** (C++ PTY daemon from loompty): better PID isolation from VS Code's process tracking, hardened signal propagation, hot-restart with FD handoff so shells survive daemon restarts.
+- **xterm Unicode addon** upgraded from `unicode11` to `unicode-graphemes`.
+- **BellNotificationService extracted** into a dedicated class with its own tests.
+- **Daemon integration + layer tests** (FrameDecoder, lockfile, shellEscape, spawn, persistence, reattach).
+- **`scripts/daemon-status.sh`** diagnostic.
+- **Skip loomptyd copy+re-sign** when source unchanged (faster builds).
+
 ## [0.2.0-dev.12] — 2026-03-30
 
 ### New Features

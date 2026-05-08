@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.0-dev.19",
+  "version": "0.2.0-dev.20",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -373,12 +373,36 @@
           },
           "alterminal.fontWeight": {
             "type": "string",
-            "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+            "enum": [
+              "normal",
+              "bold",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900"
+            ],
             "markdownDescription": "Terminal font weight for normal text. Inherits from `#terminal.integrated.fontWeight#` when unset."
           },
           "alterminal.fontWeightBold": {
             "type": "string",
-            "enum": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+            "enum": [
+              "normal",
+              "bold",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900"
+            ],
             "markdownDescription": "Terminal font weight for bold text. Inherits from `#terminal.integrated.fontWeightBold#` when unset."
           },
           "alterminal.lineHeight": {
@@ -391,7 +415,11 @@
           },
           "alterminal.cursorStyle": {
             "type": "string",
-            "enum": ["block", "line", "underline"],
+            "enum": [
+              "block",
+              "line",
+              "underline"
+            ],
             "markdownDescription": "Terminal cursor style. Inherits from `#terminal.integrated.cursorStyle#` when unset."
           },
           "alterminal.cursorBlinking": {
