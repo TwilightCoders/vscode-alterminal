@@ -2,6 +2,16 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.0-dev.21] — 2026-05-09
+
+### Fixes (memory bloat)
+
+- **Loomptyd refuses to start when one is already running**. Previously, every spawn unconditionally `unlink()`'d the existing socket and bound a new one — leaving the prior daemon orphaned but alive, holding all its sessions and scrollback. Repeated VS Code reloads accumulated zombie loomptyds, each retaining hundreds of MB. New `is_socket_responsive()` probe rejects re-starts on a live socket.
+- **Loompty scrollback now caps total bytes (default 16 MiB)**, not just chunk count. The 10000-entry cap was meaningless when each entry could be 64KB; worst case was 640MB per session.
+- **PtyManager hidden-buffer caps total bytes (16 MiB / tab)** instead of only chunk count. Replay path uses a single-pass `flush()` to avoid holding the concatenated string and chunk array simultaneously.
+
+Together these can free multi-GB of extension-host and daemon memory for users who saw runaway RSS on fresh VS Code boots.
+
 ## [0.2.0-dev.20] — 2026-05-03
 
 ### New Features
