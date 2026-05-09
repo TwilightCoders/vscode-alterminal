@@ -51,6 +51,10 @@ import {
   extractUserVars,
   replaceBelWithST,
 } from "./dataPipeline";
+import { BoundedChunkBuffer } from "./boundedChunkBuffer";
+
+const HIDDEN_BUFFER_MAX_CHUNKS = 10000;
+const HIDDEN_BUFFER_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB per tab
 
 export class PtyManager {
   private _ptyProcesses = new Map<number, pty.IPty>();
@@ -83,9 +87,10 @@ export class PtyManager {
 
   private _bellDetector = new BellDetector();
 
-  // Buffer for PTY output when webview is hidden
-  private _outputBuffer = new Map<number, string[]>();
-  private _maxBufferSize = 10000; // Maximum lines to buffer per terminal
+  // Buffer for PTY output when webview is hidden. Bounded by both chunk
+  // count and total bytes — runaway output (e.g. cat'ing a large file in
+  // a hidden tab) used to retain GBs because the cap was chunk-count only.
+  private _outputBuffer = new Map<number, BoundedChunkBuffer>();
 
   // Data pipeline functions (filterVSCodeSequences, extractCwdFromOsc7,
   // extractUserVars, replaceBelWithST) and regex constants are in
@@ -244,15 +249,15 @@ export class PtyManager {
         tabId,
       });
     } else {
-      if (!this._outputBuffer.has(tabId)) {
-        this._outputBuffer.set(tabId, []);
+      let buffer = this._outputBuffer.get(tabId);
+      if (!buffer) {
+        buffer = new BoundedChunkBuffer({
+          maxChunks: HIDDEN_BUFFER_MAX_CHUNKS,
+          maxBytes: HIDDEN_BUFFER_MAX_BYTES,
+        });
+        this._outputBuffer.set(tabId, buffer);
       }
-      const buffer = this._outputBuffer.get(tabId)!;
       buffer.push(filteredData);
-      if (buffer.length > this._maxBufferSize) {
-        const excess = buffer.length - this._maxBufferSize;
-        buffer.splice(0, excess);
-      }
     }
 
     // Throttled process check (direct mode only — daemon doesn't have ptyProcess.process)
@@ -364,19 +369,19 @@ export class PtyManager {
       if (buffer.length > 0) {
         Logger.debug(`📤 Replaying ${buffer.length} buffered messages for tab ${tabId}`);
 
-        // Send all buffered data at once (joined)
-        const combinedData = buffer.join('');
+        // flush() concatenates and clears in one pass — avoids the
+        // peak-memory hit from holding the joined string and the chunks
+        // simultaneously.
+        totalReplayed += buffer.length;
         this._alterminal.webview.postMessage({
           command: "data",
-          data: combinedData,
+          data: buffer.flush(),
           tabId: tabId,
         });
-
-        totalReplayed += buffer.length;
       }
     }
 
-    // Clear all buffers after replay
+    // Clear remaining buffer entries (already flushed above).
     this._outputBuffer.clear();
 
     if (totalReplayed > 0) {
