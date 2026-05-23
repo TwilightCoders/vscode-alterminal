@@ -338,6 +338,11 @@ export class PtyManager {
     this._extensionPath = extensionPath;
   }
 
+  /** Foreground process name for a tab (e.g. "claude", "bash"), or undefined. */
+  public getProcessName(tabId: number): string | undefined {
+    return this._currentProcessNames.get(tabId);
+  }
+
   public setAlterminal(alterminal: vscode.WebviewView) {
     // Clean up previous visibility subscription
     if (this._visibilityDisposable) {

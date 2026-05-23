@@ -1,8 +1,23 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { PtyManager } from "../terminal/ptyManager";
+import { ClipboardBridge } from "../terminal/clipboardBridge";
 import { Logger } from "../utils/logger";
+
+// Process names that intercept Ctrl-V at the application layer and read
+// the system clipboard directly (i.e. understand rich paste, including
+// images). For these, drag-drop of an image routes through the clipboard
+// bridge so the bytes actually reach the app's context.
+const RICH_PASTE_APPS = /^(claude|claude-code|aider)$/i;
+
+// Process names where we positively want path injection instead of the
+// clipboard bridge — typing a quoted path is the natural drag-drop UX in
+// a shell, and Ctrl-V there would just be "literal next character."
+const KNOWN_SHELLS = /^(bash|zsh|fish|sh|dash|ksh|tcsh|csh|pwsh|powershell|cmd)$/i;
+
+const CTRL_V = "\x16";
 
 /**
  * FileOperationHandler
@@ -27,7 +42,22 @@ export class FileOperationHandler {
   }
 
   /**
-   * Handle dropped file from webview
+   * Handle dropped file from webview.
+   *
+   * Two routes:
+   *
+   * 1. **Clipboard bridge** — when the dropped file is an image AND the
+   *    foreground process is a known rich-paste app (Claude Code, etc.),
+   *    stage the image on the system clipboard and type Ctrl-V into the
+   *    PTY. The app intercepts the keystroke, reads the clipboard
+   *    directly via OS APIs, and gets the actual bytes. Same end-result
+   *    as the user pressing Ctrl-V manually after copying the image.
+   *    Clipboard is restored ~300ms later.
+   *
+   * 2. **Path injection** — for everything else (text files, shells,
+   *    vim, anything that doesn't speak rich paste), write the bytes to
+   *    /tmp and type the path. The receiving program reads the file
+   *    itself if it understands paths.
    */
   public async handleDroppedFile(
     tabId: number,
@@ -37,14 +67,66 @@ export class FileOperationHandler {
     fileData: string,
   ): Promise<void> {
     try {
-      // Route file operations to PtyManager
-      if (fileData) {
-        await this.ptyManager.sendFileData(fileData, fileName, fileType, tabId);
-      } else {
+      if (!fileData) {
         this.ptyManager.writeToPty(`Failed to read file: ${fileName}\n`, tabId);
+        return;
       }
+
+      const isImage = fileType.startsWith("image/");
+      const fgProcess = this.ptyManager.getProcessName(tabId) ?? "";
+      // Take the clipboard bridge when:
+      //   - The foreground process is a known rich-paste app, OR
+      //   - The foreground process is unknown (daemon mode doesn't surface
+      //     it; "I dropped an image" is a strong intent signal anyway).
+      // Skip when we positively know we're in a shell — path injection is
+      // the expected behavior there.
+      const fgIsRichPaste = RICH_PASTE_APPS.test(fgProcess);
+      const fgIsKnownShell = KNOWN_SHELLS.test(fgProcess);
+      const useBridge = isImage && process.platform === "darwin"
+        && (fgIsRichPaste || !fgIsKnownShell);
+
+      if (useBridge) {
+        Logger.debug(`[drop] tab=${tabId} → clipboard bridge (fg="${fgProcess}")`);
+        await this.pasteImageViaClipboard(tabId, fileName, fileData);
+        return;
+      }
+
+      await this.ptyManager.sendFileData(fileData, fileName, fileType, tabId);
     } catch (error) {
       Logger.error("Failed to handle dropped file:", error);
+    }
+  }
+
+  /**
+   * Stage an image on the macOS clipboard, send Ctrl-V to the PTY, and
+   * restore the previous clipboard. Used when the running app reads the
+   * clipboard on Ctrl-V (Claude Code, etc.) so dropped images flow into
+   * the app's rich context instead of as a typed file path.
+   */
+  private async pasteImageViaClipboard(
+    tabId: number,
+    fileName: string,
+    fileData: string,
+  ): Promise<void> {
+    const buffer = decodeFileData(fileData);
+    const safeName = path
+      .basename(fileName)
+      .replace(/[\s/\\'"`$()<>|;&*?!]+/g, "_") || "drop.png";
+    const tempPath = path.join(os.tmpdir(), `alterminal-clip-${Date.now()}-${safeName}`);
+
+    await fs.promises.writeFile(tempPath, buffer);
+    await fs.promises.chmod(tempPath, 0o644);
+
+    try {
+      await ClipboardBridge.pasteImage(tempPath, () => {
+        this.ptyManager.writeToPty(CTRL_V, tabId);
+      });
+    } finally {
+      // Give the receiving app time to read clipboard + copy bytes
+      // into its own cache before the tmp file disappears.
+      setTimeout(() => {
+        fs.promises.unlink(tempPath).catch(() => {});
+      }, 5_000);
     }
   }
 
@@ -139,4 +221,13 @@ export class FileOperationHandler {
     Logger.warn(`Cannot resolve relative path without workspace: ${filePath}`);
     return null;
   }
+}
+
+function decodeFileData(fileData: string): Buffer {
+  if (fileData.startsWith("data:")) {
+    // "data:image/png;base64,iVBOR..." — strip the header, decode payload.
+    const base64 = fileData.split(",")[1] ?? "";
+    return Buffer.from(base64, "base64");
+  }
+  return Buffer.from(fileData, "utf8");
 }
