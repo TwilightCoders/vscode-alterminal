@@ -11,7 +11,7 @@
  * dismisses it.
  */
 
-import { CODICON_NAMES } from "../generated/codicons";
+import { CODICON_NAMES } from "../generated/codicons.js";
 
 export type IconPickerSelectHandler = (tabId: number, icon: string) => void;
 
