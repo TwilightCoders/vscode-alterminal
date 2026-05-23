@@ -236,46 +236,21 @@ export class TabContextMenuHandler {
         return;
       }
 
-      // Common codicons for terminals
-      const iconOptions = [
-        { label: "$(terminal)", description: "Terminal" },
-        { label: "$(console)", description: "Console" },
-        { label: "$(server)", description: "Server" },
-        { label: "$(database)", description: "Database" },
-        { label: "$(tools)", description: "Tools" },
-        { label: "$(play)", description: "Run/Build" },
-        { label: "$(bug)", description: "Debug" },
-        { label: "$(gear)", description: "Settings" },
-        { label: "$(rocket)", description: "Deploy" },
-        { label: "$(beaker)", description: "Test" },
-        { label: "$(package)", description: "Package" },
-        { label: "$(pulse)", description: "Watch" },
-      ];
-
-      const selected = await vscode.window.showQuickPick(iconOptions, {
-        placeHolder: "Select an icon for this tab",
-        matchOnDescription: true,
-      });
-
-      if (!selected) {
-        return;
-      }
-
+      // The picker lives in the webview now — full searchable grid of all
+      // ~525 codicons instead of the old 12-item QuickPick. The webview
+      // applies the chosen icon directly through its tabManager.setTabIcon
+      // path, so no postMessage round-trip back to the host is needed.
       const webview = this.getWebview();
       if (webview) {
-        // Send icon update to webview
         webview.postMessage({
-          command: "setTabIcon",
+          command: "openIconPicker",
           tabId: parseInt(tabId),
-          icon: selected.label,
         });
-
-        Logger.info(`Set icon for tab ${tabId} to ${selected.label}`);
       }
     } catch (error) {
-      Logger.error("Failed to set tab icon:", error);
+      Logger.error("Failed to open icon picker:", error);
       vscode.window.showErrorMessage(
-        "Failed to set tab icon. Please try again.",
+        "Failed to open icon picker. Please try again.",
       );
     }
   }

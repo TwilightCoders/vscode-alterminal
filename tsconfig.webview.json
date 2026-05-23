@@ -5,6 +5,6 @@
     "outDir": "out-webview",
     "rootDir": "src"
   },
-  "include": ["src/webview/**/*", "src/constants.ts"],
+  "include": ["src/webview/**/*", "src/constants.ts", "src/generated/codicons.ts"],
   "exclude": ["node_modules", ".vscode-test", "vendor"]
 }

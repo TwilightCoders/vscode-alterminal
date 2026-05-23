@@ -29,6 +29,7 @@ export interface MessageHandlerCallbacks {
   updateTabLabel: (tabId: number, label: string) => void;
   startTabRename: (tabId: number) => void;
   setTabIcon: (tabId: number, icon: string) => void;
+  openIconPicker: (tabId: number) => void;
   handleGetTabBuffer: (tabId: number) => void;
   saveActiveCommand: () => void;
   
@@ -198,6 +199,11 @@ export class MessageHandler {
         case "setTabIcon":
           Logger.debug("🎨 Received set tab icon request:", message.tabId, message.icon);
           this.callbacks.setTabIcon(message.tabId, message.icon);
+          break;
+
+        case "openIconPicker":
+          Logger.debug("🎨 Opening icon picker for tab:", message.tabId);
+          this.callbacks.openIconPicker(message.tabId);
           break;
 
         case "getTabBuffer":

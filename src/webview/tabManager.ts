@@ -5,6 +5,7 @@ import { MessageHandler, MessageHandlerCallbacks } from "./messageHandler.js";
 import { KeyboardManager } from "./keyboardManager.js";
 import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
+import { IconPickerModal } from "./iconPickerModal.js";
 import { Debouncer } from "../utils/debouncer.js";
 
 /**
@@ -49,6 +50,7 @@ export class TabManager {
   private _keyboardManager: KeyboardManager;
   private _tabUIManager: TabUIManager;
   private _layoutManager: LayoutManager;
+  private _iconPickerModal: IconPickerModal;
   private _visibilityHandler: (() => void) | null = null;
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingTitleOpts = new Map<number, Record<string, any>>();
@@ -76,6 +78,9 @@ export class TabManager {
     this._alwaysShowTabs = false;
 
     this._initTimeoutId = null;
+
+    // Icon picker modal — full codicon grid, replaces the old 12-item QuickPick.
+    this._iconPickerModal = new IconPickerModal((tabId, icon) => this.setTabIcon(tabId, icon));
 
     // Initialize message handler with callbacks
     this._messageHandler = new MessageHandler(vscode, this._createMessageCallbacks());
@@ -157,6 +162,7 @@ export class TabManager {
       updateTabLabel: (tabId, label) => this.updateTabLabel(tabId, label),
       startTabRename: (tabId) => this.startTabRename(tabId),
       setTabIcon: (tabId, icon) => this.setTabIcon(tabId, icon),
+      openIconPicker: (tabId) => this._iconPickerModal.open(tabId),
       handleGetTabBuffer: (tabId) => this.handleGetTabBuffer(tabId),
       updateTabBarVisibility: () => this.updateTabBarVisibility(),
       updateSaveButtonVisibility: (cmd, saved) => this.updateSaveButtonVisibility(cmd, saved),
