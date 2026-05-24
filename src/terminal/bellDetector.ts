@@ -1,7 +1,10 @@
 /**
  * Detects bare BEL characters (\x07) in PTY data streams while correctly
  * ignoring \x07 used as OSC sequence terminators — even when data is
- * chunked across multiple onData events.
+ * chunked across multiple onData events. Also detects "agent needs
+ * input" notification escapes (iTerm2 OSC 9, kitty OSC 99, ghostty
+ * OSC 777) emitted by tools like Claude Code when they finish a turn
+ * and want attention. These count as bells for badging purposes.
  */
 
 // Matches complete OSC sequences: \x1b] ... \x07  or  \x1b] ... \x1b\\
@@ -11,13 +14,31 @@ const OSC_PATTERN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 // ]digits; ... \x07  — covers ]8;;\x07, ]7;uri\x07, etc.
 const PARTIAL_OSC_PATTERN = /\][0-9]+;[^\x07]*\x07/g;
 
+// Notification escapes from Claude Code / iTerm2-compatible tools.
+// OSC 9 with first field non-numeric (or anything but `4;`) is a
+// notification; OSC 9;4;<state>;<percent>\x07 is the iTerm2 progress-bar
+// sub-protocol and MUST NOT trigger a bell (Claude emits these every
+// few seconds during long tool calls — would false-flash constantly).
+// OSC 99 is kitty's notification protocol; OSC 777 is ghostty's.
+// Both terminator forms are accepted (\x07 or \x1b\\).
+const NOTIFY_OSC_PATTERN = /\x1b\](?:9(?!;4;)|99|777);[^\x07\x1b]*(?:\x07|\x1b\\)/;
+
 export class BellDetector {
   private _pendingOsc = new Map<number, boolean>();
 
   /**
-   * Process a chunk of PTY data and return whether a real BEL was detected.
+   * Process a chunk of PTY data and return whether a real BEL was detected
+   * — either a bare \x07 (traditional bell) or an OSC-9/99/777
+   * notification ("agent needs input") emitted by Claude Code et al.
    */
   detect(tabId: number, data: string): boolean {
+    // Notification escapes count as bells. Check first because the OSC
+    // stripping below would otherwise erase them.
+    if (NOTIFY_OSC_PATTERN.test(data)) {
+      this._updateOscState(tabId, data);
+      return true;
+    }
+
     if (data.indexOf("\x07") === -1) {
       this._updateOscState(tabId, data);
       return false;

@@ -128,6 +128,17 @@ export class TabUIManager {
     const tabContent = tabTitleManager.createTabTitle(label);
     tab.appendChild(tabContent);
 
+    // Right-side close button slot. Mirrors VS Code editor tab pattern:
+    // shows × on active tab or on hover; an activity dot is rendered in
+    // its place (via CSS) when the tab has unread background output.
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "tab-close codicon codicon-close";
+    closeBtn.setAttribute("type", "button");
+    closeBtn.setAttribute("aria-label", `Close ${label}`);
+    closeBtn.setAttribute("title", "Close");
+    closeBtn.setAttribute("tabindex", "-1");
+    tab.appendChild(closeBtn);
+
     // Append to the end of the tab list
     tabList.appendChild(tab);
   }
@@ -195,6 +206,16 @@ export class TabUIManager {
       // Click handlers
       tabBar.addEventListener("click", (e) => {
         const target = e.target as HTMLElement;
+        // Close button takes precedence over tab-click (so clicking × doesn't
+        // also switch to the tab being closed).
+        if (target.classList.contains("tab-close")) {
+          const tab = target.closest(".tab") as HTMLElement | null;
+          const tabId = tab?.dataset.tabId ? parseInt(tab.dataset.tabId) : NaN;
+          if (!isNaN(tabId)) this._callbacks.closeTab(tabId);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         // Handle tab icon clicks (show dropdown or handle notification)
         if (
           target.classList.contains("tab-icon") ||
@@ -535,6 +556,22 @@ export class TabUIManager {
     if (tabTitleManager) {
       tabTitleManager.hideNotification();
     }
+  }
+
+  /**
+   * Show background-activity indicator for a tab (output without bell).
+   */
+  showActivity(tabId: number): void {
+    const titleManagers = this._callbacks.getTitleManagers();
+    titleManagers?.get(tabId)?.showActivity();
+  }
+
+  /**
+   * Clear background-activity indicator for a tab.
+   */
+  hideActivity(tabId: number): void {
+    const titleManagers = this._callbacks.getTitleManagers();
+    titleManagers?.get(tabId)?.hideActivity();
   }
 
   /**

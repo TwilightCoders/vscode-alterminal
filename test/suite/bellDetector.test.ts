@@ -118,4 +118,74 @@ suite("BellDetector Test Suite", () => {
   test("empty string is safe", () => {
     assert.strictEqual(detector.detect(1, ""), false);
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Agent-notification escapes (Claude Code, etc.)
+  // ──────────────────────────────────────────────────────────────────
+
+  test("detects iTerm2 OSC 9 notification (Claude end-of-turn)", () => {
+    assert.strictEqual(
+      detector.detect(1, "\x1b]9;Claude is waiting for your input\x07"),
+      true,
+    );
+  });
+
+  test("detects iTerm2 OSC 9 with ST terminator", () => {
+    assert.strictEqual(
+      detector.detect(1, "\x1b]9;some message\x1b\\"),
+      true,
+    );
+  });
+
+  test("ignores OSC 9;4 progress sequences (NOT a bell)", () => {
+    // iTerm2 progress-bar sub-protocol — Claude emits these during long tool calls.
+    // Must NOT trigger a bell or every long operation false-flashes.
+    assert.strictEqual(
+      detector.detect(1, "\x1b]9;4;1;50\x07"),
+      false,
+    );
+  });
+
+  test("ignores OSC 9;4 progress with ST terminator", () => {
+    assert.strictEqual(
+      detector.detect(1, "\x1b]9;4;1;25\x1b\\"),
+      false,
+    );
+  });
+
+  test("detects kitty OSC 99 notification", () => {
+    assert.strictEqual(
+      detector.detect(1, "\x1b]99;d=1:p=title;Claude needs input\x07"),
+      true,
+    );
+  });
+
+  test("detects ghostty OSC 777 notification", () => {
+    assert.strictEqual(
+      detector.detect(1, "\x1b]777;notify;Claude Code;Awaiting input\x07"),
+      true,
+    );
+  });
+
+  test("OSC 9 mixed with regular output still triggers bell", () => {
+    assert.strictEqual(
+      detector.detect(1, "some output\n\x1b]9;Claude is waiting\x07more output\n"),
+      true,
+    );
+  });
+
+  test("BEL fires even when chunk also contains OSC 9 progress", () => {
+    // Progress alone wouldn't fire; bare BEL still should.
+    assert.strictEqual(
+      detector.detect(1, "\x1b]9;4;1;75\x07hello\x07"),
+      true,
+    );
+  });
+
+  test("OSC 9 from a different tab is still detected", () => {
+    assert.strictEqual(
+      detector.detect(42, "\x1b]9;Claude is waiting for your input\x07"),
+      true,
+    );
+  });
 });

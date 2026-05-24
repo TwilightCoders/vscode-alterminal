@@ -152,6 +152,7 @@ export class WebViewLifecycleManager {
       alwaysShowTabs: c.alwaysShowTabs,
       clearSelectionOnCopy: c.clearSelectionOnCopy,
       scrollback: c.scrollback,
+      bellAwareTimeoutMinutes: c.bellAwareTimeoutMinutes,
       terminalAppearance: {
         fontFamily: c.fontFamily,
         fontSize: c.fontSize,

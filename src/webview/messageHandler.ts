@@ -30,6 +30,7 @@ export interface MessageHandlerCallbacks {
   startTabRename: (tabId: number) => void;
   setTabIcon: (tabId: number, icon: string) => void;
   openIconPicker: (tabId: number) => void;
+  debugPasteImageBytes: () => void;
   handleGetTabBuffer: (tabId: number) => void;
   saveActiveCommand: () => void;
   
@@ -53,6 +54,7 @@ export interface MessageHandlerCallbacks {
   findTabIdByCommand: (cmd: string) => number | null;
   reportPerformance: () => void;
   applyTerminalAppearance?: (appearance: Record<string, unknown>) => void;
+  setBellAwareTimeout?: (minutes: number) => void;
 }
 
 /**
@@ -204,6 +206,11 @@ export class MessageHandler {
         case "openIconPicker":
           Logger.debug("🎨 Opening icon picker for tab:", message.tabId);
           this.callbacks.openIconPicker(message.tabId);
+          break;
+
+        case "debugPasteImageBytes":
+          Logger.debug("🧪 Debug: paste image bytes via bracketed paste");
+          this.callbacks.debugPasteImageBytes();
           break;
 
         case "getTabBuffer":
@@ -414,6 +421,12 @@ export class MessageHandler {
       }
       if (typeof message.config.scrollback === "number") {
         (window as any).scrollbackLines = message.config.scrollback;
+      }
+      if (typeof message.config.bellAwareTimeoutMinutes === "number") {
+        (window as any).bellAwareTimeoutMinutes = message.config.bellAwareTimeoutMinutes;
+        if (typeof this.callbacks.setBellAwareTimeout === "function") {
+          this.callbacks.setBellAwareTimeout(message.config.bellAwareTimeoutMinutes);
+        }
       }
       // Terminal appearance settings — stash on window for terminal.ts
       // to pick up on next terminal construction, and push live to any

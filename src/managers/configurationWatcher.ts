@@ -72,6 +72,7 @@ export class ConfigurationWatcher {
       tabTitleTemplate: config.get<string>("tabTitle.template", "{base}{p? • {p}}"),
       tabTitleMaxLength: config.get<number>("tabTitle.maxLength", 50),
       tabTitleTruncateMode: config.get<string>("tabTitle.truncateMode", "end"),
+      bellAwareTimeoutMinutes: config.get<number>("bellAwareTimeoutMinutes", 60),
 
       // Inherited from terminal.integrated.* unless explicitly overridden
       scrollback: getInheritedSetting("terminal.scrollback", "scrollback", 1000),
@@ -118,6 +119,7 @@ export interface AlterminalConfig {
   tabTitleTemplate: string;
   tabTitleMaxLength: number;
   tabTitleTruncateMode: string;
+  bellAwareTimeoutMinutes: number;
 
   // Inherited from VS Code's terminal.integrated unless overridden
   scrollback: number;

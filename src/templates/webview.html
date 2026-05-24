@@ -310,31 +310,96 @@
 
         .tab-icon.notification {
             color: #ff8c00;
-            animation: pulse-notification 2s infinite;
         }
 
         .tab.active .tab-icon.notification {
-            animation: none;
             color: var(--vscode-tab-activeForeground, #ffffff);
         }
 
-        @keyframes pulse-notification {
-            0% { 
-                color: #ff8c00;
-                transform: scale(1);
-            }
-            50% { 
-                color: #ffb347;
-                transform: scale(1.1);
-            }
-            100% { 
-                color: #ff8c00;
-                transform: scale(1);
-            }
+        .tab.active .tab-icon.notification .codicon {
+            animation: none;
         }
 
+        /* Close button — mirrors VS Code's editor tab close-button pattern.
+           Visible on active tab and on tab hover; reserves space always so
+           the label width doesn't jump on hover. */
+        .tab-close {
+            font-size: 14px;
+            line-height: 1;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            padding: 0;
+            margin-left: 6px;
+            border: none;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            visibility: hidden;
+            position: relative;
+        }
+
+        .tab.active .tab-close,
+        .tab:hover .tab-close {
+            visibility: visible;
+        }
+
+        .tab-close:hover {
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            color: var(--vscode-tab-activeForeground, #ffffff);
+        }
+
+        /* Background activity: dot rendered in the close-button slot,
+           replaces × until the user hovers the tab. Same VS Code "dirty
+           file" pattern. */
+        .tab.activity .tab-close {
+            visibility: visible;
+        }
+
+        .tab.activity .tab-close::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .tab.activity:hover .tab-close::before {
+            content: "\ea76";
+            position: static;
+            transform: none;
+            width: auto;
+            height: auto;
+            border-radius: 0;
+            background: none;
+        }
+
+        /* Bell-swing — animate the bell glyph itself, pivoted from the top.
+           Damped: a few decreasing swings, then a quiet pause before the
+           next ring, like a clapper that's been struck. */
         .tab-icon.notification .codicon {
-            transition: all 0.3s ease;
+            display: inline-block;
+            transform-origin: 50% 0%;
+            animation: bell-ring 2.4s ease-in-out infinite;
+        }
+
+        @keyframes bell-ring {
+            0%   { transform: rotate(0); }
+            6%   { transform: rotate(-22deg); }
+            14%  { transform: rotate(18deg); }
+            22%  { transform: rotate(-12deg); }
+            30%  { transform: rotate(8deg); }
+            38%  { transform: rotate(-4deg); }
+            46%, 100% { transform: rotate(0); }
         }
 
         .tab-dropdown {
@@ -681,6 +746,67 @@
             font-size: 11px;
             color: var(--vscode-descriptionForeground, #999);
         }
+
+        /* Floating search bar — matches VS Code's find widget styling */
+        .search-bar {
+            position: absolute;
+            top: 6px;
+            right: 14px;
+            /* Above terminal instances (z 10) and the drop overlay (z 5000),
+               within the terminal area. It sits below the tab bar by virtue
+               of being inside .terminal-container, so it doesn't need to beat
+               the tab bar's z-index. */
+            z-index: 6000;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 6px;
+            background: var(--vscode-editorWidget-background, #252526);
+            border: 1px solid var(--vscode-editorWidget-border, #454545);
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
+            color: var(--vscode-editorWidget-foreground, #cccccc);
+            font-size: 12px;
+        }
+        .search-bar[hidden] { display: none; }
+        .search-input {
+            background: var(--vscode-input-background, #3c3c3c);
+            color: var(--vscode-input-foreground, #cccccc);
+            border: 1px solid var(--vscode-input-border, transparent);
+            border-radius: 2px;
+            padding: 2px 6px;
+            font: inherit;
+            outline: none;
+            min-width: 200px;
+        }
+        .search-input:focus {
+            border-color: var(--vscode-focusBorder, #007fd4);
+        }
+        .search-count {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #999);
+            min-width: 56px;
+            text-align: right;
+        }
+        .search-btn {
+            background: transparent;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 2px 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .search-btn:hover {
+            background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+        }
+        .search-btn:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
     </style>
 </head>
 <body>
@@ -698,12 +824,27 @@
         <main class="terminal-container">
             <!-- Terminal instances will be dynamically created here -->
             <div class="version-display">v{{version}}</div>
+            <!-- Floating search bar — anchored to the terminal area so it
+                 sits below the tab bar; bound to the active terminal's SearchAddon -->
+            <div id="search-bar" class="search-bar" hidden>
+                <input type="text" id="search-input" class="search-input" placeholder="Find" aria-label="Find in terminal" />
+                <span id="search-count" class="search-count"></span>
+                <button type="button" class="search-btn" id="search-prev" title="Previous match (Shift+Enter)" aria-label="Previous match">
+                    <span class="codicon codicon-arrow-up"></span>
+                </button>
+                <button type="button" class="search-btn" id="search-next" title="Next match (Enter)" aria-label="Next match">
+                    <span class="codicon codicon-arrow-down"></span>
+                </button>
+                <button type="button" class="search-btn" id="search-close" title="Close (Esc)" aria-label="Close search">
+                    <span class="codicon codicon-close"></span>
+                </button>
+            </div>
         </main>
     </div>
     <!-- Global file drop overlay -->
     <div class="terminal-overlay" id="file-drop-overlay">
     </div>
-    
+
     <!-- Load xterm.js and addons -->
     <script src="{{xtermUri}}"></script>
     <script src="{{fitAddonUri}}"></script>
@@ -711,6 +852,7 @@
     <script src="{{webLinksAddonUri}}"></script>
     <script src="{{serializeAddonUri}}"></script>
     <script src="{{unicodeAddonUri}}"></script>
+    <script src="{{searchAddonUri}}"></script>
     <script type="module">
         // Import and make LinkProvider globally available for other modules
         import { LinkProvider } from '{{linkProviderUri}}';

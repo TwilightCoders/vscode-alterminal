@@ -7,13 +7,11 @@ import {
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 class FakeBellNotificationHost implements BellNotificationHost {
-  public readonly notifications: Array<{ action: string; message: string }> = [];
-  public readonly postedMessages: any[] = [];
+  public readonly publishedBells: string[] = [];
   public indicator = "\u{1F514}";
   public nowValue = 0;
-  public openTerminalCalls = 0;
   public titleIndicator = "";
-  public notificationSelection: string | undefined;
+  public windowFocused = false;
 
   private nextTimerId = 1;
   private readonly timers = new Map<number, { callback: () => void; dueAt: number }>();
@@ -26,21 +24,16 @@ class FakeBellNotificationHost implements BellNotificationHost {
     return this.indicator;
   }
 
-  public getWebview() {
-    return {
-      postMessage: async (message: any) => {
-        this.postedMessages.push(message);
-        return true;
-      },
-    } as any;
+  public isWindowFocused(): boolean {
+    return this.windowFocused;
   }
 
   public now(): number {
     return this.nowValue;
   }
 
-  public async openTerminal(): Promise<void> {
-    this.openTerminalCalls += 1;
+  public publishBell(body: string): void {
+    this.publishedBells.push(body);
   }
 
   public setTimer(callback: () => void, delayMs: number): TimerHandle {
@@ -51,11 +44,6 @@ class FakeBellNotificationHost implements BellNotificationHost {
 
   public setTitleIndicator(value: string): void {
     this.titleIndicator = value;
-  }
-
-  public showNotification(message: string, action: string): Promise<string | undefined> {
-    this.notifications.push({ action, message });
-    return Promise.resolve(this.notificationSelection);
   }
 
   public advance(ms: number): void {
@@ -94,9 +82,8 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 suite("BellNotificationService", () => {
-  test("debounces multiple bells into one notification", async () => {
+  test("debounces multiple bells into one published bell", async () => {
     const host = new FakeBellNotificationHost();
-    host.notificationSelection = "Go to Terminal";
     const service = new BellNotificationService(host);
 
     service.handleBellSound(1, "Build");
@@ -104,42 +91,68 @@ suite("BellNotificationService", () => {
     service.handleBellSound(2, "Logs");
 
     assert.strictEqual(host.titleIndicator, "\u{1F514}2");
-    assert.strictEqual(host.notifications.length, 0);
+    assert.strictEqual(host.publishedBells.length, 0);
 
     host.advance(3000);
     await flushMicrotasks();
 
-    assert.deepStrictEqual(host.notifications, [
-      { action: "Go to Terminal", message: "2 terminals: Build, Logs" },
-    ]);
-    assert.strictEqual(host.openTerminalCalls, 1);
-    assert.strictEqual(host.titleIndicator, "");
-
-    host.advance(200);
-    await flushMicrotasks();
-
-    assert.deepStrictEqual(host.postedMessages, [
-      { command: "switchToTab", tabId: 2 },
-    ]);
+    assert.deepStrictEqual(host.publishedBells, ["2 terminals: Build, Logs"]);
+    assert.strictEqual(host.titleIndicator, "\u{1F514}2");
   });
 
-  test("suppresses repeat notifications during cooldown", () => {
+  test("does not raise title or publish when window is focused", async () => {
+    const host = new FakeBellNotificationHost();
+    host.windowFocused = true;
+    const service = new BellNotificationService(host);
+
+    service.handleBellSound(1, "Build");
+    host.advance(3000);
+    await flushMicrotasks();
+
+    // Window is focused — user is present, the per-tab icon is enough.
+    assert.strictEqual(host.titleIndicator, "");
+    assert.strictEqual(host.publishedBells.length, 0);
+  });
+
+  test("raises title bell when window is unfocused", () => {
+    const host = new FakeBellNotificationHost();
+    host.windowFocused = false;
+    const service = new BellNotificationService(host);
+
+    service.handleBellSound(1, "Build");
+
+    assert.strictEqual(host.titleIndicator, "\u{1F514}");
+  });
+
+  test("suppresses publish if window gains focus during debounce", async () => {
+    const host = new FakeBellNotificationHost();
+    host.windowFocused = false;
+    const service = new BellNotificationService(host);
+
+    service.handleBellSound(1, "Build");
+    // User switches into this window before the debounced publish fires.
+    host.windowFocused = true;
+    host.advance(3000);
+    await flushMicrotasks();
+
+    assert.strictEqual(host.publishedBells.length, 0);
+  });
+
+  test("suppresses repeat publishes during cooldown", () => {
     const host = new FakeBellNotificationHost();
     const service = new BellNotificationService(host);
 
     service.handleBellSound(1, "Build");
     host.advance(3000);
 
-    assert.deepStrictEqual(host.notifications, [
-      { action: "Go to Terminal", message: "Build" },
-    ]);
+    assert.deepStrictEqual(host.publishedBells, ["Build"]);
     assert.strictEqual(host.titleIndicator, "\u{1F514}");
 
     host.advance(1000);
     service.handleBellSound(1, "Build");
     host.advance(3000);
 
-    assert.strictEqual(host.notifications.length, 1);
+    assert.strictEqual(host.publishedBells.length, 1);
     assert.strictEqual(host.titleIndicator, "\u{1F514}");
   });
 
@@ -150,7 +163,7 @@ suite("BellNotificationService", () => {
     service.handleBellSound(1, "Build");
     service.clearBellIndicator();
 
-    assert.strictEqual(host.notifications.length, 0);
+    assert.strictEqual(host.publishedBells.length, 0);
     assert.strictEqual(host.titleIndicator, "\u{1F514}");
 
     host.advance(1999);

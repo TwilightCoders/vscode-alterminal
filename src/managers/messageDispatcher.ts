@@ -24,6 +24,9 @@ export interface PerformanceData {
  */
 export class MessageDispatcher {
   private readonly bellNotifications: BellNotificationService;
+  // Set by the provider once the per-window cross-window-bell coordinator
+  // exists. Until then, publishing is a no-op.
+  private _crossWindowPublish: (body: string) => void = () => {};
 
   constructor(
     private readonly ptyManager: PtyManager,
@@ -39,8 +42,13 @@ export class MessageDispatcher {
     private readonly onInteraction?: () => void,
   ) {
     this.bellNotifications = new BellNotificationService(
-      createBellNotificationHost(this.getWebview, this.openTerminal),
+      createBellNotificationHost((body) => this._crossWindowPublish(body)),
     );
+  }
+
+  /** Wire the cross-window bell publisher (called by the provider). */
+  public setCrossWindowPublish(fn: (body: string) => void): void {
+    this._crossWindowPublish = fn;
   }
 
   /**
@@ -166,6 +174,8 @@ export class MessageDispatcher {
 
   public handleBellSound(tabId: number, tabLabel: string): void {
     this.bellNotifications.handleBellSound(tabId, tabLabel);
+    // Also notify the webview so the in-tab bell icon shows
+    this.getWebview()?.postMessage({ command: "bell", tabId });
   }
 
   /**

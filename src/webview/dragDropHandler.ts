@@ -137,6 +137,34 @@ export class DragDropHandler {
       // Get the active terminal ID from TabManager
       const activeTabId = this.tabManager ? this.tabManager.activeTabId : 1;
 
+      // FULL DIAGNOSTIC: dump every DataTransfer type and its value.
+      // Looking for any vscode-internal type that carries the OS path,
+      // bypassing the webview sandbox's stripping of File.path / uri-list.
+      const allTypes: Record<string, string> = {};
+      for (const t of Array.from(e.dataTransfer.types)) {
+        try {
+          allTypes[t] = e.dataTransfer.getData(t);
+        } catch (err) {
+          allTypes[t] = `<getData threw: ${err}>`;
+        }
+      }
+      console.log("[drag-drop] all dataTransfer types & values:", allTypes);
+      console.log("[drag-drop] files:", Array.from(e.dataTransfer.files).map((f) => ({
+        name: f.name,
+        type: f.type,
+        size: f.size,
+        path: (f as any).path,
+        webkitRelativePath: (f as any).webkitRelativePath,
+      })));
+      // Also check items (newer API with kinds like "string"/"file")
+      if (e.dataTransfer.items) {
+        const items = Array.from(e.dataTransfer.items).map((it) => ({
+          kind: it.kind,
+          type: it.type,
+        }));
+        console.log("[drag-drop] items:", items);
+      }
+
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
         const file = e.dataTransfer.files[i];
         await this.processDroppedFile(file, activeTabId);

@@ -34,6 +34,8 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   private _commandManager: CommandManager;
   private _serializer?: WebviewViewSerializer;
   private _tabTitleProvider = new TabTitleProvider();
+  /** Last rendered title per tab — used to label bell notifications. */
+  private _tabTitles = new Map<number, string>();
 
   // Managers
   private stateManager: StateManager;
@@ -97,7 +99,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
 
     // Wire PTY-side bell detection to notification handler
     this._ptyManager.onBell((tabId) =>
-      this.messageDispatcher.handleBellSound(tabId, `Tab ${tabId}`),
+      this.messageDispatcher.handleBellSound(
+        tabId,
+        this._tabTitles.get(tabId) || `Tab ${tabId}`,
+      ),
     );
 
     // WebViewLifecycleManager needs MessageDispatcher
@@ -195,6 +200,10 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         timestamp: new Date(),
         userVars: msg.userVars,
       });
+
+      if (typeof msg.tabId === "number" && title) {
+        this._tabTitles.set(msg.tabId, title);
+      }
 
       this._view?.webview.postMessage({
         command: "formatTabTitleResponse",
@@ -311,6 +320,14 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    */
   public sendFilePath(filePath: string, tabId: number): void {
     this.fileOperationHandler.sendFilePath(tabId, filePath);
+  }
+
+  /**
+   * Get the active webview (if any). DEBUG-only accessor for commands
+   * that need to post messages directly to the webview.
+   */
+  public getWebview(): vscode.Webview | undefined {
+    return this._view?.webview;
   }
 
   /**

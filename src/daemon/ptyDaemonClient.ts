@@ -28,6 +28,21 @@ export interface PtyDaemonClientEvents {
   disconnected: () => void;
 }
 
+/**
+ * Frame types that answer a request and so participate in id-correlation.
+ * Anything else (exit, bell, and unsolicited user_data broadcasts) is an
+ * event, never a response — even if it carries an `id`.
+ */
+const RESPONSE_TYPES = new Set<string>([
+  "auth_ok",
+  "spawned",
+  "ptyList",
+  "attached",
+  "pong",
+  "renamed",
+  "error",
+]);
+
 /** Env vars to forward to daemon-spawned sessions via command prefix. */
 const FORWARD_ENV_KEYS = [
   "TERM",
@@ -136,10 +151,19 @@ export class PtyDaemonClient extends EventEmitter {
     this._controlSocket = null;
   }
 
-  /** Request a graceful daemon restart with PTY handoff. */
-  async handoff(): Promise<void> {
-    const id = this._nextId();
-    await this._request({ type: "handoff", id });
+  /**
+   * Tell the daemon to hand off all sessions to a successor daemon
+   * listening at `successorSocketPath`, then shut itself down.
+   *
+   * Fire-and-forget: on success the daemon transfers sessions (SCM_RIGHTS)
+   * and shuts down WITHOUT replying (PROTOCOL §4.11), which closes this
+   * connection; on failure it sends an error frame and keeps running. We
+   * don't await — the caller polls the canonical control socket to find
+   * whichever daemon (successor on success, original on failure) ends up
+   * serving it.
+   */
+  handoff(successorSocketPath: string): void {
+    this._sendControl({ type: "handoff", socket: successorSocketPath });
   }
 
   /**
@@ -245,11 +269,23 @@ export class PtyDaemonClient extends EventEmitter {
   }
 
   /**
-   * Reattach to an existing PTY, opening a raw data socket.
-   * Scrollback is automatically replayed as the first data received.
+   * Attach to an existing PTY, opening a raw data socket. The daemon
+   * replays full scrollback as the first data received — use for a fresh
+   * client that wants the history (new window, reload, cold connect).
    */
-  async attach(ptyId: string): Promise<void> {
-    await this._attachSession(ptyId);
+  async attach(ptyId: string, opts?: { rows?: number; cols?: number }): Promise<void> {
+    await this._attachSession(ptyId, "attach", opts);
+  }
+
+  /**
+   * Resume-only reattach: open the raw data socket WITHOUT replaying
+   * scrollback. For a client that already holds the buffer and just needs
+   * the live stream back (e.g. after a daemon handoff). Avoids the
+   * full-buffer repaint that `attach` would cause on an already-populated
+   * terminal. Requires daemon support for the `reattach` control type.
+   */
+  async reattach(ptyId: string, opts?: { rows?: number; cols?: number }): Promise<void> {
+    await this._attachSession(ptyId, "reattach", opts);
   }
 
   /** Ping the daemon. Returns true if alive. */
@@ -316,8 +352,16 @@ export class PtyDaemonClient extends EventEmitter {
 
   /** Handle messages on the control socket (responses + events). */
   private _handleControlMessage(msg: DaemonMessage): void {
-    // Check if this is a response to a pending request
-    if ("id" in msg && msg.id !== undefined && this._pending.has(msg.id)) {
+    // Correlate to a pending request ONLY for genuine response types.
+    // loompty can push unsolicited `user_data` (and other) frames to every
+    // authenticated client (PROTOCOL.md §4.12); those must never be mistaken
+    // for a response just because they happen to carry a matching `id`.
+    if (
+      RESPONSE_TYPES.has(msg.type) &&
+      "id" in msg &&
+      msg.id !== undefined &&
+      this._pending.has(msg.id)
+    ) {
       const { resolve } = this._pending.get(msg.id)!;
       this._pending.delete(msg.id);
       resolve(msg);
@@ -353,7 +397,11 @@ export class PtyDaemonClient extends EventEmitter {
    * session. After the attach handshake, the socket transitions to raw
    * mode — all reads are PTY output, all writes go to PTY stdin.
    */
-  private _attachSession(ptyId: string): Promise<void> {
+  private _attachSession(
+    ptyId: string,
+    mode: "attach" | "reattach" = "attach",
+    opts?: { rows?: number; cols?: number },
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       // Close existing session socket if any
       const existing = this._sessionSockets.get(ptyId);
@@ -380,12 +428,16 @@ export class PtyDaemonClient extends EventEmitter {
               const dm = msg as DaemonMessage;
               if (dm.type === "auth_ok") {
                 phase = "attach";
-                // Phase 2: send attach
+                // Phase 2: send attach/reattach (with dims when known so
+                // the daemon resizes before any replay — and corrects the
+                // rows+1 it applies on handoff adopt).
                 const attachId = this._nextId();
                 socket.write(encodeMessage({
-                  type: "attach",
+                  type: mode,
                   id: attachId,
                   name: ptyId,
+                  ...(opts?.rows ? { rows: opts.rows } : {}),
+                  ...(opts?.cols ? { cols: opts.cols } : {}),
                 }));
                 return;
               }

@@ -14,6 +14,7 @@ import { VSCODE_SHORTCUTS } from "../constants.js";
 export interface KeyboardManagerCallbacks {
   clearActiveTerminal: () => void;
   resetActiveTerminal: () => void;
+  openSearch?: () => void;
 }
 
 export class KeyboardManager {
@@ -76,6 +77,19 @@ export class KeyboardManager {
       event.preventDefault();
       event.stopPropagation();
       this.callbacks.clearActiveTerminal();
+      return false;
+    }
+
+    // Search active terminal: Cmd+F (Mac) or Ctrl+F (Win/Linux)
+    if (
+      event.key === "f" &&
+      ((isMac && event.metaKey) || (!isMac && event.ctrlKey)) &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.callbacks.openSearch?.();
       return false;
     }
 

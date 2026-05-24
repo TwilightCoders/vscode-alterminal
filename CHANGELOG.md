@@ -2,6 +2,34 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [0.2.0-beta.1] — 2026-05-24
+
+First beta. Big focus on the notification/bell system, tab UX, and a search bar.
+
+### New Features
+
+- **Cross-window bell notifications**: when a terminal in a *background* window needs you — Claude Code finishing a turn, any tool ringing the bell — a toast appears on whatever window you're currently focused on (even a different project), with an **Open Project** button that jumps to it. Routed through a shared store in the extension's global storage; only the focused window shows the toast, so there's no focus stealing and no stale notification waiting when you switch back.
+- **Three-state tab indicators**: clean → a subtle **activity dot** (background output) → a **swinging bell** (attention / BEL). Bell-aware mode: once a tab rings a bell, ordinary stdout chatter (spinners, watch-mode rebuilds, REPL repaints) stops flashing the activity dot — the bell becomes that tab's signal — reverting after an idle timeout (`alterminal.bellAwareTimeoutMinutes`, default 60).
+- **Agent end-of-turn detection**: detects OSC 9 / 99 / 777 notification escapes (iTerm2 / kitty / ghostty style) that Claude Code and similar agents emit when they finish and need input, surfacing them as bells. Progress sequences (`OSC 9;4`) are excluded so long tool calls don't false-flash. *(Requires the agent's notification channel to be enabled — see the Claude Code section in the README.)*
+- **Tab close button**: an `×` on each tab, matching VS Code's editor tabs — visible on the active tab and on hover; the activity dot sits in its place when there's unread output.
+- **Find in terminal** (`Cmd+F` / `Ctrl+F`): a floating search bar (xterm SearchAddon) with next/previous and a match count.
+- **Drag-drop images into Claude Code**: dropping an image onto a tab running Claude Code now attaches it as an image (`[Image #N]`) by writing it to a temp file and injecting the path through a bracketed paste — rather than dumping a path that expires.
+- **Full codicon picker**: set a tab's icon from the complete codicon set via a searchable grid (was a fixed 12-icon list).
+
+### Fixes
+
+- **In-tab bell icon now actually appears.** The extension host detected bells but never forwarded the event to the webview, so the per-tab bell icon never showed. It does now.
+- **Bell no longer nags the window you're looking at.** The window-title `${bell}` indicator and toasts are suppressed while the window is focused and cleared the moment it regains focus — they only fire for windows you're away from.
+- **Bell icon swings** (like a struck clapper) instead of pulsing.
+
+### Technical / loompty compatibility
+
+- Hardened daemon control-frame correlation against unsolicited `user_data` broadcasts (loompty PROTOCOL §4.12): only genuine response types resolve a pending request, so a broadcast can't be mistaken for one.
+- **Zero-downtime daemon restart.** "Restart PTY Daemon" now performs a true SCM_RIGHTS session handoff (loompty `--handoff-listen`, PROTOCOL §4.11/§6): a successor daemon is brought up listening on a handoff socket, the dying daemon hands it the live PTY master fds, and clients reconnect to the successor — live shells are preserved across the swap instead of being killed.
+- **Auto-reconnect + reattach across all windows.** When the shared daemon is swapped, every window's control socket drops; each window independently treats the unexpected disconnect as the signal to reconnect to the canonical socket and `reattach` its sessions (resume-only, no scrollback replay). No cross-window coordination and nothing routed through VS Code — the dropped socket *is* the signal. Intentional disconnects (deactivate, the triggering window's own restart) are flagged and skipped.
+- New `reattach` control message (resume, no replay) distinct from `attach` (full scrollback replay); `AttachMessage`/`ReattachMessage` carry `rows`/`cols` so the successor restores grid dimensions.
+- **F5 dev launch rebuilds both projects.** The watch task only covered the extension tsconfig before, so webview changes silently didn't take effect; it now watches the extension and webview projects in parallel.
+
 ## [0.2.0-dev.21] — 2026-05-09
 
 ### Fixes (memory bloat)

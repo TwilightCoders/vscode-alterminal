@@ -21,8 +21,19 @@ if [[ ! -f "$LOOM_DIR/build/build.ninja" && ! -f "$LOOM_DIR/build/Makefile" ]]; 
   cmake -S "$LOOM_DIR" -B "$LOOM_DIR/build" -DLOOM_BUILD_TESTS=OFF >/dev/null
 fi
 
-# Build loomptyd (brings in libloom as a dependency)
-cmake --build "$LOOM_DIR/build" --target loomptyd >/dev/null 2>&1
+# Build loomptyd (brings in libloom as a dependency). If the loompty source
+# tree is mid-development and won't compile, fall back to the existing
+# vendored binary rather than failing the whole extension package — we
+# vendor bin/loomptyd precisely so our build is insulated from upstream's
+# in-progress state.
+if ! cmake --build "$LOOM_DIR/build" --target loomptyd >/dev/null 2>&1; then
+  if [[ -f "bin/loomptyd" ]]; then
+    echo "⚠  loomptyd build failed (loompty source may be mid-change) — keeping existing bin/loomptyd"
+    exit 0
+  fi
+  echo "❌ loomptyd build failed and no vendored bin/loomptyd to fall back to"
+  exit 1
+fi
 
 # Copy to bin/ only when the source is newer. A spurious copy invalidates
 # macOS's in-kernel code signature cache for bin/loomptyd, causing

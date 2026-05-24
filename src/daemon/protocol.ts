@@ -21,6 +21,7 @@ export type ClientMessage =
   | KillMessage
   | ListMessage
   | AttachMessage
+  | ReattachMessage
   | DetachMessage
   | ClearBufferMessage
   | PingMessage
@@ -68,6 +69,21 @@ export interface AttachMessage {
   type: "attach";
   id: number;
   name: string;
+  rows?: number;
+  cols?: number;
+}
+
+/**
+ * Like attach, but resume-only: open the raw session socket WITHOUT
+ * replaying scrollback. For a client that already holds the buffer and
+ * just needs the live stream reconnected (e.g. after a daemon handoff).
+ */
+export interface ReattachMessage {
+  type: "reattach";
+  id: number;
+  name: string;
+  rows?: number;
+  cols?: number;
 }
 
 export interface DetachMessage {
@@ -86,7 +102,8 @@ export interface PingMessage {
 
 export interface HandoffMessage {
   type: "handoff";
-  id: number;
+  /** Path of the successor daemon's handoff-listen socket (PROTOCOL §4.11). */
+  socket: string;
 }
 
 // ---------------------------------------------------------------------------

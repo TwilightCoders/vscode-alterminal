@@ -52,6 +52,7 @@ export class TerminalInstance {
   public isActive: boolean;
   public whenOpened: Promise<any>;
   public onBellReceived?: (tabId: number) => void;
+  public onActivity?: (tabId: number) => void;
 
   // Internal — passed to child managers but not accessed externally
   private vscode: any;
@@ -64,6 +65,7 @@ export class TerminalInstance {
   private serializeAddon: any;
   private unicodeAddon: any;
   private webglAddon?: any;
+  public searchAddon?: any;
 
   // Managers and handlers (internal)
   private lifecycleManager: TerminalLifecycleManager;
@@ -78,6 +80,7 @@ export class TerminalInstance {
   private renderDisposable: any;
   private titleChangeDisposable: any;
   private osc52Disposable: any;
+  private writeParsedDisposable: any;
 
   // State tracking (internal)
   public shellPath: string | null;
@@ -259,6 +262,11 @@ export class TerminalInstance {
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
       this.terminal.loadAddon(this.unicodeAddon);
+      const SearchCtor = (window as any).SearchAddon?.SearchAddon;
+      if (SearchCtor) {
+        this.searchAddon = new SearchCtor();
+        this.terminal.loadAddon(this.searchAddon);
+      }
       this.setupEventHandlers();
       this.lifecycleManager.on("bootReady", () => {
         if (window.tabManager?.saveToLocalState) {
@@ -469,6 +477,15 @@ export class TerminalInstance {
         this.onBellReceived(this.id);
       }
     });
+
+    // Background-activity signal: any PTY output marks an inactive tab as
+    // having unread activity. Active tabs ignore — they are already visible.
+    if (typeof this.terminal.onWriteParsed === "function") {
+      this.writeParsedDisposable = this.terminal.onWriteParsed(() => {
+        if (this.isActive) return;
+        this.onActivity?.(this.id);
+      });
+    }
 
     // Set up OSC title change handler (fired by \x1b]0;title\x07 or \x1b]2;title\x07)
     // Deferred via queueMicrotask to avoid blocking the synchronous
@@ -931,6 +948,7 @@ export class TerminalInstance {
     this.titleChangeDisposable = this.disposeEventHandler(this.titleChangeDisposable);
     this.osc52Disposable = this.disposeEventHandler(this.osc52Disposable);
     this.renderDisposable = this.disposeEventHandler(this.renderDisposable);
+    this.writeParsedDisposable = this.disposeEventHandler(this.writeParsedDisposable);
 
     // Dispose link providers
     if (this.linkProviders) {

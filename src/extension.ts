@@ -7,6 +7,7 @@ import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 import { MessageDispatcher } from "./managers/messageDispatcher";
+import { createCrossWindowBellCoordinator } from "./managers/crossWindowBell";
 import { DaemonManager } from "./daemon/daemonManager";
 import { SettingsEditor } from "./managers/settingsEditor";
 
@@ -55,6 +56,13 @@ export async function activate(context: vscode.ExtensionContext) {
   if (daemonEnabled) {
     const daemonManager = new DaemonManager(context, context.extensionUri.fsPath);
     _daemonManager = daemonManager;
+    // When the shared daemon goes away unexpectedly (e.g. ANOTHER window
+    // restarted it), DaemonManager reconnects to the successor; re-point
+    // PtyManager at the new client and reattach this window's live sessions.
+    daemonManager.onReconnected = (client) => {
+      ptyManager.setDaemonClient(client);
+      void ptyManager.reattachAllDaemonPtys();
+    };
     try {
       Logger.info("[daemon] Attempting daemon connection...");
       const client = await daemonManager.connect();
@@ -103,6 +111,24 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(disposable, provider);
+
+  // Cross-window bell: an unfocused window publishes its terminal bells to
+  // a shared store; the focused window (possibly a different project) shows
+  // the toast. Wire the publisher into the dispatcher and start watching.
+  const crossWindowBell = createCrossWindowBellCoordinator(context);
+  crossWindowBell.start();
+  provider.messageDispatcher.setCrossWindowPublish((body) => crossWindowBell.publish(body));
+  context.subscriptions.push(crossWindowBell);
+
+  // Clear the window-title bell indicator when this window regains focus —
+  // the user is back, so the cross-window nag is no longer needed.
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        provider.messageDispatcher.clearBellIndicator();
+      }
+    }),
+  );
 
   // Create status bar item
   const statusBarItem = vscode.window.createStatusBarItem(
@@ -177,6 +203,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const client = await _daemonManager.restart();
       if (client) {
         ptyManager.setDaemonClient(client);
+        // Re-attach live tabs to the swapped daemon — without this the
+        // terminals freeze on stale (now-dead) session sockets.
+        await ptyManager.reattachAllDaemonPtys();
         vscode.window.showInformationMessage("PTY daemon restarted — shells preserved");
       } else {
         vscode.window.showErrorMessage("Failed to restart PTY daemon");
@@ -325,6 +354,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("alterminal.setTabIcon", (args) => {
       provider.handleContextMenuCommand("setTabIcon", args);
+    }),
+    // DEBUG: Test bracketed-paste data URL injection.
+    // Forwards to the webview, which constructs a bracketed-paste-wrapped
+    // data:image/png;base64,... 1x1 red pixel and writes it into the
+    // active tab's PTY. Used to verify whether Claude Code's paste handler
+    // detects data URLs inside bracketed-paste blocks. REMOVE once verified.
+    vscode.commands.registerCommand("alterminal.debugPasteImageBytes", () => {
+      const webview = provider.getWebview();
+      if (!webview) {
+        vscode.window.showWarningMessage("Alterminal webview not open");
+        return;
+      }
+      webview.postMessage({ command: "debugPasteImageBytes" });
     }),
   );
 }

@@ -6,17 +6,21 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 export interface BellNotificationHost {
   clearTimer(timer: TimerHandle): void;
   getBellIndicator(): string;
-  getWebview(): vscode.Webview | undefined;
+  isWindowFocused(): boolean;
   now(): number;
-  openTerminal(): Promise<void>;
+  /**
+   * Publish a bell for OTHER windows to surface. The originating window
+   * is unfocused (we only reach here when unfocused), so it never shows
+   * a local toast — the cross-window coordinator renders it on whichever
+   * window is focused.
+   */
+  publishBell(body: string): void;
   setTimer(callback: () => void, delayMs: number): TimerHandle;
   setTitleIndicator(value: string): void;
-  showNotification(message: string, action: string): Thenable<string | undefined>;
 }
 
 export function createBellNotificationHost(
-  getWebview: () => vscode.Webview | undefined,
-  openTerminal: () => Promise<void>,
+  publishBell: (body: string) => void,
 ): BellNotificationHost {
   return {
     clearTimer: (timer) => clearTimeout(timer),
@@ -24,9 +28,9 @@ export function createBellNotificationHost(
       vscode.workspace
         .getConfiguration("alterminal")
         .get<string>("bellIndicator", "\u{1F514}"),
-    getWebview,
+    isWindowFocused: () => vscode.window.state.focused,
     now: () => Date.now(),
-    openTerminal,
+    publishBell,
     setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
     setTitleIndicator: (value) => {
       vscode.commands.executeCommand(
@@ -35,8 +39,6 @@ export function createBellNotificationHost(
         value,
       );
     },
-    showNotification: (message, action) =>
-      vscode.window.showInformationMessage(message, action),
   };
 }
 
@@ -70,6 +72,11 @@ export class BellNotificationService {
 
   public handleBellSound(tabId: number, tabLabel: string): void {
     Logger.info(`Bell received: tabId=${tabId}, label=${tabLabel}`);
+
+    // If this window is focused, the user is already here — the per-tab
+    // bell icon is enough. Skip the cross-window title indicator and the
+    // OS notification, both of which are only useful when you're away.
+    if (this.host.isWindowFocused()) return;
 
     const lastNotified = this.bellNotifiedAt.get(tabId) ?? 0;
     const inCooldown =
@@ -158,6 +165,11 @@ export class BellNotificationService {
 
     if (bells.size === 0) return;
 
+    // Re-check focus at fire time, not just at bell arrival. The user may
+    // have switched into this window during the debounce window — if so,
+    // they're present and the toast is unwanted.
+    if (this.host.isWindowFocused()) return;
+
     const now = this.host.now();
     for (const tabId of bells.keys()) {
       this.bellNotifiedAt.set(tabId, now);
@@ -166,23 +178,10 @@ export class BellNotificationService {
     const labels = Array.from(bells.values());
     const body =
       bells.size === 1 ? labels[0] : `${bells.size} terminals: ${labels.join(", ")}`;
-    const lastTabId = Array.from(bells.keys()).pop();
 
     Logger.info(`Bell notification: ${body}`);
 
-    this.host.showNotification(body, "Go to Terminal").then(async (selection) => {
-      if (selection !== "Go to Terminal") return;
-      this.clearBellIndicator();
-      await this.host.openTerminal();
-      this.host.setTimer(() => {
-        const webview = this.host.getWebview();
-        if (webview && lastTabId !== undefined) {
-          webview.postMessage({
-            command: "switchToTab",
-            tabId: Number(lastTabId),
-          });
-        }
-      }, 200);
-    });
+    // Publish for other windows — the focused window renders the toast.
+    this.host.publishBell(body);
   }
 }

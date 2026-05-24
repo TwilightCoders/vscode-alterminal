@@ -326,4 +326,172 @@ suite("Daemon Integration", () => {
       }
     });
   });
+
+  suite("zero-downtime handoff (Layer 1 --handoff-listen)", () => {
+    // Spawn a successor in --handoff-listen mode, sharing the predecessor's
+    // control socket. Resolves once it has written its post-listen marker.
+    function spawnSuccessor(
+      paths: ReturnType<typeof uniquePaths>,
+      secret: string,
+      handoffPath: string,
+    ): Promise<cp.ChildProcess> {
+      const child = cp.spawn(LOOMPTYD, [
+        "--socket", paths.socket,
+        "--secret", secret,
+        "--lockfile", paths.lockfile,
+        "--handoff-listen", handoffPath,
+      ], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      child.stdout!.resume();
+      child.stderr!.resume();
+      child.unref();
+
+      const ready = `${handoffPath}.ready`;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          clearInterval(poll);
+          reject(new Error("successor never wrote its handoff-listen ready marker"));
+        }, 8000);
+        const poll = setInterval(() => {
+          if (fs.existsSync(ready)) {
+            clearInterval(poll);
+            clearTimeout(timeout);
+            resolve(child);
+          }
+        }, 50);
+      });
+    }
+
+    test("successor adopts the live session across a daemon swap (same pid, scrollback intact)", async function () {
+      this.timeout(20000);
+      const paths = uniquePaths();
+      const handoffPath = path.join(os.tmpdir(), `alterm-handoff-${process.pid}-${Date.now()}.sock`);
+      const { pid: pidA, secret } = await spawnDaemonDirect(paths);
+
+      try {
+        // Predecessor: spawn a session, write a marker into its scrollback.
+        const clientA = new PtyDaemonClient("A", secret);
+        await clientA.connect(paths.socket);
+        const sessionName = `handoff-sess-${Date.now()}`;
+        const { pid: shellPid } = await clientA.spawn(
+          sessionName, "/bin/sh", [], process.cwd(), { TERM: "dumb" }, 80, 24,
+        );
+        assert.ok(shellPid > 0, "session should have a real shell pid");
+        await sleep(300);
+        clientA.write(sessionName, "HANDOFF_MARKER");
+        await sleep(300);
+
+        // Bring up the successor listening on the handoff socket.
+        const successor = await spawnSuccessor(paths, secret, handoffPath);
+
+        // Tell the predecessor to hand off, then drop our connection to it.
+        clientA.handoff(handoffPath);
+        clientA.disconnect();
+
+        // Poll the (shared) control socket until the successor has adopted
+        // the session and rebound. The predecessor's pid should be gone.
+        let clientB: PtyDaemonClient | null = null;
+        for (let i = 0; i < 40 && !clientB; i++) {
+          await sleep(250);
+          try {
+            const c = new PtyDaemonClient("B", secret);
+            await c.connect(paths.socket);
+            if (await c.ping()) { clientB = c; break; }
+            c.disconnect();
+          } catch { /* successor not up yet — retry */ }
+        }
+        assert.ok(clientB, "a daemon should answer the control socket after handoff");
+
+        // The original spawning daemon process must be gone (it shut down
+        // after the handoff) — proving this is the successor, not a no-op.
+        await sleep(300);
+        assert.ok(!isAlive(pidA), "predecessor daemon should have shut down after handoff");
+
+        // The adopted session must still exist with the SAME shell pid —
+        // i.e. the live PTY was transferred (SCM_RIGHTS), not respawned.
+        const sessions = await clientB!.list();
+        const adopted = sessions.find((p) => p.ptyId === sessionName);
+        assert.ok(adopted, "successor should list the adopted session");
+        assert.strictEqual(adopted!.pid, shellPid, "shell pid must survive the handoff unchanged");
+
+        // Scrollback must have survived the transfer.
+        const replayed: string[] = [];
+        clientB!.on("data", (_n: string, d: string) => replayed.push(d));
+        await clientB!.attach(sessionName);
+        await sleep(500);
+        assert.ok(
+          replayed.join("").includes("HANDOFF_MARKER"),
+          "adopted session's scrollback should survive the handoff",
+        );
+
+        clientB!.kill(sessionName);
+        await sleep(200);
+        clientB!.disconnect();
+        try { successor.kill("SIGTERM"); } catch { /* already gone */ }
+      } finally {
+        killPid(pidA);
+        await sleep(200);
+        try { fs.rmSync(`${handoffPath}.ready`, { force: true }); } catch {}
+        try { fs.rmSync(handoffPath, { force: true }); } catch {}
+        cleanupPaths(paths);
+      }
+    });
+  });
+
+  suite("reattach (resume-only, no replay)", () => {
+    test("reattach resumes the live stream WITHOUT replaying scrollback", async function () {
+      this.timeout(15000);
+      const paths = uniquePaths();
+      const { pid, secret } = await spawnDaemonDirect(paths);
+
+      try {
+        // Seed scrollback with a marker via a first (attached) client.
+        const clientA = new PtyDaemonClient("A", secret);
+        await clientA.connect(paths.socket);
+        const sessionName = `reattach-sess-${Date.now()}`;
+        await clientA.spawn(
+          sessionName, "/bin/sh", [], process.cwd(), { TERM: "dumb" }, 80, 24,
+        );
+        await sleep(300);
+        // Commit the marker to scrollback HISTORY (trailing newline), not
+        // the live input line — otherwise a resize-triggered redraw of the
+        // current line would surface it and we couldn't distinguish a
+        // redraw from an actual scrollback replay.
+        clientA.write(sessionName, "echo REATTACH_MARKER\n");
+        await sleep(400);
+        clientA.disconnect();
+        await sleep(200);
+
+        // Reattach (resume-only) with a fresh client.
+        const clientB = new PtyDaemonClient("B", secret);
+        await clientB.connect(paths.socket);
+        const got: string[] = [];
+        clientB.on("data", (_n: string, d: string) => got.push(d));
+        await clientB.reattach(sessionName, { cols: 80, rows: 24 });
+
+        // No scrollback should replay — the historical marker must NOT
+        // reappear (a current-line resize redraw only touches the prompt).
+        await sleep(500);
+        assert.ok(
+          !got.join("").includes("REATTACH_MARKER"),
+          `reattach must NOT replay scrollback, but got: ${JSON.stringify(got.join(""))}`,
+        );
+
+        // The live stream must still work — new input echoes back.
+        clientB.write(sessionName, "echo LIVE_PING\n");
+        await sleep(400);
+        assert.ok(
+          got.join("").includes("LIVE_PING"),
+          "reattach should leave a working live stream (echo of new input)",
+        );
+
+        clientB.kill(sessionName);
+        await sleep(200);
+        clientB.disconnect();
+      } finally {
+        killPid(pid);
+        await sleep(200);
+        cleanupPaths(paths);
+      }
+    });
+  });
 });

@@ -50,6 +50,9 @@ export class TemplateUtils {
     const unicodeAddonUri = getNodeModuleUri(
       "@xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.js",
     );
+    const searchAddonUri = getNodeModuleUri(
+      "@xterm/addon-search/lib/addon-search.js",
+    );
     const linkProviderUri = getNodeModuleUri(
       "xterm-link-provider/lib/esm/index.js",
     );
@@ -128,6 +131,7 @@ export class TemplateUtils {
       webLinksAddonUri,
       serializeAddonUri,
       unicodeAddonUri,
+      searchAddonUri,
       linkProviderUri,
       combinedScript,
       // ES6 module URIs for import map

@@ -11,6 +11,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as cp from "child_process";
+import * as fs from "fs";
 import { Logger } from "../utils/logger";
 import { PtyDaemonClient } from "./ptyDaemonClient";
 import {
@@ -43,6 +44,18 @@ export class DaemonManager {
   private _client: PtyDaemonClient | null = null;
   private _sessionId: string;
   private _extensionPath: string;
+  // Set true immediately before a disconnect WE initiate (dispose, or the
+  // old client during a restart), so the disconnect handler knows not to
+  // treat it as a daemon death and auto-reconnect. Consumed on each fire.
+  private _intentionalDisconnect = false;
+  /**
+   * Called after an UNEXPECTED daemon disconnect is recovered by
+   * reconnecting to the (new) daemon. The extension wires this to
+   * re-point PtyManager at the new client and reattach live sessions —
+   * this is what lets every window independently survive another window
+   * restarting the shared daemon.
+   */
+  public onReconnected?: (client: PtyDaemonClient) => void;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -113,54 +126,141 @@ export class DaemonManager {
   /** Gracefully disconnect from the daemon (on deactivate). */
   disconnect(): void {
     if (this._client) {
+      this._intentionalDisconnect = true;
       this._client.disconnect();
       this._client = null;
     }
   }
 
   /**
-   * Restart the daemon with a graceful handoff.
-   * The old daemon passes its PTY FDs to the new one, so existing
-   * shells survive. The client reconnects automatically.
+   * Zero-downtime daemon restart via loompty's SCM_RIGHTS handoff
+   * (PROTOCOL §4.11/§6, Layer 1 `--handoff-listen`):
+   *
+   *   1. Spawn a successor daemon that listens on a handoff socket
+   *      (`--handoff-listen <path>`), reusing the canonical control
+   *      socket / lockfile / secret. It writes `<path>.ready` after
+   *      `listen()`.
+   *   2. Tell the old daemon to hand off to that socket. It connects,
+   *      transfers session metadata + PTY master fds (SCM_RIGHTS) directly
+   *      to the successor, then shuts down — releasing the control socket.
+   *   3. The successor adopts the sessions and rebinds the control socket.
+   *   4. We poll the control socket until the successor answers, then
+   *      reconnect. Shells survive untouched (same PTY fds, new daemon).
+   *
+   * Abort-safe: a failed handoff leaves the old daemon running, so we just
+   * reconnect to it. No daemon → spawn fresh.
    */
   async restart(): Promise<PtyDaemonClient | null> {
     if (!this._client?.connected) {
-      Logger.info("No daemon to restart — starting fresh");
-      return this.connect();
+      return (await this._tryConnect()) ?? this.connect();
     }
 
-    Logger.info("Requesting daemon handoff...");
+    const sockPath = socketPath(GLOBAL_DAEMON_ID);
+    const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
+    const secret = readSecret(secretPath(GLOBAL_DAEMON_ID));
+    if (!secret) {
+      Logger.warn("[daemon] no secret on file — cannot hand off; staying on current daemon");
+      return this._client;
+    }
+
+    const handoffPath = path.join(
+      path.dirname(sockPath),
+      `alterminal-handoff-${GLOBAL_DAEMON_ID}-${Date.now()}.sock`,
+    );
+    const readyMarker = `${handoffPath}.ready`;
+    const oldClient = this._client;
 
     try {
-      // Send handoff message to old daemon
-      await this._client.handoff();
-    } catch (err) {
-      Logger.warn("Handoff request failed:", err);
-    }
+      Logger.info("[daemon] starting zero-downtime handoff...");
+      // 1. Bring up the successor listening on the handoff socket.
+      await this._spawnSuccessorForHandoff(sockPath, lockPath, secret, handoffPath);
 
-    // Old daemon spawns replacement and exits.
-    // Disconnect our client (socket will close).
-    this._client.disconnect();
-    this._client = null;
+      // 2. Tell the old daemon to transfer its sessions to the successor.
+      //    Fire-and-forget: on success it shuts down silently. Mark our own
+      //    disconnect intentional so the auto-reconnect handler stays out of
+      //    the way — restart() does its own reconnect+reattach below.
+      oldClient.handoff(handoffPath);
+      this._intentionalDisconnect = true;
+      oldClient.disconnect();
+      this._client = null;
 
-    // Wait for the new daemon to start (old daemon closes server, spawns
-    // replacement, new daemon adopts FDs and starts listening)
-    await this._sleep(2000);
-
-    // Connect to the new daemon
-    for (let i = 0; i < MAX_CONNECT_ATTEMPTS; i++) {
-      Logger.info(`[daemon] Restart reconnect attempt ${i + 1}/${MAX_CONNECT_ATTEMPTS}...`);
-      const client = await this._tryConnect();
-      if (client) {
-        Logger.info("Reconnected to restarted daemon");
-        return client;
+      // 3+4. Poll the canonical control socket until the successor (which
+      //      rebinds after adoption) answers, then reconnect.
+      for (let i = 0; i < MAX_CONNECT_ATTEMPTS * 3; i++) {
+        await this._sleep(RETRY_DELAY_MS);
+        const client = await this._tryConnect();
+        if (client) {
+          Logger.info("[daemon] handoff complete — reconnected to successor, sessions preserved");
+          return client;
+        }
       }
-      Logger.info(`[daemon] Restart reconnect attempt ${i + 1} failed`);
-      await this._sleep(RETRY_DELAY_MS);
+      Logger.error("[daemon] handoff: no daemon answered the control socket after handoff");
+      return null;
+    } catch (err) {
+      // Abort-safe: the old daemon kept running. Reconnect to it.
+      Logger.warn(`[daemon] handoff aborted (${(err as Error)?.message || err}); old daemon still running`);
+      return (await this._tryConnect()) ?? this.connect();
+    } finally {
+      try { fs.rmSync(readyMarker, { force: true }); } catch { /* best effort */ }
+      try { fs.rmSync(handoffPath, { force: true }); } catch { /* best effort */ }
     }
+  }
 
-    Logger.error("Failed to reconnect after daemon restart");
-    return null;
+  /**
+   * Spawn a successor daemon in `--handoff-listen` mode (reusing the
+   * canonical control socket / lockfile / secret) and resolve once it has
+   * written its post-`listen()` ready marker. Rejects on timeout.
+   */
+  private async _spawnSuccessorForHandoff(
+    sockPath: string,
+    lockPath: string,
+    secret: string,
+    handoffPath: string,
+  ): Promise<void> {
+    const binary = await this._findLoomptyd();
+    const launcher = path.join(this._extensionPath, "scripts", "spawn-loomptyd.js");
+    const readyMarker = `${handoffPath}.ready`;
+
+    // Clear any stale marker/socket from a prior aborted attempt.
+    try { fs.rmSync(readyMarker, { force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(handoffPath, { force: true }); } catch { /* ignore */ }
+
+    return new Promise((resolve, reject) => {
+      // The launcher appends trailing args to loomptyd's argv, so
+      // --handoff-listen rides through unchanged.
+      const launcherArgs = [
+        launcher, binary, sockPath, secret, lockPath,
+        "--handoff-listen", handoffPath,
+      ];
+      const stderr: string[] = [];
+      const proc = cp.spawn(process.execPath, launcherArgs, {
+        detached: true,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: { ...process.env },
+      });
+      proc.stderr!.on("data", (chunk: Buffer) => stderr.push(chunk.toString()));
+      proc.unref();
+
+      const timeout = setTimeout(() => {
+        clearInterval(poll);
+        reject(new Error(`successor not listening on handoff socket: ${stderr.join("").trim()}`));
+      }, 10000);
+
+      const poll = setInterval(() => {
+        if (fs.existsSync(readyMarker)) {
+          clearInterval(poll);
+          clearTimeout(timeout);
+          Logger.info("[daemon] successor is listening on the handoff socket");
+          resolve();
+        }
+      }, 100);
+
+      proc.on("error", (err) => {
+        clearInterval(poll);
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -236,11 +336,41 @@ export class DaemonManager {
 
   private _setupDisconnectHandler(client: PtyDaemonClient): void {
     client.on("disconnected", () => {
-      Logger.warn("Lost connection to PTY daemon");
       if (this._client === client) {
         this._client = null;
       }
+      // An intentional disconnect (dispose, or the old client during our own
+      // restart) is consumed here and ignored — no auto-reconnect.
+      if (this._intentionalDisconnect) {
+        this._intentionalDisconnect = false;
+        Logger.info("[daemon] intentional disconnect — not reconnecting");
+        return;
+      }
+      // Unexpected: the daemon went away (crash, or ANOTHER window restarted
+      // the shared daemon). Reconnect to whatever now serves the canonical
+      // socket (the successor) and reattach our live sessions. This is how a
+      // restart triggered in one window is survived by every other window.
+      Logger.warn("[daemon] unexpected daemon disconnect — reconnecting + reattaching");
+      void this._reconnectAndReattach();
     });
+  }
+
+  /**
+   * Recover from an unexpected daemon disconnect: poll the canonical control
+   * socket until the (successor) daemon answers, then hand the new client to
+   * the extension so it re-points PtyManager and reattaches live sessions.
+   */
+  private async _reconnectAndReattach(): Promise<void> {
+    for (let i = 0; i < MAX_CONNECT_ATTEMPTS * 4; i++) {
+      await this._sleep(RETRY_DELAY_MS);
+      const client = await this._tryConnect();
+      if (client) {
+        Logger.info("[daemon] reconnected after unexpected disconnect — reattaching sessions");
+        this.onReconnected?.(client);
+        return;
+      }
+    }
+    Logger.error("[daemon] could not reconnect after unexpected daemon disconnect");
   }
 
   /**

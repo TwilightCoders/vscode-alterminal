@@ -7,6 +7,8 @@ import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
 import { IconPickerModal } from "./iconPickerModal.js";
 import { Debouncer } from "../utils/debouncer.js";
+import { BellAwareTracker } from "./bellAwareTracker.js";
+import { SearchBar } from "./searchBar.js";
 
 /**
  * Tab Manager Class (Refactored)
@@ -55,6 +57,8 @@ export class TabManager {
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingTitleOpts = new Map<number, Record<string, any>>();
   private _pendingCloseChecks = new Map<number, (procs: Array<{ pid: number; name: string }>) => void>();
+  private _bellAware = new BellAwareTracker();
+  private _searchBar = new SearchBar();
 
   constructor(vscode: any, terminalTheme: any, getThemeColor: (cssVar: string, fallback: string) => string) {
     this.vscode = vscode;
@@ -90,8 +94,10 @@ export class TabManager {
     this._keyboardManager = new KeyboardManager({
       clearActiveTerminal: () => this.clearActiveTerminal(),
       resetActiveTerminal: () => this.resetActiveTerminal(),
+      openSearch: () => this.openSearch(),
     });
     this._keyboardManager.setup();
+    this._searchBar.install();
 
     // Initialize tab UI manager for tab bar interactions
     this._tabUIManager = new TabUIManager(this._createTabUICallbacks());
@@ -163,6 +169,7 @@ export class TabManager {
       startTabRename: (tabId) => this.startTabRename(tabId),
       setTabIcon: (tabId, icon) => this.setTabIcon(tabId, icon),
       openIconPicker: (tabId) => this._iconPickerModal.open(tabId),
+      debugPasteImageBytes: () => this._debugPasteImageBytes(),
       handleGetTabBuffer: (tabId) => this.handleGetTabBuffer(tabId),
       updateTabBarVisibility: () => this.updateTabBarVisibility(),
       updateSaveButtonVisibility: (cmd, saved) => this.updateSaveButtonVisibility(cmd, saved),
@@ -178,6 +185,7 @@ export class TabManager {
       getHistoryBannerShownEver: () => this._historyBannerShownEver,
       setHistoryBannerShownEver: (val) => { this._historyBannerShownEver = val; },
       setAlwaysShowTabs: (val) => { this._alwaysShowTabs = val; },
+      setBellAwareTimeout: (minutes) => this.setBellAwareTimeout(minutes),
       findTabIdByCommand: (cmd) => this._findTabIdByCommand(cmd),
       reportPerformance: () => this._reportPerformance(),
       saveActiveCommand: () => { if (this.activeTabId !== null) this.saveCommand(this.activeTabId); },
@@ -220,8 +228,19 @@ export class TabManager {
     // xterm.js onBell is kept as a safety net but shouldn't fire
     // since we strip \x07 before data reaches xterm.js.
     terminal.onBellReceived = (id: number) => {
+      this._bellAware.recordBell(id);
       if (terminal.isActive) return;
+      // Bell supersedes any background-activity dot — single attention indicator.
+      this._tabUIManager.hideActivity(id);
       this._tabUIManager.showNotification(id);
+    };
+    // Background output (no bell) marks the tab as having unread activity —
+    // UNLESS the tab has demonstrated it speaks bell, in which case we trust
+    // the bell as its sole signal and ignore chatty stdout (spinners etc).
+    terminal.onActivity = (id: number) => {
+      if (terminal.isActive) return;
+      if (this._bellAware.isBellAware(id)) return;
+      this._tabUIManager.showActivity(id);
     };
   }
 
@@ -230,9 +249,27 @@ export class TabManager {
    * Shows tab badge for inactive tabs.
    */
   private _handleBell(tabId: number): void {
+    this._bellAware.recordBell(tabId);
     const terminal = this.terminals.get(tabId);
     if (!terminal || terminal.isActive) return;
+    this._tabUIManager.hideActivity(tabId);
     this._tabUIManager.showNotification(tabId);
+  }
+
+  /** Propagate the latest bell-aware timeout from settings. */
+  public setBellAwareTimeout(minutes: number): void {
+    this._bellAware.setTimeoutMinutes(minutes);
+  }
+
+  /** Open Cmd+F search bar bound to the active terminal's SearchAddon. */
+  public openSearch(): void {
+    if (this._searchBar.isOpen()) {
+      this._searchBar.close();
+      return;
+    }
+    const active = this.terminals.get(this.activeTabId!);
+    if (!active?.searchAddon) return;
+    this._searchBar.open(active.searchAddon);
   }
 
   _findTabIdByCommand(cmd: string | null): number | null {
@@ -418,8 +455,9 @@ export class TabManager {
     this._tabUIManager.updateActiveTabUI(tabId);
     this.activeTabId = tabId;
 
-    // Clear notifications for the newly active tab (local + extension host)
+    // Clear notifications + activity for the newly active tab
     this._tabUIManager.hideNotification(tabId);
+    this._tabUIManager.hideActivity(tabId);
     this.vscode.postMessage({ command: "switchTab", tabId });
 
     // Schedule save reflecting activeTabId change
@@ -530,6 +568,7 @@ export class TabManager {
 
     // Remove from collection
     this.terminals.delete(tabId);
+    this._bellAware.clearTab(tabId);
 
     // Remove tab element from DOM
     const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
@@ -1111,6 +1150,27 @@ export class TabManager {
     } catch (error) {
       Logger.error("Failed to save state:", error);
     }
+  }
+
+  /**
+   * DEBUG: Write a bracketed-paste-wrapped data:image/png URL to the
+   * active tab's PTY. Tests whether the receiving app (Claude Code, etc.)
+   * detects data URLs inside bracketed-paste blocks and converts them to
+   * images. REMOVE once verified.
+   */
+  private _debugPasteImageBytes(): void {
+    const tabId = this.activeTabId;
+    if (!tabId) {
+      Logger.warn("debugPasteImageBytes: no active tab");
+      return;
+    }
+    // 1x1 red PNG, exactly the same payload from the manual paste test.
+    const base64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    const dataUrl = `data:image/png;base64,${base64}`;
+    const payload = `\x1b[200~${dataUrl}\x1b[201~`;
+    Logger.warn(`debugPasteImageBytes: writing bracketed paste to tab ${tabId}`);
+    this.vscode.postMessage({ command: "data", data: payload, tabId });
   }
 
   /**

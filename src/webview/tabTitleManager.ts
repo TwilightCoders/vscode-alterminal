@@ -44,6 +44,7 @@ export class TabTitleManager {
     CUSTOMIZED: number;
     EDITING: number;
     DROPDOWN_OPEN: number;
+    ACTIVITY: number;
   };
   public iconContainer: HTMLElement | null;
   public regularIcon: HTMLElement | null;
@@ -71,6 +72,7 @@ export class TabTitleManager {
       CUSTOMIZED: 1 << 1, // User has customized the icon
       EDITING: 1 << 2, // Title is being edited
       DROPDOWN_OPEN: 1 << 3, // Dropdown menu is open
+      ACTIVITY: 1 << 4, // Background output since last viewed (no bell)
     };
 
     // DOM references
@@ -373,6 +375,29 @@ export class TabTitleManager {
     const label = this.terminal ? this.terminal.label : "Terminal";
     this.iconContainer.setAttribute("title", `Click for ${label} options`);
     this.iconContainer.setAttribute("aria-label", `${label} menu`);
+  }
+
+  /**
+   * Mark tab as having background activity (output without bell).
+   * Class lives on the .tab parent so CSS can target the right-side
+   * close button slot (which is a sibling of the icon, not a child).
+   */
+  showActivity(): void {
+    if (!this.iconContainer || this.hasState(this.STATES.ACTIVITY)) return;
+    const tab = this.iconContainer.closest(".tab");
+    if (!tab || tab.classList.contains("active")) return;
+    tab.classList.add("activity");
+    this.setState(this.STATES.ACTIVITY);
+  }
+
+  /**
+   * Clear background activity indicator.
+   */
+  hideActivity(): void {
+    if (!this.iconContainer) return;
+    const tab = this.iconContainer.closest(".tab");
+    if (tab) tab.classList.remove("activity");
+    this.clearState(this.STATES.ACTIVITY);
   }
 
   /**

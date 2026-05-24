@@ -77,6 +77,13 @@ export class PtyManager {
   private _tabPtyIds = new Map<number, string>();
   // Reverse map ptyId → tabId for daemon event routing
   private _ptyIdToTab = new Map<string, number>();
+  // Tabs whose next inbound chunk should be prefixed with a terminal clear.
+  // Only used on the fallback (attach+replay) path when a daemon doesn't
+  // yet support `reattach`; the seamless `reattach` path needs no clear.
+  private _clearOnNextData = new Set<number>();
+  // Last known terminal dimensions per tab, so live re-attach can resize
+  // the PTY to the client's real size (and correct loompty's rows+1 adopt).
+  private _tabDims = new Map<number, { cols: number; rows: number }>();
   // Live daemon PTYs discovered on connect (before tabs restore)
   private _liveDaemonPtys = new Set<string>();
   // Resolves once the daemon PTY list has been fetched
@@ -179,6 +186,46 @@ export class PtyManager {
   }
 
   /**
+   * Re-attach every live tab's session on the current daemon client.
+   *
+   * Called after a zero-downtime handoff swaps the client: the old client's
+   * per-session data sockets died on disconnect, so without this the
+   * terminals freeze (no output in, nowhere for input to go). Each tab is
+   * flagged so its first replayed chunk clears the stale buffer, avoiding
+   * duplicated scrollback. Unlike the restore path (fresh webview, fresh
+   * xterm), this runs against live, already-populated terminals.
+   */
+  public async reattachAllDaemonPtys(): Promise<void> {
+    if (!this._daemonClient?.connected) return;
+    const entries = Array.from(this._tabPtyIds.entries());
+    Logger.info(`[daemon] re-attaching ${entries.length} session(s) after handoff`);
+    for (const [tabId, ptyId] of entries) {
+      this._ptyIdToTab.set(ptyId, tabId);
+      const dims = this._tabDims.get(tabId);
+      // Preferred: resume-only `reattach` — the terminal already holds the
+      // buffer, so no scrollback replay (no repaint, seamless).
+      try {
+        await this._daemonClient.reattach(ptyId, dims);
+        Logger.info(`[daemon] re-attached (resume-only) tab ${tabId} → ${ptyId}`);
+        continue;
+      } catch (err) {
+        // Daemon may predate `reattach` support — fall back to a full
+        // `attach`, clearing the stale buffer first so the replay doesn't
+        // duplicate. Correct, just with a visible repaint.
+        Logger.warn(`[daemon] reattach unsupported/failed for tab ${tabId} (${ptyId}); falling back to attach+replay: ${(err as Error)?.message || err}`);
+      }
+      this._clearOnNextData.add(tabId);
+      try {
+        await this._daemonClient.attach(ptyId, dims);
+        Logger.info(`[daemon] re-attached (attach+replay) tab ${tabId} → ${ptyId}`);
+      } catch (err2) {
+        this._clearOnNextData.delete(tabId);
+        Logger.error(`[daemon] re-attach failed for tab ${tabId} (${ptyId}):`, err2);
+      }
+    }
+  }
+
+  /**
    * List live PTYs in the daemon for this session.
    */
   public async listDaemonPtys(): Promise<Array<{ ptyId: string; pid: number; processName: string; cwd: string }>> {
@@ -226,7 +273,7 @@ export class PtyManager {
     }
 
     if (this._onBell && this._bellDetector.detect(tabId, data)) {
-      Logger.warn(`🔔 Bell detected [tab ${tabId}]`);
+      Logger.debug(`🔔 Bell detected [tab ${tabId}]`);
       this._onBell(tabId);
       // Notify webview so it can show tab badge (xterm.js won't fire
       // onBell since we strip \x07 before it reaches the terminal).
@@ -240,6 +287,15 @@ export class PtyManager {
     // Replace BEL with ST so xterm.js doesn't fire onBell for OSC terminators.
     // BellDetector already ran above on the raw data.
     filteredData = replaceBelWithST(filteredData);
+
+    // First chunk after a live re-attach: clear the stale on-screen buffer
+    // (screen + scrollback) so the daemon's replayed scrollback renders
+    // clean rather than duplicating. Atomic with the replay — same stream,
+    // no cross-message race.
+    if (this._clearOnNextData.has(tabId)) {
+      this._clearOnNextData.delete(tabId);
+      filteredData = "\x1b[2J\x1b[3J\x1b[H" + filteredData;
+    }
     if (!filteredData) return;
 
     if (this._alterminal?.visible) {
@@ -742,6 +798,7 @@ export class PtyManager {
   }
 
   public resizePty(cols: number, rows: number, tabId: number): void {
+    this._tabDims.set(tabId, { cols, rows });
     // Daemon mode
     const ptyId = this._tabPtyIds.get(tabId);
     if (ptyId && this._daemonClient?.connected) {
@@ -806,36 +863,46 @@ export class PtyManager {
     this._outputBuffer.delete(tabId);
   }
 
+  /**
+   * Write dropped file bytes to a temp file and schedule a 60s cleanup.
+   * Returns the absolute path. Used by file-drop flows that need to hand
+   * a real path to the running program (Claude Code's image-attach,
+   * shell consumers of binary files, etc.).
+   */
+  public async writeDroppedFileToTemp(
+    fileData: string,
+    fileName: string,
+  ): Promise<string> {
+    const tempDir = os.tmpdir();
+    const safeName = path.basename(fileName).replace(/[/\\]/g, "_");
+    const tempFileName = `alterminal-${Date.now()}-${safeName}`;
+    const tempFilePath = path.join(tempDir, tempFileName);
+
+    let buffer: Buffer;
+    if (fileData.startsWith("data:")) {
+      const base64Data = fileData.split(",")[1];
+      buffer = Buffer.from(base64Data, "base64");
+    } else {
+      buffer = Buffer.from(fileData, "utf8");
+    }
+
+    await fs.promises.writeFile(tempFilePath, buffer);
+    await fs.promises.chmod(tempFilePath, 0o644);
+    setTimeout(() => fs.promises.unlink(tempFilePath).catch(() => {}), 60_000);
+    return tempFilePath;
+  }
+
   public async sendFileData(
     fileData: string,
     fileName: string,
-    fileType: string,
+    _fileType: string,
     tabId: number,
   ): Promise<void> {
     try {
-      const tempDir = os.tmpdir();
-      // Strip path separators to prevent directory traversal
-      const safeName = path.basename(fileName).replace(/[/\\]/g, "_");
-      const tempFileName = `alterminal-${Date.now()}-${safeName}`;
-      const tempFilePath = path.join(tempDir, tempFileName);
-
-      // Handle different data formats
-      let buffer: Buffer;
-      if (fileData.startsWith("data:")) {
-        // Data URL format (images, binary files)
-        const base64Data = fileData.split(",")[1];
-        buffer = Buffer.from(base64Data, "base64");
-      } else {
-        // Plain text content
-        buffer = Buffer.from(fileData, "utf8");
-      }
-
-      await fs.promises.writeFile(tempFilePath, buffer);
-      await fs.promises.chmod(tempFilePath, 0o644);
-
-      // Send the temp file path and schedule cleanup
+      const tempFilePath = await this.writeDroppedFileToTemp(fileData, fileName);
+      // Quoted path — for shell consumers. The trailing space lets the
+      // user keep typing right after.
       this.writeToPty(`'${tempFilePath}' `, tabId);
-      setTimeout(() => fs.promises.unlink(tempFilePath).catch(() => {}), 60_000);
     } catch (error) {
       Logger.error("Error writing file to temp:", error);
       const escapedName = fileName.replace(/'/g, "'\\''");
