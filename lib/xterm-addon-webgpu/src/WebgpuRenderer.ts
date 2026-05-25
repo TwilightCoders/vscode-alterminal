@@ -19,9 +19,9 @@
 import type { SharedDevice } from "./shared/SharedDevice.js";
 import type { IRenderDimensions, IGlyphKey } from "./types.js";
 import type { Palette } from "./util/colorUtils.js";
-import type { IXtermBuffer } from "./model/xtermTypes.js";
+import type { IXtermBuffer, IXtermDecorationService } from "./model/xtermTypes.js";
 import { rgbaToFloats } from "./util/colorUtils.js";
-import { CellColorResolver } from "./model/CellColorResolver.js";
+import { CellColorResolver, type IResolveInput } from "./model/CellColorResolver.js";
 import { DamageTracker } from "./model/DamageTracker.js";
 import { InstanceStager } from "./model/InstanceStager.js";
 import { readCell, emptyReadCell, type IReadCell } from "./model/CellReader.js";
@@ -112,6 +112,8 @@ export class WebgpuRenderer {
   private readonly _colorResolver = new CellColorResolver();
   private readonly _damage = new DamageTracker();
   private readonly _scratchCell: IReadCell = emptyReadCell();
+  /** Reused per cell to avoid allocating a resolve-input object every cell. */
+  private readonly _resolveInput: IResolveInput = { fg: 0, bg: 0, selected: false, focused: true };
   /** Active selection in absolute buffer coordinates; null when none. */
   private _selection: Selection | null = null;
   /** xterm's reusable cell object, captured on first read to avoid per-cell GC. */
@@ -134,6 +136,8 @@ export class WebgpuRenderer {
      * grid. Omitted in the standalone smoke harness.
      */
     private readonly _screenElement: HTMLElement | null = null,
+    /** xterm's decoration service — per-cell fg/bg overrides (search highlights, etc.). */
+    private readonly _decorationService: IXtermDecorationService | null = null,
   ) {
     this._device = _shared.device;
     this._metrics = metrics;
@@ -373,10 +377,16 @@ export class WebgpuRenderer {
         }
         const xPx = col * cellW;
 
-        const resolved = this._colorResolver.resolve(
-          { fg: cell.fg, bg: cell.bg, selected: isCellInSelection(col, absRow, this._selection), focused: m.focused },
-          palette,
-        );
+        const ri = this._resolveInput;
+        ri.fg = cell.fg;
+        ri.bg = cell.bg;
+        ri.selected = isCellInSelection(col, absRow, this._selection);
+        ri.focused = m.focused;
+        ri.decorationBottomBg = ri.decorationBottomFg = ri.decorationTopBg = ri.decorationTopFg = undefined;
+        if (this._decorationService) {
+          this._gatherDecorations(ri, col, absRow);
+        }
+        const resolved = this._colorResolver.resolve(ri, palette);
 
         const isCursorCell = cursor !== null && cursor.row === row && cursor.col === col;
         const invertForCursor = isCursorCell && blockCursor && m.focused;
@@ -405,6 +415,19 @@ export class WebgpuRenderer {
     }
 
     this._pushCursor(buffer);
+  }
+
+  /** Read decoration-service fg/bg overrides for a cell into the resolve input. */
+  private _gatherDecorations(ri: IResolveInput, col: number, absRow: number): void {
+    const ds = this._decorationService!;
+    ds.forEachDecorationAtCell(col, absRow, "bottom", (d) => {
+      if (d.backgroundColorRGB) ri.decorationBottomBg = d.backgroundColorRGB.rgba >>> 0;
+      if (d.foregroundColorRGB) ri.decorationBottomFg = d.foregroundColorRGB.rgba >>> 0;
+    });
+    ds.forEachDecorationAtCell(col, absRow, "top", (d) => {
+      if (d.backgroundColorRGB) ri.decorationTopBg = d.backgroundColorRGB.rgba >>> 0;
+      if (d.foregroundColorRGB) ri.decorationTopFg = d.foregroundColorRGB.rgba >>> 0;
+    });
   }
 
   private _pushRect(x: number, y: number, w: number, h: number, rgba: number, alpha: number): void {

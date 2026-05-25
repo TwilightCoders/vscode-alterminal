@@ -63,4 +63,40 @@ describe("CellColorResolver", () => {
     const out = r.resolve({ fg, bg: 0, selected: false, focused: true }, palette);
     assert.equal((out.fg >>> 8) & 0xffffff, 0xaabbcc);
   });
+
+  describe("decoration overrides", () => {
+    it("applies a bottom-layer bg override", () => {
+      const out = r.resolve(
+        { fg: 0, bg: 0, selected: false, focused: true, decorationBottomBg: 0x112233ff },
+        palette,
+      );
+      assert.equal(out.bg, 0x112233ff);
+    });
+
+    it("lets the selection paint over a bottom decoration", () => {
+      const out = r.resolve(
+        { fg: 0, bg: 0, selected: true, focused: true, decorationBottomBg: 0x112233ff },
+        palette,
+      );
+      // selectionBackground is opaque, so it replaces the bottom override
+      assert.equal(out.bg, palette.selectionBackground);
+    });
+
+    it("lets a top-layer decoration win over the selection (search match)", () => {
+      const out = r.resolve(
+        { fg: 0, bg: 0, selected: true, focused: true, decorationTopBg: 0xff8800ff },
+        palette,
+      );
+      assert.equal(out.bg, 0xff8800ff, "top decoration overrides selection");
+    });
+
+    it("applies top fg/bg overrides together", () => {
+      const out = r.resolve(
+        { fg: 0, bg: 0, selected: false, focused: true, decorationTopBg: 0x010203ff, decorationTopFg: 0x040506ff },
+        palette,
+      );
+      assert.equal(out.bg, 0x010203ff);
+      assert.equal(out.fg, 0x040506ff);
+    });
+  });
 });

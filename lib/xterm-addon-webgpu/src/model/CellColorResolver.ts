@@ -22,6 +22,16 @@ export interface IResolveInput {
   selected: boolean;
   /** Whether the terminal is focused (selection uses a dimmer color if not). */
   focused: boolean;
+  /**
+   * Decoration-service overrides for this cell, as `0xRRGGBBAA` (or undefined).
+   * Bottom-layer overrides apply beneath the selection; top-layer overrides
+   * apply above it (so a top decoration — e.g. a search-match highlight — wins
+   * over the selection). Mirrors xterm's bottom/selection/top ordering.
+   */
+  decorationBottomBg?: number;
+  decorationBottomFg?: number;
+  decorationTopBg?: number;
+  decorationTopFg?: number;
 }
 
 export interface IResolvedColors {
@@ -57,12 +67,28 @@ export class CellColorResolver {
       fgRgba = bgRgba;
     }
 
+    // Bottom-layer decoration overrides (beneath the selection).
+    if (input.decorationBottomBg !== undefined) {
+      bgRgba = (input.decorationBottomBg | 0xff) >>> 0;
+    }
+    if (input.decorationBottomFg !== undefined) {
+      fgRgba = (input.decorationBottomFg | 0xff) >>> 0;
+    }
+
     // Selection: blend the selection color over the resolved background.
     if (input.selected) {
       const sel = input.focused
         ? palette.selectionBackground
         : ((palette.selectionBackground & 0xffffff00) | SELECTION_INACTIVE_ALPHA) >>> 0;
       bgRgba = blend(bgRgba, sel);
+    }
+
+    // Top-layer decoration overrides (above the selection — e.g. search match).
+    if (input.decorationTopBg !== undefined) {
+      bgRgba = (input.decorationTopBg | 0xff) >>> 0;
+    }
+    if (input.decorationTopFg !== undefined) {
+      fgRgba = (input.decorationTopFg | 0xff) >>> 0;
     }
 
     this.result.fg = fgRgba;

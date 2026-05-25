@@ -47,3 +47,24 @@ export interface IXtermBuffer {
   readonly length: number;
   getLine(y: number): IXtermBufferLine | undefined;
 }
+
+/** A decoration's resolved colors, as seen via the decoration service. */
+export interface IXtermDecorationColors {
+  backgroundColorRGB?: { rgba: number };
+  foregroundColorRGB?: { rgba: number };
+}
+
+/**
+ * The slice of xterm's internal decoration service we read. Search/find
+ * highlights, and any `terminal.registerDecoration(...)`, surface here; the
+ * renderer must apply these per-cell fg/bg overrides or they won't paint.
+ * `y` is an absolute buffer row.
+ */
+export interface IXtermDecorationService {
+  forEachDecorationAtCell(
+    x: number,
+    y: number,
+    layer: "bottom" | "top" | undefined,
+    callback: (decoration: IXtermDecorationColors) => void,
+  ): void;
+}

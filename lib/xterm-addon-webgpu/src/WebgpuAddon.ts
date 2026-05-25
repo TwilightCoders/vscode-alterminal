@@ -108,12 +108,16 @@ export class WebgpuAddon {
       screen?.appendChild(canvas);
 
       const metrics = this._buildMetrics(terminal);
+      const decorationService = ((terminal._core as Record<string, any>)?._decorationService ?? null) as
+        | import("./model/xtermTypes.js").IXtermDecorationService
+        | null;
       this._renderer = new WebgpuRenderer(
         canvas,
         this._shared,
         () => this._terminal?.buffer.active,
         metrics,
         screen,
+        decorationService,
       );
 
       this._deviceLostSub = this._shared.onDeviceLost(() => {
