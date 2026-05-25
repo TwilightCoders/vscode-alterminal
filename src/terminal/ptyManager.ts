@@ -857,6 +857,8 @@ export class PtyManager {
     this._userVars.delete(tabId);
     this._shellIntegrationTabs.delete(tabId);
     this._bellDetector.delete(tabId);
+    this._tabDims.delete(tabId);
+    this._clearOnNextData.delete(tabId);
     Debouncer.cancel(`process-check-${tabId}`);
 
     // Clear output buffer for this tab
