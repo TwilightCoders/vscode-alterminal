@@ -29,6 +29,7 @@
   <script type="module">
     import { SharedDevice } from "../dist/shared/SharedDevice.js";
     import { WebgpuRenderer } from "../dist/WebgpuRenderer.js";
+    import { measureFont } from "../dist/platform/fontMetrics.js";
 
     const statusEl = document.getElementById("status");
     const fail = (msg) => { statusEl.textContent = msg; statusEl.className = "err"; console.error(msg); };
@@ -154,15 +155,14 @@
       const fontFamily = "Menlo, Consolas, monospace";
       const fontSize = 14;
       const fontPx = fontSize * dpr;
+      const lineHeight = 1.0;
 
-      // Measure the real monospace advance so the cell grid matches the font.
-      // Guessing the cell width (the old `9 * dpr`) left every glyph
-      // left-aligned in a too-wide cell — which reads as broken kerning. At
-      // live integration xterm's charSizeService supplies these measured dims.
-      const _measure = new OffscreenCanvas(64, 64).getContext("2d");
-      _measure.font = `${fontPx}px ${fontFamily}`;
-      const deviceCellWidth = Math.round(_measure.measureText("M").width);
-      const deviceCellHeight = Math.round(fontPx * 1.2);
+      // Everything cell-geometry is driven by the font's own metrics: advance
+      // for width, ascent+descent for the cell box, and the baseline for where
+      // glyphs sit. Same measureFont the renderer uses, so they agree.
+      const fm = measureFont(fontFamily, fontPx, lineHeight);
+      const deviceCellWidth = fm.cellWidth;
+      const deviceCellHeight = fm.cellHeight;
 
       const config = {
         fontFamily,
@@ -170,12 +170,13 @@
         fontWeight: "normal",
         fontWeightBold: "bold",
         letterSpacing: 0,
-        lineHeight: 1,
+        lineHeight,
         devicePixelRatio: dpr,
         deviceCellWidth,
         deviceCellHeight,
         deviceCharWidth: deviceCellWidth,
         deviceCharHeight: deviceCellHeight,
+        baseline: fm.baseline,
         palette,
       };
 

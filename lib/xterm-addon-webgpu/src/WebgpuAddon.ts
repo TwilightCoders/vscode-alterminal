@@ -22,6 +22,7 @@
 import { SharedDevice } from "./shared/SharedDevice.js";
 import { WebgpuRenderer, type IRenderMetrics, type CursorStyle } from "./WebgpuRenderer.js";
 import { isWebgpuSupported } from "./platform/deviceFeatures.js";
+import { measureFont } from "./platform/fontMetrics.js";
 import { DevicePixelObserver } from "./platform/DevicePixelObserver.js";
 import { toRgba, type Palette } from "./util/colorUtils.js";
 import { Emitter, type Event, type IDisposable } from "./util/event.js";
@@ -131,20 +132,28 @@ export class WebgpuAddon {
     const dpr = core?._coreBrowserService?.dpr ?? (typeof window !== "undefined" ? window.devicePixelRatio : 1) ?? 1;
     const css = core?._charSizeService ?? { width: 9, height: 17 };
     const opts = core?.optionsService?.rawOptions ?? {};
-    const deviceCellWidth = Math.max(1, Math.floor(css.width * dpr));
-    const deviceCellHeight = Math.max(1, Math.floor(css.height * dpr));
+    const fontFamily = opts.fontFamily ?? "monospace";
+    const fontSize = opts.fontSize ?? 14;
+    const lineHeight = opts.lineHeight ?? 1;
+    // Derive cell box + baseline from the font itself (see fontMetrics). xterm's
+    // charSizeService width is used for the advance when available, but the
+    // baseline and height come from the font's ascent/descent.
+    const fm = measureFont(fontFamily, fontSize * dpr, lineHeight);
+    const deviceCellWidth = css.width ? Math.max(1, Math.round(css.width * dpr)) : fm.cellWidth;
+    const deviceCellHeight = fm.cellHeight;
     return {
-      fontFamily: opts.fontFamily ?? "monospace",
-      fontSize: opts.fontSize ?? 14,
+      fontFamily,
+      fontSize,
       fontWeight: opts.fontWeight ?? "normal",
       fontWeightBold: opts.fontWeightBold ?? "bold",
       letterSpacing: opts.letterSpacing ?? 0,
-      lineHeight: opts.lineHeight ?? 1,
+      lineHeight,
       devicePixelRatio: dpr,
       deviceCellWidth,
       deviceCellHeight,
       deviceCharWidth: deviceCellWidth,
       deviceCharHeight: deviceCellHeight,
+      baseline: fm.baseline,
       palette: this._buildPalette(terminal),
     };
   }
@@ -153,13 +162,17 @@ export class WebgpuAddon {
     const core = terminal._core as Record<string, any> | undefined;
     const dpr = core?._coreBrowserService?.dpr ?? (typeof window !== "undefined" ? window.devicePixelRatio : 1) ?? 1;
     const css = core?._charSizeService ?? { width: 9, height: 17 };
+    const opts = core?.optionsService?.rawOptions ?? {};
     const focused = core?._coreBrowserService?.isFocused ?? true;
     const cursorStyle = (terminal.options.cursorStyle as CursorStyle) ?? "block";
+    // Cell box derived from the font (must match _buildFontConfig so the
+    // rasterizer's baseline and the renderer's grid agree).
+    const fm = measureFont(opts.fontFamily ?? "monospace", (opts.fontSize ?? 14) * dpr, opts.lineHeight ?? 1);
     return {
       cols: terminal.cols,
       rows: terminal.rows,
-      deviceCellWidth: Math.max(1, Math.floor(css.width * dpr)),
-      deviceCellHeight: Math.max(1, Math.floor(css.height * dpr)),
+      deviceCellWidth: css.width ? Math.max(1, Math.round(css.width * dpr)) : fm.cellWidth,
+      deviceCellHeight: fm.cellHeight,
       devicePixelRatio: dpr,
       palette: this._buildPalette(terminal),
       focused,

@@ -91,5 +91,7 @@ export interface IFontAtlasConfig {
   deviceCellHeight: number;
   deviceCharWidth: number;
   deviceCharHeight: number;
+  /** Glyph baseline Y within a cell (from the cell top), device px. */
+  baseline: number;
   palette: Palette;
 }

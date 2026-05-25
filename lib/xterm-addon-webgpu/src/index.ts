@@ -9,6 +9,7 @@
 export { WebgpuAddon } from "./WebgpuAddon.js";
 export { SharedDevice } from "./shared/SharedDevice.js";
 export { isWebgpuSupported } from "./platform/deviceFeatures.js";
+export { measureFont, deriveFontMetrics, type FontMetrics } from "./platform/fontMetrics.js";
 export type {
   IWebgpuAddonOptions,
   ISharedDevice,

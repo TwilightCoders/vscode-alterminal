@@ -67,9 +67,12 @@ export class GlyphRasterizer {
     const h = this._canvas.height;
     ctx.clearRect(0, 0, w, h);
     ctx.font = this._fontString(bold, italic);
-    ctx.textBaseline = "top";
+    // Draw on the font baseline (not the top) so glyphs are positioned by the
+    // font's own metrics. The tight-crop below then yields a baseline-correct
+    // vertical offset, and a full-cell selection wraps the text symmetrically.
+    ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(text, 0, 0);
+    ctx.fillText(text, 0, this._config.baseline);
 
     const imageData = ctx.getImageData(0, 0, w, h);
     const isColor = this._detectColor(imageData.data);
