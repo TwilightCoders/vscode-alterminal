@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>xterm-addon-webgpu — Phase 0 bench</title>
+  <style>
+    body { margin: 0; background: #111; color: #ddd; font: 13px ui-monospace, monospace; padding: 16px; }
+    h1 { font-size: 15px; }
+    table { border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #333; padding: 6px 12px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .win { color: #6a9955; font-weight: bold; }
+    #note { color: #888; max-width: 720px; line-height: 1.5; }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Phase 0: instanced quads vs fullscreen-quad + lookup</h1>
+  <p id="note">
+    Reproduces the Alacritty PR #4373 question for our hardware: does drawing one
+    instanced unit-quad per visible cell beat drawing a single fullscreen quad
+    whose fragment shader does the grid lookup? Lower ms/frame is better. Timing
+    uses <code>queue.onSubmittedWorkDone()</code> as a coarse GPU fence — relative
+    comparison only, not absolute throughput.
+  </p>
+  <div id="out">Running…</div>
+  <canvas id="c" width="1600" height="1200"></canvas>
+
+  <script type="module">
+    const out = document.getElementById("out");
+    const log = (html) => { out.innerHTML = html; };
+
+    const FRAMES = 240;
+    const GRIDS = [
+      { name: "80×24", cols: 80, rows: 24 },
+      { name: "200×50", cols: 200, rows: 50 },
+      { name: "400×100", cols: 400, rows: 100 },
+    ];
+
+    const instancedWGSL = /* wgsl */ `
+      struct VP { res: vec2<f32> };
+      struct Cell { origin: vec2<f32>, size: vec2<f32>, uv: vec4<f32> };
+      @group(0) @binding(0) var<uniform> vp: VP;
+      @group(0) @binding(1) var samp: sampler;
+      @group(0) @binding(2) var tex: texture_2d<f32>;
+      @group(1) @binding(0) var<storage, read> cells: array<Cell>;
+      struct VO { @builtin(position) p: vec4<f32>, @location(0) uv: vec2<f32> };
+      const C = array<vec2<f32>,6>(vec2(0.,0.),vec2(1.,0.),vec2(0.,1.),vec2(0.,1.),vec2(1.,0.),vec2(1.,1.));
+      @vertex fn vs(@builtin(vertex_index) v:u32, @builtin(instance_index) i:u32) -> VO {
+        let c = cells[i]; let k = C[v];
+        let px = c.origin + k*c.size;
+        let ndc = vec2(px.x/vp.res.x*2.-1., 1.-px.y/vp.res.y*2.);
+        var o:VO; o.p = vec4(ndc,0.,1.); o.uv = c.uv.xy + k*c.uv.zw; return o;
+      }
+      @fragment fn fs(in:VO) -> @location(0) vec4<f32> {
+        return vec4(0.8,0.8,0.8, textureSample(tex,samp,in.uv).a);
+      }`;
+
+    const fullscreenWGSL = /* wgsl */ `
+      struct VP { res: vec2<f32>, grid: vec2<f32>, cell: vec2<f32> };
+      @group(0) @binding(0) var<uniform> vp: VP;
+      @group(0) @binding(1) var samp: sampler;
+      @group(0) @binding(2) var tex: texture_2d<f32>;
+      @group(1) @binding(0) var<storage, read> codes: array<u32>;
+      struct VO { @builtin(position) p: vec4<f32> };
+      const C = array<vec2<f32>,6>(vec2(-1.,-1.),vec2(1.,-1.),vec2(-1.,1.),vec2(-1.,1.),vec2(1.,-1.),vec2(1.,1.));
+      @vertex fn vs(@builtin(vertex_index) v:u32) -> VO { var o:VO; o.p = vec4(C[v],0.,1.); return o; }
+      @fragment fn fs(in:VO) -> @location(0) vec4<f32> {
+        let px = in.p.xy;
+        let col = u32(floor(px.x / vp.cell.x));
+        let row = u32(floor(px.y / vp.cell.y));
+        let idx = row * u32(vp.grid.x) + col;
+        let code = codes[idx];
+        let local = vec2(fract(px.x/vp.cell.x), fract(px.y/vp.cell.y));
+        // Pretend each code picks a different atlas tile (16x16 grid of glyphs).
+        let tile = vec2(f32(code % 16u), f32((code/16u) % 16u)) / 16.;
+        let uv = tile + local / 16.;
+        return vec4(0.8,0.8,0.8, textureSample(tex,samp,uv).a);
+      }`;
+
+    async function main() {
+      if (!("gpu" in navigator)) { log("<span style='color:#f48771'>WebGPU unavailable.</span>"); return; }
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+      const device = await adapter.requestDevice();
+      const canvas = document.getElementById("c");
+      const ctx = canvas.getContext("webgpu");
+      const format = navigator.gpu.getPreferredCanvasFormat();
+      ctx.configure({ device, format, alphaMode: "opaque" });
+
+      // Dummy 256x256 atlas with a soft gradient in alpha.
+      const atlas = device.createTexture({
+        size: [256, 256], format: "rgba8unorm",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      const pixels = new Uint8Array(256 * 256 * 4);
+      for (let i = 0; i < 256 * 256; i++) { pixels[i*4]=255; pixels[i*4+1]=255; pixels[i*4+2]=255; pixels[i*4+3]=(i*7)&0xff; }
+      device.queue.writeTexture({ texture: atlas }, pixels, { bytesPerRow: 256*4 }, [256,256]);
+      const texView = atlas.createView();
+      const samp = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+
+      const sharedLayout = device.createBindGroupLayout({ entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT, buffer:{type:"uniform"} },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler:{type:"filtering"} },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture:{sampleType:"float"} },
+      ]});
+      const storLayout = device.createBindGroupLayout({ entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT, buffer:{type:"read-only-storage"} },
+      ]});
+
+      const mkPipeline = (code) => device.createRenderPipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [sharedLayout, storLayout] }),
+        vertex: { module: device.createShaderModule({ code }), entryPoint: "vs" },
+        fragment: { module: device.createShaderModule({ code }), entryPoint: "fs", targets: [{ format }] },
+        primitive: { topology: "triangle-list" },
+      });
+      const instPipe = mkPipeline(instancedWGSL);
+      const fullPipe = mkPipeline(fullscreenWGSL);
+
+      async function timePass(buildPass) {
+        // warmup
+        for (let i = 0; i < 30; i++) { const e = device.createCommandEncoder(); buildPass(e); device.queue.submit([e.finish()]); }
+        await device.queue.onSubmittedWorkDone();
+        const t0 = performance.now();
+        for (let i = 0; i < FRAMES; i++) { const e = device.createCommandEncoder(); buildPass(e); device.queue.submit([e.finish()]); }
+        await device.queue.onSubmittedWorkDone();
+        return (performance.now() - t0) / FRAMES;
+      }
+
+      const rows = [];
+      for (const g of GRIDS) {
+        const n = g.cols * g.rows;
+        const cellW = canvas.width / g.cols, cellH = canvas.height / g.rows;
+
+        // instanced data: 8 floats/cell (origin.xy, size.xy, uv.xyzw)
+        const inst = new Float32Array(n * 8);
+        for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) {
+          const o = (r*g.cols+c)*8; const code = (r*g.cols+c) % 256;
+          inst[o]=c*cellW; inst[o+1]=r*cellH; inst[o+2]=cellW; inst[o+3]=cellH;
+          const tx=(code%16)/16, ty=((code/16|0)%16)/16;
+          inst[o+4]=tx; inst[o+5]=ty; inst[o+6]=1/16; inst[o+7]=1/16;
+        }
+        const instBuf = device.createBuffer({ size: inst.byteLength, usage: GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(instBuf, 0, inst);
+        const instVP = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(instVP, 0, new Float32Array([canvas.width, canvas.height, 0, 0]));
+        const instShared = device.createBindGroup({ layout: sharedLayout, entries: [
+          {binding:0,resource:{buffer:instVP}},{binding:1,resource:samp},{binding:2,resource:texView}]});
+        const instStor = device.createBindGroup({ layout: storLayout, entries:[{binding:0,resource:{buffer:instBuf}}]});
+
+        // fullscreen data: u32 code/cell
+        const codes = new Uint32Array(n);
+        for (let i = 0; i < n; i++) codes[i] = i % 256;
+        const codeBuf = device.createBuffer({ size: codes.byteLength, usage: GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(codeBuf, 0, codes);
+        const fullVP = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(fullVP, 0, new Float32Array([canvas.width, canvas.height, g.cols, g.rows, cellW, cellH, 0, 0]));
+        const fullShared = device.createBindGroup({ layout: sharedLayout, entries: [
+          {binding:0,resource:{buffer:fullVP}},{binding:1,resource:samp},{binding:2,resource:texView}]});
+        const fullStor = device.createBindGroup({ layout: storLayout, entries:[{binding:0,resource:{buffer:codeBuf}}]});
+
+        const colorAttachment = () => ({ view: ctx.getCurrentTexture().createView(), clearValue:{r:0,g:0,b:0,a:1}, loadOp:"clear", storeOp:"store" });
+
+        const instMs = await timePass((e) => {
+          const p = e.beginRenderPass({ colorAttachments:[colorAttachment()] });
+          p.setPipeline(instPipe); p.setBindGroup(0,instShared); p.setBindGroup(1,instStor); p.draw(6, n); p.end();
+        });
+        const fullMs = await timePass((e) => {
+          const p = e.beginRenderPass({ colorAttachments:[colorAttachment()] });
+          p.setPipeline(fullPipe); p.setBindGroup(0,fullShared); p.setBindGroup(1,fullStor); p.draw(6, 1); p.end();
+        });
+        rows.push({ grid: g.name, n, instMs, fullMs });
+      }
+
+      let html = "<table><tr><th>grid</th><th>cells</th><th>instanced ms</th><th>fullscreen ms</th><th>winner</th></tr>";
+      for (const r of rows) {
+        const instWin = r.instMs <= r.fullMs;
+        html += `<tr><td>${r.grid}</td><td>${r.n}</td>` +
+          `<td class="${instWin?'win':''}">${r.instMs.toFixed(3)}</td>` +
+          `<td class="${!instWin?'win':''}">${r.fullMs.toFixed(3)}</td>` +
+          `<td>${instWin?'instanced':'fullscreen'}</td></tr>`;
+      }
+      html += "</table>";
+      html += "<p id='note'>Adapter: " + (adapter.info ? (adapter.info.vendor + " " + adapter.info.architecture) : "(info unavailable)") + "</p>";
+      log(html);
+      console.table(rows);
+    }
+    main().catch((e) => log("<span style='color:#f48771'>" + e.message + "</span>"));
+  </script>
+</body>
+</html>

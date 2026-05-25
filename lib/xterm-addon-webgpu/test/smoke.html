@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>xterm-addon-webgpu — smoke test</title>
+  <style>
+    body { margin: 0; background: #1e1e1e; color: #d0d0d0; font: 13px system-ui, sans-serif; }
+    header { padding: 10px 16px; border-bottom: 1px solid #333; }
+    #status { color: #6a9955; }
+    #status.err { color: #f48771; }
+    #wrap { padding: 16px; }
+    canvas { image-rendering: pixelated; border: 1px solid #333; display: block; }
+    code { color: #ce9178; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>xterm-addon-webgpu smoke test</strong> —
+    <span id="status">initializing…</span>
+    <div style="margin-top:6px; color:#888">
+      Serve this directory over http (<code>npx http-server ..</code> or
+      <code>python3 -m http.server</code>) and open in a WebGPU-capable browser
+      (Chrome/Edge 113+, or Electron 28+). Drives <code>WebgpuRenderer</code>
+      directly with a synthetic buffer — no xterm, no extension host.
+    </div>
+  </header>
+  <div id="wrap"><canvas id="term"></canvas></div>
+
+  <script type="module">
+    import { SharedDevice } from "../dist/shared/SharedDevice.js";
+    import { WebgpuRenderer } from "../dist/WebgpuRenderer.js";
+
+    const statusEl = document.getElementById("status");
+    const fail = (msg) => { statusEl.textContent = msg; statusEl.className = "err"; console.error(msg); };
+
+    // --- packed color helpers (0xRRGGBBAA) ---
+    const rgba = (r, g, b, a = 0xff) => ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
+
+    // --- a minimal palette ---
+    const ansi = [];
+    for (let i = 0; i < 256; i++) ansi.push(rgba(i, i, i));
+    ansi[1] = rgba(0xf4, 0x87, 0x71); // red
+    ansi[2] = rgba(0x6a, 0x99, 0x55); // green
+    ansi[4] = rgba(0x56, 0x9c, 0xd6); // blue
+    const palette = {
+      foreground: rgba(0xd4, 0xd4, 0xd4),
+      background: rgba(0x1e, 0x1e, 0x1e),
+      cursor: rgba(0xff, 0xff, 0xff),
+      cursorAccent: rgba(0, 0, 0),
+      selectionBackground: rgba(0x26, 0x4f, 0x78, 0xff),
+      ansi,
+    };
+
+    // --- synthetic xterm-like cell ---
+    // spec: { ch, fg?: 0xRRGGBB (RGB) | {p:index} (palette), bold, italic, ul }
+    function makeCell(spec) {
+      const s = spec || {};
+      const ch = s.ch ?? " ";
+      const fgRGB = typeof s.fg === "number" ? s.fg : null;
+      const fgPal = s.fg && typeof s.fg === "object" ? s.fg.p : null;
+      return {
+        getChars: () => ch,
+        getCode: () => (ch ? ch.codePointAt(0) : 0),
+        getWidth: () => 1,
+        isFgRGB: () => fgRGB !== null,
+        isBgRGB: () => false,
+        isFgPalette: () => fgPal !== null,
+        isBgPalette: () => false,
+        isFgDefault: () => fgRGB === null && fgPal === null,
+        isBgDefault: () => true,
+        getFgColor: () => (fgRGB !== null ? fgRGB : fgPal ?? 0),
+        getBgColor: () => 0,
+        isBold: () => (s.bold ? 1 : 0),
+        isItalic: () => (s.italic ? 1 : 0),
+        isDim: () => 0,
+        isUnderline: () => (s.ul ? 1 : 0),
+        isBlink: () => 0,
+        isInverse: () => 0,
+        isInvisible: () => 0,
+        isStrikethrough: () => 0,
+        isOverline: () => 0,
+        getUnderlineStyle: () => (s.ul ? s.ul : 0),
+      };
+    }
+
+    function lineFromSpecs(specs, cols) {
+      const cells = [];
+      for (let x = 0; x < cols; x++) cells.push(makeCell(specs[x]));
+      return { getCell: (x) => cells[x] };
+    }
+
+    // Convert a plain string into per-cell specs with an optional style.
+    const str = (text, style = {}) => [...text].map((ch) => ({ ch, ...style }));
+
+    function buildBuffer(cols, rows) {
+      const lines = new Array(rows).fill(null).map(() => lineFromSpecs([], cols));
+      const put = (row, specs) => { lines[row] = lineFromSpecs(specs, cols); };
+
+      put(0, str("WebGPU renderer smoke test", {}));
+      put(2, [
+        ...str("ERROR ", { fg: { p: 1 } }),
+        ...str("OK ", { fg: { p: 2 } }),
+        ...str("INFO ", { fg: { p: 4 } }),
+        ...str("#aabbcc", { fg: 0xaabbcc }),
+      ]);
+      put(3, [
+        ...str("bold ", { bold: true }),
+        ...str("italic ", { italic: true }),
+        ...str("underline ", { ul: 1 }),
+        ...str("curly", { ul: 3 }),
+      ]);
+      put(4, str("emoji: ★ ✓ ✗ → λ ∑ 🎉 🚀", {}));
+      put(6, str("the quick brown fox jumps over the lazy dog 0123456789", {}));
+
+      return {
+        cursorX: 26,
+        cursorY: 0,
+        baseY: 0,
+        viewportY: 0,
+        length: rows,
+        getLine: (y) => lines[y],
+      };
+    }
+
+    function diagnoseNoWebgpu() {
+      const ua = navigator.userAgent;
+      const isChromium = /Chrome|Edg|Chromium/.test(ua) && !/Firefox/.test(ua);
+      const isSafari = /Safari/.test(ua) && !isChromium;
+      const isFirefox = /Firefox/.test(ua);
+      let why;
+      if (!window.isSecureContext) {
+        why = "INSECURE CONTEXT — navigator.gpu is only exposed on https://, " +
+          "localhost, 127.0.0.1, or file://. You appear to be on '" +
+          location.protocol + "//" + location.host + "'. If you're going through " +
+          "the Remote Tunnel, open a *forwarded localhost* port, not the desktop's LAN IP.";
+      } else if (isFirefox) {
+        why = "FIREFOX — WebGPU is not enabled in Firefox stable on macOS. Use Chrome/Edge, or check about:config dom.webgpu.enabled.";
+      } else if (isSafari) {
+        why = "SAFARI — enable Develop ▸ Feature Flags ▸ WebGPU (Safari 17.4+), or use Safari Technology Preview / Chrome.";
+      } else if (isChromium) {
+        why = "CHROMIUM but no navigator.gpu — check chrome://gpu (WebGPU row). May be blocked by GPU denylist/flags; try --enable-unsafe-webgpu or chrome://flags/#enable-unsafe-webgpu.";
+      } else {
+        why = "Unknown browser without WebGPU.";
+      }
+      fail("WebGPU not available — " + why);
+      console.warn("[smoke] secureContext=", window.isSecureContext, " url=", location.href, " ua=", ua);
+    }
+
+    async function main() {
+      if (!("gpu" in navigator) || !navigator.gpu) { diagnoseNoWebgpu(); return; }
+
+      const dpr = window.devicePixelRatio || 1;
+      const cols = 60, rows = 8;
+      const deviceCellWidth = Math.floor(9 * dpr);
+      const deviceCellHeight = Math.floor(20 * dpr);
+
+      const config = {
+        fontFamily: "Menlo, Consolas, monospace",
+        fontSize: 14,
+        fontWeight: "normal",
+        fontWeightBold: "bold",
+        letterSpacing: 0,
+        lineHeight: 1,
+        devicePixelRatio: dpr,
+        deviceCellWidth,
+        deviceCellHeight,
+        deviceCharWidth: deviceCellWidth,
+        deviceCharHeight: deviceCellHeight,
+        palette,
+      };
+
+      let shared;
+      try {
+        shared = await SharedDevice.create(config);
+      } catch (e) {
+        fail("Device init failed: " + e.message);
+        return;
+      }
+
+      const canvas = document.getElementById("term");
+      canvas.style.width = (cols * deviceCellWidth) / dpr + "px";
+      canvas.style.height = (rows * deviceCellHeight) / dpr + "px";
+
+      const buffer = buildBuffer(cols, rows);
+      const metrics = {
+        cols, rows, deviceCellWidth, deviceCellHeight, devicePixelRatio: dpr,
+        palette, focused: true, cursorVisible: true, cursorStyle: "block",
+      };
+
+      const renderer = new WebgpuRenderer(canvas, shared, () => buffer, metrics);
+
+      // Demo a selection over "quick brown" on the fox line (row 6) so the
+      // selection-background painting is visible. In a real terminal xterm core
+      // drives this via mouse drag; here we set it directly. [col,row], end excl.
+      renderer.handleSelectionChanged([4, 6], [15, 6], false);
+      renderer.renderRows(0, rows - 1);
+
+      statusEl.textContent = "rendered ✓  (atlas pages: " + shared.atlas.layerCount +
+        ", page " + shared.atlas.pageSize + "px) — text, colors, styles, emoji, cursor, " +
+        "and a selection highlight on the fox line. If you can read it, the pipeline works.";
+
+      // Re-render a few times to exercise the cache hit path (no atlas growth).
+      let n = 0;
+      const tick = () => { renderer.renderRows(0, rows - 1); if (++n < 30) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+
+      // --- Harness-only drag-to-select -------------------------------------
+      // The smoke page has no xterm core, so this fakes the one thing xterm
+      // would do live: translate a mouse drag into a cell range and hand it to
+      // the renderer via handleSelectionChanged. It proves the *paint* path
+      // tracks a selection. It is NOT real selection — no clipboard, no
+      // word/line select; that all lives in xterm core at integration time.
+      const cssCellW = deviceCellWidth / dpr;
+      const cssCellH = deviceCellHeight / dpr;
+      const cellAt = (ev) => {
+        const r = canvas.getBoundingClientRect();
+        const col = Math.max(0, Math.min(cols, Math.floor((ev.clientX - r.left) / cssCellW)));
+        const row = Math.max(0, Math.min(rows - 1, Math.floor((ev.clientY - r.top) / cssCellH)));
+        return [col, row];
+      };
+      let dragging = false;
+      let anchor = null;
+      canvas.style.cursor = "text";
+      canvas.addEventListener("mousedown", (ev) => {
+        dragging = true;
+        anchor = cellAt(ev);
+        renderer.handleSelectionChanged(anchor, anchor, false);
+        renderer.renderRows(0, rows - 1);
+        ev.preventDefault();
+      });
+      window.addEventListener("mousemove", (ev) => {
+        if (!dragging) return;
+        renderer.handleSelectionChanged(anchor, cellAt(ev), false);
+        renderer.renderRows(0, rows - 1);
+      });
+      window.addEventListener("mouseup", () => { dragging = false; });
+    }
+
+    main().catch((e) => fail("Unexpected: " + (e && e.message)));
+  </script>
+</body>
+</html>
