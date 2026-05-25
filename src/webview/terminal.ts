@@ -244,20 +244,28 @@ export class TerminalInstance {
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
       this.unicodeAddon = new (window as any).UnicodeGraphemesAddon.UnicodeGraphemesAddon();
-      // Use WebGL renderer for best performance, fallback to DOM if unsupported
-      try {
-        this.webglAddon = new WebglAddon.WebglAddon();
-        this.webglAddon.onContextLoss(() => {
-          this.webglAddon.dispose();
-          this.webglAddon = null;
-          Logger.warn(`Terminal ${this.id}: WebGL context lost`);
-          this.showWebGLError();
-        });
-        this.terminal.loadAddon(this.webglAddon);
-        Logger.debug(`Terminal ${this.id}: Using WebGL renderer (GPU accelerated)`);
-      } catch (webglError) {
-        Logger.debug(`Terminal ${this.id}: Using DOM renderer (WebGL unavailable)`);
+      // Renderer: WebGL (default, GPU) unless alterminal.renderer === "dom",
+      // in which case we skip the addon entirely and use xterm's built-in DOM
+      // renderer (no glyph atlas). Falls back to DOM if WebGL init throws.
+      const rendererMode = (window as any).__alterminalRenderer ?? "webgl";
+      if (rendererMode === "dom") {
         this.webglAddon = null;
+        Logger.debug(`Terminal ${this.id}: Using DOM renderer (alterminal.renderer=dom)`);
+      } else {
+        try {
+          this.webglAddon = new WebglAddon.WebglAddon();
+          this.webglAddon.onContextLoss(() => {
+            this.webglAddon.dispose();
+            this.webglAddon = null;
+            Logger.warn(`Terminal ${this.id}: WebGL context lost`);
+            this.showWebGLError();
+          });
+          this.terminal.loadAddon(this.webglAddon);
+          Logger.debug(`Terminal ${this.id}: Using WebGL renderer (GPU accelerated)`);
+        } catch (webglError) {
+          Logger.debug(`Terminal ${this.id}: Using DOM renderer (WebGL unavailable)`);
+          this.webglAddon = null;
+        }
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);

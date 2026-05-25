@@ -862,6 +862,10 @@
         // Acquire VS Code API and make it global for ES6 modules
         window.vscode = acquireVsCodeApi();
 
+        // Renderer selection (alterminal.renderer): "webgl" (default, GPU) or
+        // "dom" (xterm built-in, no glyph atlas). Read by terminal.ts at create.
+        window.__alterminalRenderer = "{{rendererMode}}";
+
         {{combinedScript}}
     </script>
     

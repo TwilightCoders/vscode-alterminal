@@ -86,6 +86,14 @@ export class TemplateUtils {
     const dragDropHandlerUri = getWebviewScriptUri("dragDropHandler.js");
     const initUri = getWebviewScriptUri("init.js");
 
+    // Renderer selection. "webgl" (default) loads the GPU addon; "dom" skips
+    // it and uses xterm's built-in DOM renderer (no glyph atlas — useful for
+    // diagnosing atlas artifacts or for GPU-troubled machines).
+    const rendererSetting = vscode.workspace
+      .getConfiguration("alterminal")
+      .get<string>("renderer", "webgl");
+    const rendererMode = rendererSetting === "dom" ? "dom" : "webgl";
+
     // Create logger script inline (no import needed)
     const combinedScript = createWebviewLogger();
 
@@ -125,6 +133,7 @@ export class TemplateUtils {
       codiconCssUri,
       xtermCssUri,
       version,
+      rendererMode,
       xtermUri,
       fitAddonUri,
       webglAddonUri,

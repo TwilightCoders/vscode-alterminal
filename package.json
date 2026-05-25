@@ -334,6 +334,16 @@
             "minimum": 0,
             "markdownDescription": "After a tab emits a bell, Alterminal trusts it as the canonical attention signal and suppresses the background-activity dot from regular stdout (avoiding false flashes from spinners and re-draws). If no further bell arrives within this many minutes, the tab reverts to normal activity-on-stdout behavior. Set to `0` to disable bell-aware mode entirely (every stdout chunk flashes the dot)."
           },
+          "alterminal.renderer": {
+            "type": "string",
+            "enum": ["webgl", "dom"],
+            "default": "webgl",
+            "markdownEnumDescriptions": [
+              "GPU-accelerated WebGL renderer (default). Fastest, but uses a shared glyph texture atlas.",
+              "xterm's built-in DOM renderer. Slower, no glyph atlas — useful for diagnosing rendering artifacts or on machines where WebGL is unreliable."
+            ],
+            "markdownDescription": "Terminal renderer. `webgl` is GPU-accelerated (default). `dom` uses xterm's built-in DOM renderer with no glyph atlas. **Reload the window after changing.**"
+          },
           "alterminal.savedCommands": {
             "type": "array",
             "default": [],
