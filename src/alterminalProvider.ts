@@ -149,6 +149,13 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   ): void {
     this._view = alterminal;
 
+    // Show the version in the view header (next to the title/toolbar) rather
+    // than overlaying it on the terminal content.
+    const version = vscode.extensions.getExtension("twilightcoders.alterminal")?.packageJSON?.version;
+    if (version) {
+      alterminal.description = `v${version}`;
+    }
+
     // Serializer will handle webview lifecycle
     if (this._serializer && this._serializer.setAlterminal) {
       this._serializer.setAlterminal(alterminal);

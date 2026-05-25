@@ -523,18 +523,6 @@
         
     /* (show class now defined above for fade-in) */
         
-        .version-display {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground, #888888);
-            opacity: 0.7;
-            pointer-events: none;
-            z-index: 10;
-            font-family: var(--vscode-font-family, sans-serif);
-        }
-        
         .loading {
             display: flex;
             flex-direction: column;
@@ -823,7 +811,7 @@
         </nav>
         <main class="terminal-container">
             <!-- Terminal instances will be dynamically created here -->
-            <div class="version-display">v{{version}}</div>
+            <!-- Version is shown in the view header (WebviewView.description), not overlaid here -->
             <!-- Floating search bar — anchored to the terminal area so it
                  sits below the tab bar; bound to the active terminal's SearchAddon -->
             <div id="search-bar" class="search-bar" hidden>
