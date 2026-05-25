@@ -32,13 +32,16 @@
     <button id="theme">Toggle theme</button>
     <button id="fontUp">Font +</button>
     <button id="fontDown">Font −</button>
-    <span style="color:#666">— these change xterm options live; the renderer should follow (proves state subscriptions).</span>
+    <input id="search" placeholder="search (⌘F) — highlights via decorations" style="margin-left:8px; width:280px" />
+    <span style="color:#666">— theme/font exercise live state; search exercises decoration overrides.</span>
   </div>
   <div id="term"></div>
   <div class="row">selection: <span id="sel">(none)</span></div>
 
   <!-- xterm core (UMD → window.Terminal), the exact 6.0.0 we build against -->
   <script src="./node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <!-- search addon (UMD → window.SearchAddon); highlights matches via decorations -->
+  <script src="./node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script type="module">
     import { WebgpuAddon, isWebgpuSupported } from "./dist/index.js";
 
@@ -120,6 +123,28 @@
     };
     document.getElementById("fontUp").onclick = () => { term.options.fontSize = term.options.fontSize + 1; term.focus(); };
     document.getElementById("fontDown").onclick = () => { term.options.fontSize = Math.max(6, term.options.fontSize - 1); term.focus(); };
+
+    // Search — highlights matches via decorations, which our renderer paints
+    // through the decoration-service override path (parity #31).
+    const search = new SearchAddon.SearchAddon();
+    term.loadAddon(search);
+    const searchEl = document.getElementById("search");
+    const searchOpts = {
+      decorations: {
+        matchBackground: "#515c6a", matchOverviewRuler: "#515c6a",
+        activeMatchBackground: "#a8703a", activeMatchColorOverviewRuler: "#a8703a",
+      },
+    };
+    searchEl.addEventListener("input", () => {
+      if (searchEl.value) search.findNext(searchEl.value, searchOpts);
+      else search.clearDecorations();
+    });
+    searchEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); search.findNext(searchEl.value, searchOpts); }
+    });
+    window.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); searchEl.focus(); searchEl.select(); }
+    });
 
     term.focus();
     window.__term = term; // for poking in the console
