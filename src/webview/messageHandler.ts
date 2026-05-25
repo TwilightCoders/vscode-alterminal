@@ -6,6 +6,11 @@
  */
 
 import { Logger } from "./logger.js";
+import type {
+  ExtToWebviewMessage,
+  AnyMessage,
+  ExtractByCommand,
+} from "../shared/messages.js";
 
 declare const vscode: any;
 
@@ -80,7 +85,9 @@ export class MessageHandler {
    * Handle incoming message from extension
    */
   private handleMessage(event: MessageEvent): void {
-    const message = event.data;
+    // event.data is untyped at the boundary; the discriminated union lets the
+    // switch below narrow each case to its exact payload shape.
+    const message = event.data as ExtToWebviewMessage;
 
     try {
       switch (message.command) {
@@ -234,7 +241,9 @@ export class MessageHandler {
 
   // === Individual message handlers ===
 
-  private handleFormatTabTitleResponse(message: any): void {
+  private handleFormatTabTitleResponse(
+    message: ExtractByCommand<ExtToWebviewMessage, "formatTabTitleResponse">,
+  ): void {
     try {
       if (typeof message.tabId === "number" && typeof message.title === "string") {
         this.callbacks.updateTabLabel(message.tabId, message.title);
@@ -245,7 +254,9 @@ export class MessageHandler {
     }
   }
 
-  private handleSavedCommandsList(message: any): void {
+  private handleSavedCommandsList(
+    message: ExtractByCommand<ExtToWebviewMessage, "savedCommandsList">,
+  ): void {
     try {
       const savedSet = new Set<string>(message.commands || []);
       this.callbacks.setSavedCommandsSet(savedSet);
@@ -265,10 +276,12 @@ export class MessageHandler {
     }
   }
 
-  private handleRestoreState(message: any): void {
+  private handleRestoreState(
+    message: ExtractByCommand<ExtToWebviewMessage, "restoreState">,
+  ): void {
     Logger.debug(
       "🔄 Received restoreState - terminals in message:",
-      message.state?.terminals?.length,
+      (message.state as any)?.terminals?.length,
       ", existing terminals:",
       this.callbacks.getTerminals().size,
       ", cold:",
@@ -343,7 +356,9 @@ export class MessageHandler {
     this.callbacks.restoreFromState(stateToRestore, !!message.cold);
   }
 
-  private handleInitializeEmpty(message: any): void {
+  private handleInitializeEmpty(
+    message: ExtractByCommand<ExtToWebviewMessage, "initializeEmpty">,
+  ): void {
     Logger.debug("🆕 Received initializeEmpty command - checking for existing state");
 
     const existingState = vscode.getState();
@@ -356,7 +371,9 @@ export class MessageHandler {
     }
   }
 
-  private handleData(message: any): void {
+  private handleData(
+    message: ExtractByCommand<ExtToWebviewMessage, "data">,
+  ): void {
     if (message.tabId) {
       this.callbacks.writeToTerminal(message.tabId, message.data);
     } else {
@@ -393,7 +410,9 @@ export class MessageHandler {
     });
   }
 
-  private handleSetDebugFilter(message: any): void {
+  private handleSetDebugFilter(
+    message: ExtractByCommand<ExtToWebviewMessage, "setDebugFilter">,
+  ): void {
     if (message.filter) {
       localStorage.setItem("alterminal.debugFilter", JSON.stringify(message.filter));
     } else {
@@ -401,7 +420,9 @@ export class MessageHandler {
     }
   }
 
-  private handleSetDeveloperMode(message: any): void {
+  private handleSetDeveloperMode(
+    message: ExtractByCommand<ExtToWebviewMessage, "setDeveloperMode">,
+  ): void {
     (window as any).DEVELOPER_MODE = message.enabled;
     try {
       Logger.configureDevMode(message.enabled);
@@ -410,7 +431,9 @@ export class MessageHandler {
     }
   }
 
-  private handleUpdateConfig(message: any): void {
+  private handleUpdateConfig(
+    message: ExtractByCommand<ExtToWebviewMessage, "updateConfig">,
+  ): void {
     if (message.config) {
       if (typeof message.config.alwaysShowTabs === "boolean") {
         this.callbacks.setAlwaysShowTabs(message.config.alwaysShowTabs);
@@ -438,7 +461,9 @@ export class MessageHandler {
     }
   }
 
-  private handleCommandSavedResponse(message: any): void {
+  private handleCommandSavedResponse(
+    message: ExtractByCommand<ExtToWebviewMessage, "commandSavedResponse">,
+  ): void {
     Logger.debug("📋 Received command saved status:", message.launchCommand, message.isSaved);
     this.callbacks.updateSaveButtonVisibility(message.launchCommand, message.isSaved);
 
