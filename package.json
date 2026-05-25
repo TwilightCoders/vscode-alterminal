@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0-dev.0",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",
@@ -336,7 +336,11 @@
           },
           "alterminal.renderer": {
             "type": "string",
-            "enum": ["webgl", "dom", "webgpu"],
+            "enum": [
+              "webgl",
+              "dom",
+              "webgpu"
+            ],
             "default": "webgl",
             "markdownEnumDescriptions": [
               "GPU-accelerated WebGL renderer (default). Fastest, but uses a shared glyph texture atlas.",
