@@ -476,15 +476,22 @@ export class WebgpuRenderer {
     }
     const page = this._shared.atlas.pageSize;
     const [r, g, b, a] = rgbaToFloats(fgRgba);
+    // Half-texel inset: sample within [pos+0.5 .. pos+size-0.5] so nearest
+    // filtering always lands on this glyph's own texels and never bleeds into
+    // the adjacent glyph at the quad's far edge (the yellow-fragment artifact).
+    const uvX = (glyph.texturePosition.x + 0.5) / page;
+    const uvY = (glyph.texturePosition.y + 0.5) / page;
+    const uvW = Math.max(0, glyph.size.x - 1) / page;
+    const uvH = Math.max(0, glyph.size.y - 1) / page;
     this._glyphStager.push([
       xPx + glyph.offset.x,
       yPx + glyph.offset.y,
       glyph.size.x,
       glyph.size.y,
-      glyph.texturePosition.x / page,
-      glyph.texturePosition.y / page,
-      glyph.size.x / page,
-      glyph.size.y / page,
+      uvX,
+      uvY,
+      uvW,
+      uvH,
       r,
       g,
       b,
