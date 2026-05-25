@@ -26,7 +26,7 @@ import { DamageTracker } from "./model/DamageTracker.js";
 import { InstanceStager } from "./model/InstanceStager.js";
 import { readCell, emptyReadCell, type IReadCell } from "./model/CellReader.js";
 import { normalizeSelection, isCellInSelection, type Selection } from "./model/selection.js";
-import { extractUnderlineStyle, NULL_CELL_CODE, UnderlineStyle } from "./util/attributes.js";
+import { extractUnderlineStyle, FgFlags, NULL_CELL_CODE, UnderlineStyle } from "./util/attributes.js";
 import { Emitter, type Event } from "./util/event.js";
 
 export type CursorStyle = "block" | "underline" | "bar";
@@ -299,6 +299,13 @@ export class WebgpuRenderer {
     this._glyphStager.reset();
     this._decorStager.reset();
 
+    // Cursor cell (viewport-relative), if visible and on-screen.
+    const cursor =
+      m.cursorVisible && buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols
+        ? { row: buffer.cursorY, col: buffer.cursorX }
+        : null;
+    const blockCursor = cursor !== null && m.cursorStyle === "block";
+
     const top = buffer.viewportY;
     for (let row = 0; row < m.rows; row++) {
       const absRow = top + row;
@@ -326,14 +333,25 @@ export class WebgpuRenderer {
           palette,
         );
 
-        // Background (skip the default — the pass clears to it).
-        if (resolved.bg !== palette.background) {
-          this._pushRect(xPx, yPx, cellW, cellH, resolved.bg, 1);
+        const isCursorCell = cursor !== null && cursor.row === row && cursor.col === col;
+        const invertForCursor = isCursorCell && blockCursor && m.focused;
+
+        // Background. A focused block cursor paints the cell in the cursor
+        // color and the glyph gets inverted to the accent color below (true
+        // inversion, not a translucent overlay). Otherwise skip the default bg.
+        const bgColor = invertForCursor ? m.palette.cursor : resolved.bg;
+        if (bgColor !== palette.background) {
+          this._pushRect(xPx, yPx, cellW, cellH, bgColor, 1);
+        }
+        // Unfocused block cursor: hollow outline, glyph unchanged.
+        if (isCursorCell && blockCursor && !m.focused) {
+          this._pushRectOutline(xPx, yPx, cellW, cellH, m.palette.cursor);
         }
 
         // Glyph.
         if (cell.code !== NULL_CELL_CODE && cell.chars.length > 0 && cell.chars !== " ") {
-          this._pushGlyph(cell, xPx, yPx, resolved.fg, resolved.dim);
+          const glyphColor = invertForCursor ? m.palette.cursorAccent : resolved.fg;
+          this._pushGlyph(cell, xPx, yPx, glyphColor, resolved.dim && !invertForCursor);
         }
 
         // Underline / strikethrough decorations.
@@ -386,18 +404,33 @@ export class WebgpuRenderer {
     fgRgba: number,
   ): void {
     const [r, g, b, a] = rgbaToFloats(fgRgba);
+    const dpr = this._metrics.devicePixelRatio || 1;
+    // A 1px logical stroke; scales with DPR. (Real font underline-thickness
+    // metrics would refine this; this is the cell-derived approximation.)
+    const stroke = Math.max(1, Math.round(dpr));
+    const bottomGap = Math.max(1, Math.round(dpr));
+
     const us = extractUnderlineStyle(cell.ext);
     if (us !== UnderlineStyle.NONE) {
-      // Underline band sits at the bottom ~15% of the cell.
-      const bandH = Math.max(1, Math.round(cellH * 0.15));
       const styleId = underlineStyleToShaderId(us);
-      this._decorStager.push([xPx, yPx + cellH - bandH, cellW, bandH, r, g, b, a, styleId, cellW, 0, 0]);
+      // Single/dashed: a thin stroke. Double needs room for two lines; curly
+      // needs amplitude for the wave. The shader shapes within this band.
+      let bandH = stroke;
+      if (us === UnderlineStyle.DOUBLE) {
+        bandH = stroke * 3;
+      } else if (us === UnderlineStyle.CURLY) {
+        bandH = Math.max(3 * dpr, Math.round(cellH * 0.12));
+      }
+      const yBand = Math.round(yPx + cellH - bottomGap - bandH);
+      // periodPx drives dashed/curly; ~half a cell reads well.
+      const periodPx = Math.max(4, Math.round(cellH * 0.5));
+      this._decorStager.push([xPx, yBand, cellW, Math.round(bandH), r, g, b, a, styleId, periodPx, 0, 0]);
     }
-    // Strikethrough flag is carried in fg (FgFlags.STRIKETHROUGH); CellReader
-    // folds it into cell.fg, so we re-check via the packed value.
-    if (cell.fg & 0x80000000) {
-      const bandH = Math.max(1, Math.round(cellH * 0.1));
-      this._decorStager.push([xPx, yPx + cellH * 0.5 - bandH / 2, cellW, bandH, r, g, b, a, 4, cellW, 0, 0]);
+
+    // Strikethrough — a thin stroke across the x-height midline.
+    if (cell.fg & FgFlags.STRIKETHROUGH) {
+      const yStrike = Math.round(yPx + cellH * 0.45);
+      this._decorStager.push([xPx, yStrike, cellW, stroke, r, g, b, a, 4, cellW, 0, 0]);
     }
   }
 
@@ -413,23 +446,28 @@ export class WebgpuRenderer {
     }
     const xPx = col * m.deviceCellWidth;
     const yPx = row * m.deviceCellHeight;
-    const [r, g, b] = rgbaToFloats(m.palette.cursor);
+    // Block cursor is handled inline in _build (true inversion / outline).
+    const barW = Math.max(1, Math.round(2 * m.devicePixelRatio));
+    const lineH = Math.max(1, Math.round(2 * m.devicePixelRatio));
     switch (m.cursorStyle) {
       case "bar":
-        this._pushRect(xPx, yPx, Math.max(1, m.devicePixelRatio), m.deviceCellHeight, m.palette.cursor, 1);
+        this._pushRect(xPx, yPx, barW, m.deviceCellHeight, m.palette.cursor, 1);
         break;
-      case "underline": {
-        const h = Math.max(1, Math.round(m.deviceCellHeight * 0.12));
-        this._pushRect(xPx, yPx + m.deviceCellHeight - h, m.deviceCellWidth, h, m.palette.cursor, 1);
+      case "underline":
+        this._pushRect(xPx, yPx + m.deviceCellHeight - lineH, m.deviceCellWidth, lineH, m.palette.cursor, 1);
         break;
-      }
-      case "block":
       default:
-        // Phase-1 block cursor: translucent fill so the glyph stays legible.
-        // Phase 2 will swap the glyph to the cursor-accent color (true inverse).
-        this._rectStager.push([xPx, yPx, m.deviceCellWidth, m.deviceCellHeight, r, g, b, m.focused ? 0.5 : 0.3]);
-        break;
+        break; // block handled in _build
     }
+  }
+
+  /** Draw a hollow rectangle outline (unfocused block cursor). */
+  private _pushRectOutline(x: number, y: number, w: number, h: number, rgba: number): void {
+    const t = Math.max(1, Math.round(this._metrics.devicePixelRatio));
+    this._pushRect(x, y, w, t, rgba, 1); // top
+    this._pushRect(x, y + h - t, w, t, rgba, 1); // bottom
+    this._pushRect(x, y, t, h, rgba, 1); // left
+    this._pushRect(x + w - t, y, t, h, rgba, 1); // right
   }
 
   private _draw(): void {
