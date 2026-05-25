@@ -238,6 +238,7 @@ export class WebgpuAddon {
     const core = terminal._core as Record<string, any> | undefined;
     const d = this._charDims(terminal);
     const focused = core?._coreBrowserService?.isFocused ?? true;
+    const opts = core?.optionsService?.rawOptions ?? {};
     const cursorStyle = (terminal.options.cursorStyle as CursorStyle) ?? "block";
     return {
       cols: terminal.cols,
@@ -247,8 +248,9 @@ export class WebgpuAddon {
       devicePixelRatio: d.dpr,
       palette: this._buildPalette(terminal),
       focused,
-      cursorVisible: true,
+      cursorVisible: opts.cursorInactiveStyle !== "none" || focused,
       cursorStyle,
+      cursorBlink: !!(terminal.options.cursorBlink ?? opts.cursorBlink),
     };
   }
 

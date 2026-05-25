@@ -42,6 +42,8 @@ export interface IRenderMetrics {
   focused: boolean;
   cursorVisible: boolean;
   cursorStyle: CursorStyle;
+  /** Whether the cursor should blink (xterm's cursorBlink option). */
+  cursorBlink: boolean;
 }
 
 const GLYPH_FLOATS = 16;
@@ -118,6 +120,9 @@ export class WebgpuRenderer {
   private _selection: Selection | null = null;
   /** xterm's reusable cell object, captured on first read to avoid per-cell GC. */
   private _reusableXtermCell?: import("./model/xtermTypes.js").IXtermBufferCell;
+  /** Cursor blink state: true = cursor visible this phase. */
+  private _cursorBlinkOn = true;
+  private _blinkTimer?: ReturnType<typeof setInterval>;
 
   private readonly _onRequestRedraw = new Emitter<{ start: number; end: number }>();
   public readonly onRequestRedraw: Event<{ start: number; end: number }> = this._onRequestRedraw.event;
@@ -172,6 +177,7 @@ export class WebgpuRenderer {
     this._decorSlot = new StorageBufferSlot(this._device, _shared.layouts.instanceStorage, "webgpu-term:decors");
 
     this._applyMetrics();
+    this._updateBlink();
   }
 
   private _makeGlyphSharedBindGroup(): GPUBindGroup {
@@ -211,6 +217,7 @@ export class WebgpuRenderer {
   public setMetrics(metrics: IRenderMetrics): void {
     this._metrics = metrics;
     this._applyMetrics();
+    this._updateBlink();
     this._damage.markAllDirty();
     this._requestRedraw();
   }
@@ -251,6 +258,26 @@ export class WebgpuRenderer {
     this._onRequestRedraw.fire({ start: 0, end: Math.max(0, this._metrics.rows - 1) });
   }
 
+  /**
+   * (Re)configure cursor blinking. Blinks only when the option is on AND the
+   * terminal is focused; otherwise the cursor is steady. Each tick flips
+   * visibility and requests a redraw. A simplified CursorBlinkStateManager —
+   * fixed interval, reset to visible on (re)start.
+   */
+  private _updateBlink(): void {
+    if (this._blinkTimer !== undefined) {
+      clearInterval(this._blinkTimer);
+      this._blinkTimer = undefined;
+    }
+    this._cursorBlinkOn = true;
+    if (this._metrics.cursorBlink && this._metrics.focused && !this._disposed) {
+      this._blinkTimer = setInterval(() => {
+        this._cursorBlinkOn = !this._cursorBlinkOn;
+        this._requestRedraw();
+      }, 530);
+    }
+  }
+
   public handleResize(cols: number, rows: number): void {
     this._metrics = { ...this._metrics, cols, rows };
     this._applyMetrics();
@@ -269,12 +296,14 @@ export class WebgpuRenderer {
 
   public handleBlur(): void {
     this._metrics = { ...this._metrics, focused: false };
+    this._updateBlink(); // stop blinking while unfocused
     this._damage.markAllDirty();
     this._requestRedraw();
   }
 
   public handleFocus(): void {
     this._metrics = { ...this._metrics, focused: true };
+    this._updateBlink(); // resume blinking, reset to visible
     this._damage.markAllDirty();
     this._requestRedraw();
   }
@@ -295,6 +324,9 @@ export class WebgpuRenderer {
   }
 
   public handleCursorMove(): void {
+    // Reset the blink so the cursor is solid right after it moves (xterm does
+    // the same — typing shouldn't land mid-blink-off).
+    this._updateBlink();
     this._damage.markAllDirty();
     this._requestRedraw();
   }
@@ -350,7 +382,8 @@ export class WebgpuRenderer {
 
     // Cursor cell (viewport-relative), if visible and on-screen.
     const cursor =
-      m.cursorVisible && buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols
+      m.cursorVisible && this._cursorBlinkOn &&
+      buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols
         ? { row: buffer.cursorY, col: buffer.cursorX }
         : null;
     const blockCursor = cursor !== null && m.cursorStyle === "block";
@@ -504,7 +537,7 @@ export class WebgpuRenderer {
 
   private _pushCursor(buffer: IXtermBuffer): void {
     const m = this._metrics;
-    if (!m.cursorVisible) {
+    if (!m.cursorVisible || !this._cursorBlinkOn) {
       return;
     }
     const row = buffer.cursorY; // already viewport-relative in xterm's active buffer
@@ -589,6 +622,10 @@ export class WebgpuRenderer {
       return;
     }
     this._disposed = true;
+    if (this._blinkTimer !== undefined) {
+      clearInterval(this._blinkTimer);
+      this._blinkTimer = undefined;
+    }
     this._rectSlot.dispose();
     this._glyphSlot.dispose();
     this._decorSlot.dispose();
