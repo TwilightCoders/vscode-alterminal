@@ -29,14 +29,24 @@ export type ExtToWebviewMessage =
   // Tab/PTY lifecycle
   | { command: "createNewTab"; terminalType?: string; launchCommand?: string; cwd?: string; shellPath?: string }
   | { command: "switchToTab"; tabId: number }
+  | { command: "checkProcessesResponse"; tabId: number; processes: Array<{ pid: number; name: string }> }
   // Configuration + state
   | { command: "updateConfig"; config: WebviewConfig }
-  | { command: "restoreState"; state: unknown; cold?: boolean }
+  | { command: "restoreState"; state: unknown; cold?: boolean; liveDaemonUuids?: string[] }
   | { command: "initializeEmpty"; cold?: boolean }
   | { command: "stateResponse"; state: unknown }
-  | { command: "savedCommandsList"; commands: SavedCommand[] }
+  // The webview reads `commands` as a flat list of command strings.
+  | { command: "savedCommandsList"; commands: string[] }
   | { command: "commandSavedResponse"; launchCommand: string; isSaved: boolean }
   | { command: "formatTabTitleResponse"; tabId: number; title: string }
+  // Tab control echoed back to the webview (sent by context-menu / command handlers)
+  | { command: "renameTab"; tabId: number }
+  | { command: "closeTab"; tabId: number }
+  | { command: "setTabIcon"; tabId: number; icon: string }
+  | { command: "getTabBuffer"; tabId: number }
+  | { command: "saveCurrentCommand" }
+  | { command: "updateFileCache"; files?: string[] }
+  | { command: "fileExistsResponse"; filePath: string; exists: boolean }
   // UI signals
   | { command: "focus" }
   | { command: "refresh" }
@@ -50,7 +60,7 @@ export type ExtToWebviewMessage =
   | { command: "setDebugFilter"; filter: unknown }
   | { command: "setDeveloperMode"; enabled: boolean }
   | { command: "openIconPicker"; tabId: number }
-  | { command: "debugPasteImageBytes"; tabId: number; pngBase64: string };
+  | { command: "debugPasteImageBytes"; tabId?: number; pngBase64?: string };
 
 // ────────────────────────────────────────────────────────────────────
 // Webview → extension host
@@ -58,47 +68,44 @@ export type ExtToWebviewMessage =
 
 export type WebviewToExtMessage =
   // PTY control
-  | { command: "createPty"; tabId: number; cols: number; rows: number; cwd?: string; shellPath?: string; launchCommand?: string }
+  | { command: "createPty"; tabId: number; cols: number; rows: number; cwd?: string; shellPath?: string; launchCommand?: string; terminalType?: string; uuid?: string }
   | { command: "disposePty"; tabId: number }
   | { command: "resize"; tabId: number; cols: number; rows: number }
   | { command: "data"; tabId: number; data: string }
   | { command: "clearBuffer"; tabId: number }
   | { command: "sendFilePath"; tabId: number; filePath: string }
-  | { command: "sendFileData"; tabId: number; fileData: string; fileName: string; fileType: string; fileSize: number }
+  | { command: "sendFileData"; tabId: number; fileData: string; fileName: string; fileType: string }
   | { command: "fileDrop"; tabId: number; fileName: string; fileType: string; fileSize: number; fileData: string }
   // Tab control / coordination
   | { command: "switchTab"; tabId: number }
   | { command: "newTab"; terminalType?: string }
-  | { command: "closeTab"; tabId: number }
-  | { command: "renameTab"; tabId: number; newName: string }
   | { command: "saveCommand"; tabId: number; launchCommand: string; tabLabel: string; iconClass?: string }
-  | { command: "saveCurrentCommand"; tabId: number }
   | { command: "checkCommandSaved"; launchCommand: string }
   | { command: "checkProcesses"; tabId: number }
-  | { command: "checkProcessesResponse"; tabId: number; processes: Array<{ pid: number; name: string }> }
-  | { command: "formatTabTitle"; tabId: number; opts: Record<string, unknown> }
-  | { command: "processChange"; tabId: number; processName: string }
+  // Sent with the full render context; the host reads each field individually.
+  | { command: "formatTabTitle"; tabId: number; tabName?: string; baseTabName?: string; template?: string; processName?: string; processId?: number; oscTitle?: string; fullCommand?: string; workingDirectory?: string; lastExitCode?: number; userVars?: Record<string, string> }
   // Window/panel signals
-  | { command: "ready" }
   | { command: "webviewReady" }
   | { command: "panelFocused" }
-  | { command: "bell"; tabId: number; tabLabel?: string }
   | { command: "bellDiagnostic"; tabId: number; source: string }
+  | { command: "playBellSound"; tabId: number; tabLabel?: string }
   | { command: "performanceReport"; data: PerformanceData }
   | { command: "clipboardCopy"; text: string }
+  | { command: "debugLog"; [key: string]: unknown }
+  // Cross-direction signals (registered as no-op host handlers; really handled in the webview)
+  | { command: "setDebugFilter"; filter: unknown }
+  | { command: "setDeveloperMode"; enabled: boolean }
   // External actions
   | { command: "openFile"; filePath: string; terminalId: number }
   | { command: "openUrl"; url: string }
   | { command: "openSettings" }
-  | { command: "openSetting"; key: string }
-  | { command: "openJson"; path: string }
   // State persistence
-  | { command: "state"; state: unknown }
-  | { command: "metadataUpdate"; tabId: number; metadata: Record<string, unknown> }
-  | { command: "bufferUpdate"; tabId: number; chunk: string }
-  | { command: "bufferDelete"; tabId: number }
-  | { command: "bufferContent"; tabId: number; content: string }
-  | { command: "getTabBuffer"; tabId: number };
+  | { command: "metadataUpdate"; state: Record<string, unknown> }
+  | { command: "bufferUpdate"; buffers: Record<string, string> }
+  | { command: "bufferDelete"; uuid: string }
+  | { command: "bufferContent"; tabId: number; buffer: string }
+  | { command: "stateUpdate"; state: unknown }
+  | { command: "stateResponse"; state: unknown };
 
 // Catch-all for in-flight migration — handler code can keep accepting
 // arbitrary objects while we incrementally tighten the union.
