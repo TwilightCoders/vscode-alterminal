@@ -3,6 +3,7 @@ import {
   focusNextDropdownItem as focusNextItem,
   focusPrevDropdownItem as focusPrevItem,
 } from "./dropdownUtils.js";
+import type { WebviewToExtMessage } from "../shared/messages.js";
 
 /**
  * Tab Title Manager
@@ -534,7 +535,7 @@ export class TabTitleManager {
       launchCommand: this.terminal.launchCommand,
       tabLabel: this.terminal.label,
       iconClass: currentIconClass,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -543,7 +544,7 @@ export class TabTitleManager {
   openSettings() {
     this.vscode.postMessage({
       command: "openSettings",
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -553,7 +554,7 @@ export class TabTitleManager {
     this.vscode.postMessage({
       command: "closeTab",
       tabId: this.tabId,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -563,7 +564,7 @@ export class TabTitleManager {
     this.vscode.postMessage({
       command: "checkCommandSaved",
       launchCommand: command,
-    });
+    } satisfies WebviewToExtMessage);
 
     saveElement.setAttribute("data-command", command);
   }

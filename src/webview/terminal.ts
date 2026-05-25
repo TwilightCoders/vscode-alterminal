@@ -3,6 +3,7 @@ import { TerminalLifecycleManager } from "./lifecycleManager.js";
 import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { TERMINAL_DEFAULTS } from "../constants.js";
+import type { WebviewToExtMessage } from "../shared/messages.js";
 
 interface TerminalOptions {
   autoStartPty?: boolean;
@@ -327,9 +328,9 @@ export class TerminalInstance {
       Logger.debug(`🔗 Link clicked: "${uri}"`);
       const isUrl = uri.startsWith('http://') || uri.startsWith('https://');
       if (isUrl) {
-        this.vscode.postMessage({ command: "openUrl", url: uri });
+        this.vscode.postMessage({ command: "openUrl", url: uri } satisfies WebviewToExtMessage);
       } else {
-        this.vscode.postMessage({ command: "openFile", filePath: uri, terminalId: this.id });
+        this.vscode.postMessage({ command: "openFile", filePath: uri, terminalId: this.id } satisfies WebviewToExtMessage);
       }
     };
 
@@ -480,7 +481,7 @@ export class TerminalInstance {
         command: "bellDiagnostic",
         tabId: this.id,
         source: "xterm.js",
-      });
+      } satisfies WebviewToExtMessage);
       if (this.onBellReceived) {
         this.onBellReceived(this.id);
       }
@@ -525,7 +526,7 @@ export class TerminalInstance {
         try {
           const text = atob(payload);
           // Use the extension host's clipboard API (works in tunnel mode too)
-          this.vscode.postMessage({ command: 'clipboardCopy', text });
+          this.vscode.postMessage({ command: 'clipboardCopy', text } satisfies WebviewToExtMessage);
           Logger.debug(`📋 OSC 52 clipboard copy (${text.length} chars)`);
         } catch (e) {
           Logger.warn('OSC 52 decode failed:', e);
@@ -1010,7 +1011,7 @@ export class TerminalInstance {
       shellPath: this.shellPath || undefined,
       cols: cols,
       rows: rows,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   startDeferredPtyIfNeeded() {
@@ -1029,7 +1030,7 @@ export class TerminalInstance {
       cols: cols,
       rows: rows,
       tabId: this.id,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -1039,7 +1040,7 @@ export class TerminalInstance {
     this.vscode.postMessage({
       command: "disposePty",
       tabId: this.id,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -1209,7 +1210,7 @@ export class TerminalInstance {
     refreshButton.textContent = "Refresh Terminal";
     refreshButton.addEventListener("click", () => {
       // Request a refresh from the extension
-      this.vscode.postMessage({ command: "refresh" });
+      this.vscode.postMessage({ command: "refresh" } satisfies WebviewToExtMessage);
     });
 
     overlay.appendChild(message);

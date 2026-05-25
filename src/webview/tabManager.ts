@@ -9,6 +9,7 @@ import { IconPickerModal } from "./iconPickerModal.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { BellAwareTracker } from "./bellAwareTracker.js";
 import { SearchBar } from "./searchBar.js";
+import type { WebviewToExtMessage } from "../shared/messages.js";
 
 /**
  * Tab Manager Class (Refactored)
@@ -134,7 +135,7 @@ export class TabManager {
     // Signal that webview is ready and request state
     // Using a regular message (not queueMicrotask) ensures the handler is registered
     // The extension will respond with restoreState or initializeEmpty
-    this.vscode.postMessage({ command: "webviewReady" });
+    this.vscode.postMessage({ command: "webviewReady" } satisfies WebviewToExtMessage);
 
     // Fallback: if no state arrives within 5 seconds, create a default terminal
     // This handles edge cases where extension message is lost
@@ -219,7 +220,7 @@ export class TabManager {
       saveToLocalState: () => this.saveToLocalState(),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
       onPanelFocused: () => {
-        this.vscode.postMessage({ command: "panelFocused" });
+        this.vscode.postMessage({ command: "panelFocused" } satisfies WebviewToExtMessage);
       },
     };
   }
@@ -303,7 +304,7 @@ export class TabManager {
       this.vscode.postMessage({
         command: "performanceReport",
         data: { count: 0, samples: [] },
-      });
+      } satisfies WebviewToExtMessage);
       return;
     }
     const initVals = samples.map((s) => s.initToOpen).filter((n) => n != null);
@@ -319,7 +320,7 @@ export class TabManager {
         avgOpenToActive: openVals.length ? avg(openVals) : 0,
         samples,
       },
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -458,7 +459,7 @@ export class TabManager {
     // Clear notifications + activity for the newly active tab
     this._tabUIManager.hideNotification(tabId);
     this._tabUIManager.hideActivity(tabId);
-    this.vscode.postMessage({ command: "switchTab", tabId });
+    this.vscode.postMessage({ command: "switchTab", tabId } satisfies WebviewToExtMessage);
 
     // Schedule save reflecting activeTabId change
     try {
@@ -480,7 +481,7 @@ export class TabManager {
 
     // Ask extension host for child processes before closing.
     // Timeout after 2s — if check hangs, still show confirmation dialog.
-    this.vscode.postMessage({ command: "checkProcesses", tabId });
+    this.vscode.postMessage({ command: "checkProcesses", tabId } satisfies WebviewToExtMessage);
     const timeout = setTimeout(() => {
       if (this._pendingCloseChecks.has(tabId)) {
         this._pendingCloseChecks.delete(tabId);
@@ -557,7 +558,7 @@ export class TabManager {
         this.vscode.postMessage({
           command: "bufferDelete",
           uuid: terminal.uuid,
-        });
+        } satisfies WebviewToExtMessage);
       } catch (e) {
         Logger.warn("Failed to send buffer delete message:", e);
       }
@@ -624,7 +625,7 @@ export class TabManager {
       tabId: tabId,
       launchCommand: terminal.launchCommand,
       tabLabel: terminal.label,
-    });
+    } satisfies WebviewToExtMessage);
 
     // Provide visual feedback
     Logger.info(`Saving command: ${terminal.launchCommand}`);
@@ -641,7 +642,7 @@ export class TabManager {
     this.vscode.postMessage({
       command: "checkCommandSaved",
       launchCommand: command,
-    });
+    } satisfies WebviewToExtMessage);
 
     // Store element reference for later update
     saveElement.setAttribute("data-command", command);
@@ -832,7 +833,7 @@ export class TabManager {
         command: "bufferContent",
         tabId: tabId,
         buffer: "",
-      });
+      } satisfies WebviewToExtMessage);
       return;
     }
 
@@ -843,7 +844,7 @@ export class TabManager {
       command: "bufferContent",
       tabId: tabId,
       buffer: buffer,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -1125,7 +1126,7 @@ export class TabManager {
         this.vscode.postMessage({
           command: "metadataUpdate",
           state: metadata,
-        });
+        } satisfies WebviewToExtMessage);
 
         // Send dirty buffers keyed by UUID
         const buffers: Record<string, string> = {};
@@ -1138,7 +1139,7 @@ export class TabManager {
           this.vscode.postMessage({
             command: "bufferUpdate",
             buffers,
-          });
+          } satisfies WebviewToExtMessage);
         }
       } catch (msgError) {
         // Don't fail if async message fails during shutdown
@@ -1170,7 +1171,7 @@ export class TabManager {
     const dataUrl = `data:image/png;base64,${base64}`;
     const payload = `\x1b[200~${dataUrl}\x1b[201~`;
     Logger.warn(`debugPasteImageBytes: writing bracketed paste to tab ${tabId}`);
-    this.vscode.postMessage({ command: "data", data: payload, tabId });
+    this.vscode.postMessage({ command: "data", data: payload, tabId } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -1232,7 +1233,7 @@ export class TabManager {
     // In the future, this could open a tab-specific settings panel
     this.vscode.postMessage({
       command: "openSettings",
-    });
+    } satisfies WebviewToExtMessage);
 
     Logger.info(`Opening settings for tab ${tabId} (${terminal.label})`);
   }
@@ -1328,7 +1329,7 @@ export class TabManager {
             fullCommand: terminal.launchCommand || undefined,
             workingDirectory: merged.workingDirectory ?? terminal.cwd ?? undefined,
             userVars: terminal.userVars ?? undefined,
-          });
+          } satisfies WebviewToExtMessage);
         } catch (e) {
           try {
             Logger.warn("Failed to request formatted title", e);
@@ -1351,7 +1352,7 @@ export class TabManager {
       this.vscode.postMessage({
         command: "clearBuffer",
         tabId: activeTerminal.id,
-      });
+      } satisfies WebviewToExtMessage);
 
       // Save the cleared state
       this.saveToLocalState();

@@ -8,7 +8,7 @@
 import { Logger } from "./logger.js";
 import type {
   ExtToWebviewMessage,
-  AnyMessage,
+  WebviewToExtMessage,
   ExtractByCommand,
 } from "../shared/messages.js";
 
@@ -407,7 +407,7 @@ export class MessageHandler {
     this.vscode.postMessage({
       command: "stateResponse",
       state: currentState,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   private handleSetDebugFilter(

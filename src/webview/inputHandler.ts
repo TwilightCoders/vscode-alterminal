@@ -20,6 +20,8 @@
  * - Extensible for future input handling needs (shortcuts, modes, etc.)
  */
 
+import type { WebviewToExtMessage } from "../shared/messages.js";
+
 export class InputHandler {
   public terminal: any;
   public tabId: any;
@@ -89,7 +91,7 @@ export class InputHandler {
       if (key === 'c' && (isMac ? event.metaKey : (event.ctrlKey && this.terminal.hasSelection()))) {
         if (this.terminal.hasSelection()) {
           const text = this.terminal.getSelection();
-          this.vscode.postMessage({ command: "clipboardCopy", text });
+          this.vscode.postMessage({ command: "clipboardCopy", text } satisfies WebviewToExtMessage);
           if ((window as any).clearSelectionOnCopy !== false) {
             this.terminal.clearSelection();
           }
@@ -200,7 +202,7 @@ export class InputHandler {
       command: "data",
       data: data,
       tabId: this.tabId,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -211,7 +213,7 @@ export class InputHandler {
       command: "sendFilePath",
       filePath: filePath,
       tabId: this.tabId,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**
@@ -224,7 +226,7 @@ export class InputHandler {
       fileName: fileName,
       fileType: fileType,
       tabId: this.tabId,
-    });
+    } satisfies WebviewToExtMessage);
   }
 
   /**

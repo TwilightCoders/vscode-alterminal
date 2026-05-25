@@ -19,6 +19,8 @@
  * - VS Code webview integration
  */
 
+import type { WebviewToExtMessage } from "../shared/messages.js";
+
 export class DragDropHandler {
   private vscode: any;
   private tabManager: any;
@@ -206,7 +208,7 @@ export class DragDropHandler {
           fileSize: file.size,
           fileData: fileData,
           tabId: tabId,
-        });
+        } satisfies WebviewToExtMessage);
       }
     } catch (error) {
       console.error("Error handling dropped file:", error);
