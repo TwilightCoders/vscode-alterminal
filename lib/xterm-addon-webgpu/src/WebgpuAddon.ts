@@ -97,12 +97,22 @@ export class WebgpuAddon {
       canvas.style.position = "absolute";
       canvas.style.top = "0";
       canvas.style.left = "0";
+      // The canvas overlays .xterm-screen; without this it would swallow the
+      // mouse and xterm's SelectionService would never see a drag (no
+      // selection, no word-snap). Let events fall through to xterm's handlers.
+      canvas.style.pointerEvents = "none";
       this._canvas = canvas;
-      const screen = terminal.element?.querySelector(".xterm-screen") ?? terminal.element;
+      const screen = (terminal.element?.querySelector(".xterm-screen") ?? terminal.element ?? null) as HTMLElement | null;
       screen?.appendChild(canvas);
 
       const metrics = this._buildMetrics(terminal);
-      this._renderer = new WebgpuRenderer(canvas, this._shared, () => this._terminal?.buffer.active, metrics);
+      this._renderer = new WebgpuRenderer(
+        canvas,
+        this._shared,
+        () => this._terminal?.buffer.active,
+        metrics,
+        screen,
+      );
 
       this._deviceLostSub = this._shared.onDeviceLost(() => {
         this._onContextLoss.fire();
@@ -127,53 +137,69 @@ export class WebgpuAddon {
     renderService.handleResize(terminal.cols, terminal.rows);
   }
 
-  private _buildFontConfig(terminal: IXtermTerminalLike): IFontAtlasConfig {
+  /**
+   * Compute device cell dimensions the way xterm's own renderers do — from
+   * charSizeService × dpr × lineHeight (+ letterSpacing) — so the grid we draw
+   * matches the dimensions xterm uses for mouse → cell hit-testing. The glyph
+   * baseline comes from the font's ascent, centered within that cell height.
+   */
+  private _charDims(terminal: IXtermTerminalLike) {
     const core = terminal._core as Record<string, any> | undefined;
     const dpr = core?._coreBrowserService?.dpr ?? (typeof window !== "undefined" ? window.devicePixelRatio : 1) ?? 1;
-    const css = core?._charSizeService ?? { width: 9, height: 17 };
+    const cs = core?._charSizeService ?? { width: 9, height: 17 };
     const opts = core?.optionsService?.rawOptions ?? {};
     const fontFamily = opts.fontFamily ?? "monospace";
     const fontSize = opts.fontSize ?? 14;
     const lineHeight = opts.lineHeight ?? 1;
-    // Derive cell box + baseline from the font itself (see fontMetrics). xterm's
-    // charSizeService width is used for the advance when available, but the
-    // baseline and height come from the font's ascent/descent.
+    const letterSpacing = opts.letterSpacing ?? 0;
+
+    const deviceCharWidth = Math.floor((cs.width || 9) * dpr);
+    const deviceCharHeight = Math.ceil((cs.height || 17) * dpr);
+    const deviceCellHeight = Math.floor(deviceCharHeight * lineHeight);
+    const deviceCellWidth = deviceCharWidth + Math.round(letterSpacing);
+
+    // Baseline: the font's ascent, with any line-height leading split evenly.
     const fm = measureFont(fontFamily, fontSize * dpr, lineHeight);
-    const deviceCellWidth = css.width ? Math.max(1, Math.round(css.width * dpr)) : fm.cellWidth;
-    const deviceCellHeight = fm.cellHeight;
+    const leading = deviceCellHeight - (fm.ascent + fm.descent);
+    const baseline = Math.round(fm.ascent + leading / 2);
+
     return {
-      fontFamily,
-      fontSize,
-      fontWeight: opts.fontWeight ?? "normal",
-      fontWeightBold: opts.fontWeightBold ?? "bold",
-      letterSpacing: opts.letterSpacing ?? 0,
-      lineHeight,
-      devicePixelRatio: dpr,
-      deviceCellWidth,
-      deviceCellHeight,
-      deviceCharWidth: deviceCellWidth,
-      deviceCharHeight: deviceCellHeight,
-      baseline: fm.baseline,
+      dpr, fontFamily, fontSize, fontWeight: opts.fontWeight ?? "normal",
+      fontWeightBold: opts.fontWeightBold ?? "bold", letterSpacing, lineHeight,
+      deviceCharWidth, deviceCharHeight, deviceCellWidth, deviceCellHeight, baseline,
+    };
+  }
+
+  private _buildFontConfig(terminal: IXtermTerminalLike): IFontAtlasConfig {
+    const d = this._charDims(terminal);
+    return {
+      fontFamily: d.fontFamily,
+      fontSize: d.fontSize,
+      fontWeight: d.fontWeight,
+      fontWeightBold: d.fontWeightBold,
+      letterSpacing: d.letterSpacing,
+      lineHeight: d.lineHeight,
+      devicePixelRatio: d.dpr,
+      deviceCellWidth: d.deviceCellWidth,
+      deviceCellHeight: d.deviceCellHeight,
+      deviceCharWidth: d.deviceCharWidth,
+      deviceCharHeight: d.deviceCharHeight,
+      baseline: d.baseline,
       palette: this._buildPalette(terminal),
     };
   }
 
   private _buildMetrics(terminal: IXtermTerminalLike): IRenderMetrics {
     const core = terminal._core as Record<string, any> | undefined;
-    const dpr = core?._coreBrowserService?.dpr ?? (typeof window !== "undefined" ? window.devicePixelRatio : 1) ?? 1;
-    const css = core?._charSizeService ?? { width: 9, height: 17 };
-    const opts = core?.optionsService?.rawOptions ?? {};
+    const d = this._charDims(terminal);
     const focused = core?._coreBrowserService?.isFocused ?? true;
     const cursorStyle = (terminal.options.cursorStyle as CursorStyle) ?? "block";
-    // Cell box derived from the font (must match _buildFontConfig so the
-    // rasterizer's baseline and the renderer's grid agree).
-    const fm = measureFont(opts.fontFamily ?? "monospace", (opts.fontSize ?? 14) * dpr, opts.lineHeight ?? 1);
     return {
       cols: terminal.cols,
       rows: terminal.rows,
-      deviceCellWidth: css.width ? Math.max(1, Math.round(css.width * dpr)) : fm.cellWidth,
-      deviceCellHeight: fm.cellHeight,
-      devicePixelRatio: dpr,
+      deviceCellWidth: d.deviceCellWidth,
+      deviceCellHeight: d.deviceCellHeight,
+      devicePixelRatio: d.dpr,
       palette: this._buildPalette(terminal),
       focused,
       cursorVisible: true,

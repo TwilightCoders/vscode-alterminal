@@ -127,6 +127,13 @@ export class WebgpuRenderer {
     private readonly _shared: SharedDevice,
     private readonly _getBuffer: () => IXtermBuffer | undefined,
     metrics: IRenderMetrics,
+    /**
+     * xterm's `.xterm-screen` element. When provided, the renderer sizes it to
+     * match the canvas's CSS dimensions so xterm's mouse → cell hit-testing
+     * (which reads back `renderService.dimensions`) lines up with the rendered
+     * grid. Omitted in the standalone smoke harness.
+     */
+    private readonly _screenElement: HTMLElement | null = null,
   ) {
     this._device = _shared.device;
     this._metrics = metrics;
@@ -180,13 +187,17 @@ export class WebgpuRenderer {
   public get dimensions(): IRenderDimensions {
     const m = this._metrics;
     const dpr = m.devicePixelRatio || 1;
+    const deviceCanvasW = m.cols * m.deviceCellWidth;
+    const deviceCanvasH = m.rows * m.deviceCellHeight;
     return {
       css: {
-        canvas: { width: (m.cols * m.deviceCellWidth) / dpr, height: (m.rows * m.deviceCellHeight) / dpr },
+        // Round the canvas to whole CSS px (xterm does the same) so the screen
+        // element and the mouse → cell math agree.
+        canvas: { width: Math.round(deviceCanvasW / dpr), height: Math.round(deviceCanvasH / dpr) },
         cell: { width: m.deviceCellWidth / dpr, height: m.deviceCellHeight / dpr },
       },
       device: {
-        canvas: { width: m.cols * m.deviceCellWidth, height: m.rows * m.deviceCellHeight },
+        canvas: { width: deviceCanvasW, height: deviceCanvasH },
         cell: { width: m.deviceCellWidth, height: m.deviceCellHeight },
         char: { width: m.deviceCellWidth, height: m.deviceCellHeight, top: 0, left: 0 },
       },
@@ -201,37 +212,66 @@ export class WebgpuRenderer {
 
   private _applyMetrics(): void {
     const m = this._metrics;
-    const w = Math.max(1, Math.round(m.cols * m.deviceCellWidth));
-    const h = Math.max(1, Math.round(m.rows * m.deviceCellHeight));
+    const dpr = m.devicePixelRatio || 1;
+    // Device-pixel backing store (what we render into).
+    const w = Math.max(1, m.cols * m.deviceCellWidth);
+    const h = Math.max(1, m.rows * m.deviceCellHeight);
     if (this._canvas.width !== w || this._canvas.height !== h) {
       this._canvas.width = w;
       this._canvas.height = h;
+    }
+    // CSS display size, and — critically — size xterm's screen element to match
+    // so its mouse → cell hit-testing aligns with what we draw. Mirrors
+    // @xterm/addon-webgl's WebglRenderer.
+    const cssW = Math.round(w / dpr);
+    const cssH = Math.round(h / dpr);
+    this._canvas.style.width = `${cssW}px`;
+    this._canvas.style.height = `${cssH}px`;
+    if (this._screenElement) {
+      this._screenElement.style.width = `${cssW}px`;
+      this._screenElement.style.height = `${cssH}px`;
     }
     this._device.queue.writeBuffer(this._viewportBuffer, 0, new Float32Array([w, h, 0, 0]));
     this._damage.resize(m.rows);
   }
 
+  /**
+   * Ask xterm to schedule a repaint of the viewport. xterm's RenderService
+   * subscribes to onRequestRedraw and calls back into renderRows. Visual-state
+   * changes that don't alter buffer content (selection, focus, cursor, atlas
+   * clear, resize) MUST fire this, or nothing repaints. Mirrors WebglRenderer's
+   * _requestRedrawViewport.
+   */
+  private _requestRedraw(): void {
+    this._onRequestRedraw.fire({ start: 0, end: Math.max(0, this._metrics.rows - 1) });
+  }
+
   public handleResize(cols: number, rows: number): void {
     this._metrics = { ...this._metrics, cols, rows };
     this._applyMetrics();
+    this._requestRedraw();
   }
 
   public handleCharSizeChanged(): void {
     this._applyMetrics();
+    this._requestRedraw();
   }
 
   public handleDevicePixelRatioChange(): void {
     this._applyMetrics();
+    this._requestRedraw();
   }
 
   public handleBlur(): void {
     this._metrics = { ...this._metrics, focused: false };
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   public handleFocus(): void {
     this._metrics = { ...this._metrics, focused: true };
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   /**
@@ -246,20 +286,24 @@ export class WebgpuRenderer {
   ): void {
     this._selection = start && end ? normalizeSelection(start, end, columnSelectMode) : null;
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   public handleCursorMove(): void {
-    // Cursor is rebuilt every frame in this phase; nothing to do.
+    this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   public clear(): void {
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   public clearTextureAtlas(): void {
     this._shared.atlas.clearTexture();
     // Atlas view object is stable across clears, so the bind group stays valid.
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   public renderRows(start: number, end: number): void {
