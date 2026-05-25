@@ -1,0 +1,43 @@
+{
+  "name": "xterm-addon-webgpu",
+  "version": "0.1.0-dev.0",
+  "description": "A WebGPU-backed renderer addon for xterm.js — drop-in replacement for @xterm/addon-webgl with optional cross-terminal device sharing.",
+  "keywords": [
+    "xterm",
+    "webgpu",
+    "terminal",
+    "renderer",
+    "addon"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json -w",
+    "test": "tsc -p tsconfig.test.json && mocha 'out-test/test/**/*.test.js'",
+    "clean": "rm -rf dist out-test"
+  },
+  "peerDependencies": {
+    "@xterm/xterm": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.30",
+    "@webgpu/types": "^0.1.51",
+    "mocha": "^11.7.5",
+    "typescript": "^5.9.3"
+  }
+}
