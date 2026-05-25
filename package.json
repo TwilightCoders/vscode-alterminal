@@ -336,13 +336,14 @@
           },
           "alterminal.renderer": {
             "type": "string",
-            "enum": ["webgl", "dom"],
+            "enum": ["webgl", "dom", "webgpu"],
             "default": "webgl",
             "markdownEnumDescriptions": [
               "GPU-accelerated WebGL renderer (default). Fastest, but uses a shared glyph texture atlas.",
-              "xterm's built-in DOM renderer. Slower, no glyph atlas — useful for diagnosing rendering artifacts or on machines where WebGL is unreliable."
+              "xterm's built-in DOM renderer. Slower, no glyph atlas — useful for diagnosing rendering artifacts or on machines where WebGL is unreliable.",
+              "Experimental WebGPU renderer. Newer GPU path with a correctly-keyed atlas (avoids the WebGL atlas-bleed artifacts). Falls back to xterm's DOM renderer if WebGPU is unavailable."
             ],
-            "markdownDescription": "Terminal renderer. `webgl` is GPU-accelerated (default). `dom` uses xterm's built-in DOM renderer with no glyph atlas. **Reload the window after changing.**"
+            "markdownDescription": "Terminal renderer. `webgl` is GPU-accelerated (default). `dom` uses xterm's built-in DOM renderer with no glyph atlas. `webgpu` is the experimental WebGPU renderer. **Reload the window after changing.**"
           },
           "alterminal.savedCommands": {
             "type": "array",

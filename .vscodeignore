@@ -25,3 +25,15 @@ vendor/**
 !node_modules/@lydell/node-pty-linux-x64/**
 !node_modules/@lydell/node-pty-win32-x64/**
 !node_modules/@xterm/**
+# WebGPU addon: ship only the bundled renderer (dist/*.js), not the package's
+# own node_modules / sources / tests / demo.
+lib/xterm-addon-webgpu/node_modules/**
+lib/xterm-addon-webgpu/out-test/**
+lib/xterm-addon-webgpu/src/**
+lib/xterm-addon-webgpu/test/**
+lib/xterm-addon-webgpu/bench/**
+lib/xterm-addon-webgpu/demo/**
+lib/xterm-addon-webgpu/demo.html
+lib/xterm-addon-webgpu/*.json
+lib/xterm-addon-webgpu/*.md
+lib/xterm-addon-webgpu/LICENSE

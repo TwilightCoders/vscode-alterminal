@@ -56,6 +56,11 @@ export class TemplateUtils {
     const linkProviderUri = getNodeModuleUri(
       "xterm-link-provider/lib/esm/index.js",
     );
+    // WebGPU renderer addon — vendored as an IIFE bundle (window.WebgpuAddon),
+    // loaded like the other addons. Lives in-tree under lib/, not node_modules.
+    const webgpuAddonUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(extensionUri, "lib", "xterm-addon-webgpu", "dist", "webgpu-addon.umd.js"),
+    );
 
     // Get extension version for display
     const packagePath = path.join(__dirname, "..", "..", "package.json");
@@ -92,7 +97,8 @@ export class TemplateUtils {
     const rendererSetting = vscode.workspace
       .getConfiguration("alterminal")
       .get<string>("renderer", "webgl");
-    const rendererMode = rendererSetting === "dom" ? "dom" : "webgl";
+    const rendererMode =
+      rendererSetting === "dom" || rendererSetting === "webgpu" ? rendererSetting : "webgl";
 
     // Create logger script inline (no import needed)
     const combinedScript = createWebviewLogger();
@@ -141,6 +147,7 @@ export class TemplateUtils {
       serializeAddonUri,
       unicodeAddonUri,
       searchAddonUri,
+      webgpuAddonUri,
       linkProviderUri,
       combinedScript,
       // ES6 module URIs for import map

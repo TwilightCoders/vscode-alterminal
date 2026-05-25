@@ -9,6 +9,7 @@ declare const WebLinksAddon: any;
 declare const SerializeAddon: any;
 declare const UnicodeAddon: any;
 declare const WebglAddon: any;
+declare const WebgpuAddon: any;
 // VS Code webview API
 interface VSCodeAPI {
     postMessage(message: any): void;

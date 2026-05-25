@@ -245,13 +245,29 @@ export class TerminalInstance {
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
       this.unicodeAddon = new (window as any).UnicodeGraphemesAddon.UnicodeGraphemesAddon();
-      // Renderer: WebGL (default, GPU) unless alterminal.renderer === "dom",
-      // in which case we skip the addon entirely and use xterm's built-in DOM
-      // renderer (no glyph atlas). Falls back to DOM if WebGL init throws.
+      // Renderer: WebGL (default, GPU) unless alterminal.renderer is "dom"
+      // (xterm's built-in DOM renderer, no glyph atlas) or "webgpu" (the
+      // experimental WebGPU addon). The `webglAddon` field holds whichever GPU
+      // renderer addon is active. Each GPU path falls back to DOM if init throws.
       const rendererMode = (window as any).__alterminalRenderer ?? "webgl";
       if (rendererMode === "dom") {
         this.webglAddon = null;
         Logger.debug(`Terminal ${this.id}: Using DOM renderer (alterminal.renderer=dom)`);
+      } else if (rendererMode === "webgpu") {
+        try {
+          if (!WebgpuAddon?.WebgpuAddon) throw new Error("WebgpuAddon global not loaded");
+          this.webglAddon = new WebgpuAddon.WebgpuAddon();
+          this.webglAddon.onContextLoss(() => {
+            try { this.webglAddon?.dispose?.(); } catch {}
+            this.webglAddon = null;
+            Logger.warn(`Terminal ${this.id}: WebGPU unavailable/lost — falling back to DOM`);
+          });
+          this.terminal.loadAddon(this.webglAddon);
+          Logger.debug(`Terminal ${this.id}: Using WebGPU renderer (experimental)`);
+        } catch (webgpuError) {
+          Logger.warn(`Terminal ${this.id}: WebGPU init failed, using DOM renderer`, webgpuError);
+          this.webglAddon = null;
+        }
       } else {
         try {
           this.webglAddon = new WebglAddon.WebglAddon();

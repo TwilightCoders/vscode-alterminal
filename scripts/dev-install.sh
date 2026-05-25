@@ -26,6 +26,14 @@ else
   echo "📦 Version: $current (unchanged)"
 fi
 
+# --- Build the in-tree WebGPU renderer addon (vendored UMD bundle) ---
+if [[ -d lib/xterm-addon-webgpu/node_modules ]]; then
+  echo "🎨 Building WebGPU renderer addon…"
+  (cd lib/xterm-addon-webgpu && npm run build >/dev/null)
+else
+  echo "⚠  lib/xterm-addon-webgpu/node_modules missing — 'npm install' there to enable the webgpu renderer"
+fi
+
 # --- Compile ---
 npm run compile
 
