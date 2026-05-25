@@ -14,6 +14,7 @@
 
 import * as vscode from "vscode";
 import { Logger } from "../utils/logger";
+import type { ExtToWebviewMessage } from "../shared/messages";
 
 export interface SerializedTerminal {
   uuid: string;
@@ -71,7 +72,7 @@ export class WebviewViewSerializer {
         // Initial restore is handled by webviewReady -> StateManager
         if (this._didInitialViewRestore) {
           // Already restored once, just focus
-          this._alterminal.webview.postMessage({ command: "focus" });
+          this._alterminal.webview.postMessage({ command: "focus" } satisfies ExtToWebviewMessage);
         }
         // Note: if _didInitialViewRestore is false, StateManager will handle it via webviewReady
       } else {
@@ -93,7 +94,7 @@ export class WebviewViewSerializer {
       return;
     }
 
-    this._alterminal.webview.postMessage({ command: "requestState" });
+    this._alterminal.webview.postMessage({ command: "requestState" } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -155,11 +156,11 @@ export class WebviewViewSerializer {
       this._alterminal.webview.postMessage({
         command: "restoreState",
         state: savedState,
-      });
+      } satisfies ExtToWebviewMessage);
     } else {
       this._alterminal.webview.postMessage({
         command: "initializeEmpty",
-      });
+      } satisfies ExtToWebviewMessage);
     }
   }
 

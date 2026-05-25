@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
+import type { ExtToWebviewMessage } from "../shared/messages";
 import { Logger } from "../utils/logger";
 
 const METADATA_KEY = "alterminal.state";
@@ -186,7 +187,7 @@ export class StateManager {
       if (onStateRestored) onStateRestored();
     } catch (error) {
       Logger.error("Failed to restore webview state:", error);
-      webview.postMessage({ command: "initializeEmpty", cold: this._isColdBoot });
+      webview.postMessage({ command: "initializeEmpty", cold: this._isColdBoot } satisfies ExtToWebviewMessage);
     }
   }
 
@@ -207,10 +208,10 @@ export class StateManager {
         state: fullState,
         cold: this._isColdBoot,
         liveDaemonUuids: this.skipBufferUuids.size > 0 ? [...this.skipBufferUuids] : undefined,
-      });
+      } satisfies ExtToWebviewMessage);
     } else {
       Logger.debug("🆕 No saved state, initializing empty");
-      webview.postMessage({ command: "initializeEmpty", cold: this._isColdBoot });
+      webview.postMessage({ command: "initializeEmpty", cold: this._isColdBoot } satisfies ExtToWebviewMessage);
     }
   }
 

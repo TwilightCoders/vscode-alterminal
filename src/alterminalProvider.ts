@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { ExtToWebviewMessage } from "./shared/messages";
 import { PtyManager } from "./terminal/ptyManager";
 import { Logger } from "./utils/logger";
 import { CommandManager } from "./utils/commandManager";
@@ -209,7 +210,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
         command: "formatTabTitleResponse",
         tabId: msg.tabId,
         title,
-      });
+      } satisfies ExtToWebviewMessage);
     } catch (e) {
       Logger.warn("Failed to format tab title", e);
     }
@@ -227,7 +228,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       this._view.webview.postMessage({
         command: "setDeveloperMode",
         enabled: isDeveloper,
-      });
+      } satisfies ExtToWebviewMessage);
     }
   }
 
@@ -237,7 +238,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Request performance report from terminals
    */
   public async requestPerformanceReport(): Promise<void> {
-    this._view?.webview.postMessage({ command: "collectPerformance" });
+    this._view?.webview.postMessage({ command: "collectPerformance" } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -281,7 +282,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Trigger terminal resize
    */
   public triggerResize(): void {
-    this._view?.webview.postMessage({ command: "triggerResize" });
+    this._view?.webview.postMessage({ command: "triggerResize" } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -292,7 +293,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       command: "createNewTab",
       terminalType: type,
       shellPath,
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -305,7 +306,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       terminalType: "command",
       launchCommand: cmd,
       cwd: cwd || undefined,
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -336,7 +337,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
   public setDebugFilter(filter: string[] | null): void {
     const webview = this._view?.webview;
     if (webview) {
-      webview.postMessage({ command: "setDebugFilter", filter });
+      webview.postMessage({ command: "setDebugFilter", filter } satisfies ExtToWebviewMessage);
       Logger.info(`Debug filter ${filter ? "set" : "cleared"}:`, filter);
     }
   }

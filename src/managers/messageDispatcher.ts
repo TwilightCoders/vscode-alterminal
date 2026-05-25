@@ -11,6 +11,7 @@ import {
 } from "./bellNotificationService";
 import type {
   WebviewToExtMessage,
+  ExtToWebviewMessage,
   AnyMessage,
   PerformanceData,
   ExtractByCommand,
@@ -189,7 +190,7 @@ export class MessageDispatcher {
   public handleBellSound(tabId: number, tabLabel: string): void {
     this.bellNotifications.handleBellSound(tabId, tabLabel);
     // Also notify the webview so the in-tab bell icon shows
-    this.getWebview()?.postMessage({ command: "bell", tabId });
+    this.getWebview()?.postMessage({ command: "bell", tabId } satisfies ExtToWebviewMessage);
   }
 
   /**

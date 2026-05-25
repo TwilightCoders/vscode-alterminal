@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { ExtToWebviewMessage } from "../shared/messages";
 import { PtyManager } from "../terminal/ptyManager";
 import { StateManager } from "./stateManager";
 import { ConfigurationWatcher } from "./configurationWatcher";
@@ -124,7 +125,7 @@ export class WebViewLifecycleManager {
       webview.postMessage({
         command: "savedCommandsList",
         commands: saved,
-      });
+      } satisfies ExtToWebviewMessage);
     } catch (e) {
       Logger.warn("Failed sending savedCommandsList", e);
     }
@@ -133,7 +134,7 @@ export class WebViewLifecycleManager {
     webview.postMessage({
       command: "updateConfig",
       config: this._buildWebviewConfig(),
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -143,7 +144,7 @@ export class WebViewLifecycleManager {
     webview.postMessage({
       command: "updateConfig",
       config: this._buildWebviewConfig(),
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   private _buildWebviewConfig() {

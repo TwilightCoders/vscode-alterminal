@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import type { ExtToWebviewMessage } from "../shared/messages";
 import { CommandManager } from "../utils/commandManager";
 import { Logger } from "../utils/logger";
 
@@ -109,7 +110,7 @@ export class TabContextMenuHandler {
         webview.postMessage({
           command: "renameTab",
           tabId: parseInt(tabId),
-        });
+        } satisfies ExtToWebviewMessage);
 
         Logger.info(`Context menu - Starting inline rename for tab ${tabId}`);
       }
@@ -140,7 +141,7 @@ export class TabContextMenuHandler {
         webview.postMessage({
           command: "closeTab",
           tabId: parseInt(tabId),
-        });
+        } satisfies ExtToWebviewMessage);
 
         Logger.info(`Context menu - Closed tab ${tabId}`);
       }
@@ -188,7 +189,7 @@ export class TabContextMenuHandler {
       webview.postMessage({
         command: "getTabBuffer",
         tabId: tabIdNum,
-      });
+      } satisfies ExtToWebviewMessage);
 
       // Wait for response
       let content: string;
@@ -245,7 +246,7 @@ export class TabContextMenuHandler {
         webview.postMessage({
           command: "openIconPicker",
           tabId: parseInt(tabId),
-        });
+        } satisfies ExtToWebviewMessage);
       }
     } catch (error) {
       Logger.error("Failed to open icon picker:", error);

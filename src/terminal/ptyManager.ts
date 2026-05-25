@@ -45,6 +45,7 @@ import { BellDetector } from "./bellDetector";
 import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
 import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
+import type { ExtToWebviewMessage } from "../shared/messages";
 import {
   filterVSCodeSequences,
   extractCwdFromOsc7,
@@ -280,7 +281,7 @@ export class PtyManager {
       this._alterminal?.webview.postMessage({
         command: "bell",
         tabId,
-      });
+      } satisfies ExtToWebviewMessage);
     }
 
     let filteredData = (hasEsc && this._suppressFocusStealing) ? this._filterVSCodeSequences(data) : data;
@@ -303,7 +304,7 @@ export class PtyManager {
         command: "data",
         data: filteredData,
         tabId,
-      });
+      } satisfies ExtToWebviewMessage);
     } else {
       let buffer = this._outputBuffer.get(tabId);
       if (!buffer) {
@@ -361,7 +362,7 @@ export class PtyManager {
         command: "userVarChange",
         vars: changed,
         tabId,
-      });
+      } satisfies ExtToWebviewMessage);
     }
   }
 
@@ -375,7 +376,7 @@ export class PtyManager {
       command: "cwdChange",
       cwd,
       tabId,
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   public setCommandExpander(fn: (cmd: string) => string) {
@@ -438,7 +439,7 @@ export class PtyManager {
           command: "data",
           data: buffer.flush(),
           tabId: tabId,
-        });
+        } satisfies ExtToWebviewMessage);
       }
     }
 
@@ -983,7 +984,7 @@ export class PtyManager {
         command: "processChange",
         processName: currentProcess,
         tabId: tabId,
-      });
+      } satisfies ExtToWebviewMessage);
     }
 
     // For shells without our integration (unsupported shells), fall back
@@ -1142,7 +1143,7 @@ export class PtyManager {
       command: "checkProcessesResponse",
       tabId,
       processes,
-    });
+    } satisfies ExtToWebviewMessage);
   }
 
   /**

@@ -10,6 +10,7 @@ import { MessageDispatcher } from "./managers/messageDispatcher";
 import { createCrossWindowBellCoordinator } from "./managers/crossWindowBell";
 import { DaemonManager } from "./daemon/daemonManager";
 import { SettingsEditor } from "./managers/settingsEditor";
+import type { ExtToWebviewMessage } from "./shared/messages";
 
 export async function activate(context: vscode.ExtensionContext) {
   // Determine dev mode - enable for development, NODE_ENV, or preview versions
@@ -366,7 +367,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("Alterminal webview not open");
         return;
       }
-      webview.postMessage({ command: "debugPasteImageBytes" });
+      webview.postMessage({ command: "debugPasteImageBytes" } satisfies ExtToWebviewMessage);
     }),
   );
 }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { ExtToWebviewMessage } from "../shared/messages";
 import { CommandManager } from "../utils/commandManager";
 import { Logger } from "../utils/logger";
 
@@ -28,7 +29,7 @@ export class CommandLauncher {
    * Save the current command
    */
   public async saveCurrentCommand(webview: vscode.Webview): Promise<void> {
-    webview.postMessage({ command: "saveCurrentCommand" });
+    webview.postMessage({ command: "saveCurrentCommand" } satisfies ExtToWebviewMessage);
   }
 
   /**
@@ -130,7 +131,7 @@ export class CommandLauncher {
         command: "commandSavedResponse",
         launchCommand: launchCommand,
         isSaved: isSaved,
-      });
+      } satisfies ExtToWebviewMessage);
     } catch (error) {
       Logger.error("Failed to check command saved status:", error);
     }
