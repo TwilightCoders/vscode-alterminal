@@ -28,6 +28,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json -w",
     "test": "tsc -p tsconfig.test.json && mocha 'out-test/test/**/*.test.js'",
+    "demo": "node demo/server.mjs",
     "clean": "rm -rf dist out-test"
   },
   "peerDependencies": {
@@ -38,6 +39,7 @@
     "@types/node": "^20.19.30",
     "@webgpu/types": "^0.1.51",
     "mocha": "^11.7.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "ws": "^8.21.0"
   }
 }

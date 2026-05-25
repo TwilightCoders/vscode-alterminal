@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>xterm.js + WebGPU renderer — demo</title>
+  <link rel="stylesheet" href="./node_modules/@xterm/xterm/css/xterm.css" />
+  <style>
+    body { margin: 0; background: #1e1e1e; color: #ccc; font: 13px system-ui, sans-serif; }
+    header { padding: 10px 16px; border-bottom: 1px solid #333; }
+    #renderer { font-weight: bold; }
+    #renderer.gpu { color: #6a9955; }
+    #renderer.dom { color: #d7ba7d; }
+    #renderer.err { color: #f48771; }
+    #term { padding: 8px; }
+    .row { padding: 6px 16px; color: #888; }
+    #sel { color: #569cd6; white-space: pre; }
+    kbd { background:#333; border-radius:3px; padding:1px 5px; color:#ddd; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>xterm.js + WebGPU renderer</strong> — renderer:
+    <span id="renderer">checking…</span>
+    <div class="row" style="padding-left:0">
+      A real <code>Terminal</code> driven by <code>WebgpuAddon</code>, wired to a
+      <strong>real shell</strong> (node-pty over WebSocket). Run commands for real.
+      Selection/word-snap/copy are xterm core: <kbd>drag</kbd>,
+      <kbd>double-click</kbd> a word, <kbd>triple-click</kbd> a line, then ⌘C.
+    </div>
+  </header>
+  <div id="term"></div>
+  <div class="row">selection: <span id="sel">(none)</span></div>
+
+  <!-- xterm core (UMD → window.Terminal), the exact 6.0.0 we build against -->
+  <script src="./node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script type="module">
+    import { WebgpuAddon, isWebgpuSupported } from "./dist/index.js";
+
+    const rendEl = document.getElementById("renderer");
+    const selEl = document.getElementById("sel");
+    const setRenderer = (txt, cls) => { rendEl.textContent = txt; rendEl.className = cls; };
+
+    if (!isWebgpuSupported()) {
+      setRenderer("WebGPU unavailable — open in Chrome/Edge over localhost", "err");
+    }
+
+    const term = new Terminal({
+      fontFamily: "Menlo, Consolas, monospace",
+      fontSize: 14,
+      lineHeight: 1.0,
+      cursorBlink: true,
+      allowProposedApi: true, // CellReader uses getUnderlineStyle (proposed)
+      theme: {
+        background: "#1e1e1e", foreground: "#d4d4d4", cursor: "#ffffff",
+        selectionBackground: "#264f78",
+        black: "#000", red: "#f48771", green: "#6a9955", yellow: "#d7ba7d",
+        blue: "#569cd6", magenta: "#c586c0", cyan: "#4ec9b0", white: "#d4d4d4",
+      },
+    });
+
+    // Open first so terminal.element exists, then load the addon.
+    term.open(document.getElementById("term"));
+
+    const addon = new WebgpuAddon();
+    addon.onContextLoss(() => setRenderer("WebGPU context lost — fell back to DOM", "err"));
+    term.loadAddon(addon);
+
+    // Wire to a REAL shell over the WebSocket bridge (demo/server.mjs spawns a
+    // node-pty). No fake echo — this runs actual commands.
+    const ws = new WebSocket(`ws://${location.host}/pty`);
+    ws.binaryType = "arraybuffer";
+    ws.onmessage = (e) => {
+      term.write(typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data));
+    };
+    ws.onopen = () => ws.send("r" + JSON.stringify({ cols: term.cols, rows: term.rows }));
+    ws.onclose = () => term.write("\r\n\x1b[31m[shell exited]\x1b[0m\r\n");
+    ws.onerror = () =>
+      term.write("\r\n\x1b[31m[no shell — run `node demo/server.mjs` and load via that server]\x1b[0m\r\n");
+    term.onData((d) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send("i" + d);
+    });
+    term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send("r" + JSON.stringify({ cols, rows }));
+    });
+
+    // Prove selection works end-to-end (this is all xterm core).
+    term.onSelectionChange(() => {
+      const s = term.getSelection();
+      selEl.textContent = s ? JSON.stringify(s) : "(none)";
+    });
+
+    // Detect which renderer actually installed: our addon appends a
+    // .xterm-webgpu-canvas. Check after the async device init settles.
+    setTimeout(() => {
+      if (rendEl.className === "err") return;
+      const ours = document.querySelector("#term .xterm-webgpu-canvas");
+      if (ours) setRenderer("WebGPU ✓ (our addon is driving this Terminal)", "gpu");
+      else setRenderer("DOM (WebGPU addon did not install — check console)", "dom");
+    }, 600);
+
+    term.focus();
+    window.__term = term; // for poking in the console
+  </script>
+</body>
+</html>
