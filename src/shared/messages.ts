@@ -79,6 +79,8 @@ export type WebviewToExtMessage =
   // Tab control / coordination
   | { command: "switchTab"; tabId: number }
   | { command: "newTab"; terminalType?: string }
+  // Closes a tab; the host routes this to PtyManager to dispose the PTY.
+  | { command: "closeTab"; tabId: number }
   | { command: "saveCommand"; tabId: number; launchCommand: string; tabLabel: string; iconClass?: string }
   | { command: "checkCommandSaved"; launchCommand: string }
   | { command: "checkProcesses"; tabId: number }
@@ -99,6 +101,10 @@ export type WebviewToExtMessage =
   | { command: "openFile"; filePath: string; terminalId: number }
   | { command: "openUrl"; url: string }
   | { command: "openSettings" }
+  // Emitted by the webview's error-overlay "Refresh Terminal" button.
+  // Currently has no host handler (logged as unhandled) but is a real
+  // outbound message, so it lives in the union for honesty.
+  | { command: "refresh" }
   // State persistence
   | { command: "metadataUpdate"; state: Record<string, unknown> }
   | { command: "bufferUpdate"; buffers: Record<string, string> }
