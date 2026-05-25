@@ -1,11 +1,21 @@
 # WebGPU renderer — build status & handoff
 
-_Last updated: 2026-05-24 (overnight session, Otto Loom). Branch: `feat/webgpu-renderer`._
+_Last updated: 2026-05-25. Branch: `feat/webgpu-renderer`._
 
-This is the honest state of the in-tree `xterm-addon-webgpu` package. It was
-built autonomously overnight from the plan in
-`~/.claude/plans/transient-doodling-creek.md`. **Nothing here is wired into the
-live extension** — see *Deliberately deferred* below for why.
+> **UPDATE 2026-05-25:** It's now **wired into the live extension** as
+> `alterminal.renderer: "webgpu"` and in real use. Validated against a real
+> xterm Terminal (standalone demo + the extension): correct geometry, working
+> selection/word-snap/copy, live theme/font/cursor, search-match highlighting,
+> blinking cursor. Most parity items below are **done** (kerning, block-cursor
+> inversion, font-driven metrics, live state subscriptions, dispose-restore,
+> decoration overrides, cursor blink). See `PARITY.md` for the live gap list.
+> **Remaining real-use gaps:** custom glyphs (powerline/box-drawing — TUIs show
+> seams/tofu until ported), the shared-device memory win (v1 is per-terminal
+> device), real LRU eviction (#27, approved), min-contrast/ligatures/overline.
+
+This was built from the plan in `~/.claude/plans/transient-doodling-creek.md`.
+The historical notes below describe the original spike; treat the UPDATE above
+as current truth where they conflict.
 
 ## TL;DR
 
