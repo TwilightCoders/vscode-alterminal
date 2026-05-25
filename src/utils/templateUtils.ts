@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { createWebviewLogger } from "./logger";
+import { getVersion } from "../version";
 
 export class TemplateUtils {
   public static getHtmlTemplate(
@@ -62,19 +63,8 @@ export class TemplateUtils {
       vscode.Uri.joinPath(extensionUri, "lib", "xterm-addon-webgpu", "dist", "webgpu-addon.umd.js"),
     );
 
-    // Get extension version for display
-    const packagePath = path.join(__dirname, "..", "..", "package.json");
-    let version = "0.0.0";
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-      version = packageJson.version || "0.0.0";
-    } catch (error) {
-      console.warn("Could not read package.json version:", error);
-    }
-    try {
-      const { DEV_BUILD_NUMBER } = require("../generated/buildInfo");
-      if (DEV_BUILD_NUMBER) { version = version.replace(/-dev\.\d+$/, "") + `-dev.${DEV_BUILD_NUMBER}`; }
-    } catch {}
+    // Extension version for display (single source of truth in ../version).
+    const version = getVersion();
 
     // Shared constants module (ES6 version for webview import map)
     const constantsUri = webview.asWebviewUri(

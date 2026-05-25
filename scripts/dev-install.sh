@@ -6,25 +6,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # --- Bump dev build number ---
-# Extracts current dev.N, increments N, writes back to package.json.
+# Use the SAME counter F5 uses (.vscode/dev-counter → src/generated/buildInfo.ts),
+# then sync package.json's -dev.N to it. One number drives every display surface.
+node scripts/bump-dev-build.js
+counter=$(cat .vscode/dev-counter)
 current=$(node -p "require('./package.json').version")
-if [[ "$current" =~ ^([0-9]+\.[0-9]+\.[0-9]+-dev\.)([0-9]+)$ ]]; then
-  prefix="${BASH_REMATCH[1]}"
-  build="${BASH_REMATCH[2]}"
-  next=$((build + 1))
-  new_version="${prefix}${next}"
-else
-  echo "⚠  Version '$current' doesn't match X.Y.Z-dev.N pattern — skipping bump"
-  new_version="$current"
-fi
-
-if [[ "$new_version" != "$current" ]]; then
-  # Use npm version to update package.json + package-lock.json without git tag
-  npm version "$new_version" --no-git-tag-version --allow-same-version >/dev/null
-  echo "📦 Version: $current → $new_version"
-else
-  echo "📦 Version: $current (unchanged)"
-fi
+base=$(node -p 'require("./package.json").version.replace(/-dev\.\d+$/, "")')
+new_version="${base}-dev.${counter}"
+# npm version updates package.json + package-lock.json without a git tag
+npm version "$new_version" --no-git-tag-version --allow-same-version >/dev/null
+echo "📦 Version: $current → $new_version (build #$counter)"
 
 # --- Build the in-tree WebGPU renderer addon (vendored UMD bundle) ---
 if [[ -d lib/xterm-addon-webgpu/node_modules ]]; then

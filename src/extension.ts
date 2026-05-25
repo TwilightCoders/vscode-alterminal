@@ -10,6 +10,7 @@ import { MessageDispatcher } from "./managers/messageDispatcher";
 import { createCrossWindowBellCoordinator } from "./managers/crossWindowBell";
 import { DaemonManager } from "./daemon/daemonManager";
 import { SettingsEditor } from "./managers/settingsEditor";
+import { getVersion } from "./version";
 import type { ExtToWebviewMessage } from "./shared/messages";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -47,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Create shared PtyManager - will be used by AlterminalProvider
   const ptyManager = new PtyManager();
-  ptyManager.setExtensionVersion(packageJson.version || "0.0.0");
+  ptyManager.setExtensionVersion(getVersion());
   ptyManager.setExtensionPath(context.extensionUri.fsPath);
 
   // PTY Daemon: persistent PTY processes that survive window reloads.
@@ -136,12 +137,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.StatusBarAlignment.Right,
     1000,
   );
-  let devBuildNumber = 0;
-  if (isDebugMode) {
-    try { devBuildNumber = require('./generated/buildInfo').DEV_BUILD_NUMBER || 0; } catch {}
-  }
   statusBarItem.text = isDebugMode
-    ? `$(terminal) Alterminal dev.${devBuildNumber}`
+    ? `$(terminal) Alterminal v${getVersion()}`
     : "$(terminal) Alterminal";
   statusBarItem.tooltip = "Open Alterminal";
   statusBarItem.command = "alterminal.openTerminal";
