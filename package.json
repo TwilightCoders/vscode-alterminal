@@ -2,7 +2,7 @@
   "name": "alterminal",
   "displayName": "Alterminal",
   "description": "Feature-rich terminal alternative for VS Code - use standalone or alongside the built-in terminal",
-  "version": "0.2.0-dev.0",
+  "version": "0.2.0",
   "preview": true,
   "publisher": "twilightcoders",
   "icon": "media/icon.png",

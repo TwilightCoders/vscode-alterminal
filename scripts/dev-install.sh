@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
-# Bump dev build number, compile, package, and install locally.
+# Build, package, and install a dev build locally.
 # Usage: npm run dev:install
+#
+# Versioning model: the committed package.json holds ONLY the curated semver
+# (e.g. 0.2.0). The build number is a monotonic, version-independent counter
+# (.vscode/dev-counter) that we staple on as a pre-release tag — 0.2.0-dev.<N> —
+# ONLY for the packaged vsix, so VS Code sees a unique, newer version each
+# install. The working package.json is restored to the curated semver
+# afterward, so the build number never lands in the repo.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# --- Stage the dev build number (not yet earned) ---
-# Use the SAME counter F5 uses (.vscode/dev-counter → src/generated/buildInfo.ts).
-# --peek bakes the next number into buildInfo for the compile below but does NOT
-# persist the counter, and we don't touch package.json yet. The bump is only
-# committed once packaging actually produces a vsix — a failed build burns
-# nothing and leaves package.json/the counter untouched.
-build_num=$(node scripts/bump-dev-build.js --peek)
-current=$(node -p "require('./package.json').version")
+orig_version=$(node -p "require('./package.json').version")
 base=$(node -p 'require("./package.json").version.replace(/-dev\.\d+$/, "")')
+
+# Always return the working package.json to the curated semver on exit —
+# success, failure, or interrupt — so the build number is never committed.
+restore_version() { npm version "$base" --no-git-tag-version --allow-same-version >/dev/null 2>&1 || true; }
+trap restore_version EXIT
+
+# --- Stage the dev build number (not yet earned) ---
+# --peek bakes the next build number into buildInfo for the compile below but
+# does NOT persist the counter. We --commit it only once a vsix exists, so a
+# failed build burns nothing.
+build_num=$(node scripts/bump-dev-build.js --peek)
 new_version="${base}-dev.${build_num}"
-echo "📦 Staging build #$build_num ($current → $new_version)"
+echo "📦 Staging build #$build_num → $new_version"
 
 # --- Build the in-tree WebGPU renderer addon (vendored UMD bundle) ---
 if [[ -d lib/xterm-addon-webgpu/node_modules ]]; then
@@ -28,28 +39,23 @@ fi
 # --- Compile (bakes in the staged build number) ---
 npm run compile
 
-# --- Bump package.json so vsce stamps the right version into the vsix ---
-# Done only now, after compile succeeds; reverted below if packaging fails.
+# --- Stamp the build version into package.json for vsce, then package ---
 npm version "$new_version" --no-git-tag-version --allow-same-version >/dev/null
 
-# --- Package ---
+vsix="alterminal-dev.vsix"
+export ALTERMINAL_DEV_BUILD=1   # verify-binaries.js: skip (local platform only)
 # vsce exits non-zero due to --no-dependencies npm install failure, but still
 # produces the vsix. Tolerate the exit code and verify the file was created.
-vsix="alterminal-dev.vsix"
-# Tell verify-binaries.js to skip (we only have the local platform binary)
-export ALTERMINAL_DEV_BUILD=1
 npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies \
   -o "$vsix" 2>&1 | tail -1
 if [[ ! -f "$vsix" ]]; then
-  # No artifact — undo the version bump and don't consume the build number.
-  npm version "$current" --no-git-tag-version --allow-same-version >/dev/null
-  echo "❌ vsce failed to produce $vsix — reverted to $current (build #$build_num not consumed)"
-  exit 1
+  echo "❌ vsce failed to produce $vsix — build #$build_num not consumed"
+  exit 1   # trap restores package.json to the curated semver
 fi
 
 # --- Build earned: persist the build counter ---
 node scripts/bump-dev-build.js --commit "$build_num"
-echo "📦 Version: $current → $new_version (build #$build_num)"
+echo "📦 Built $new_version (build #$build_num)"
 
 # --- Install locally ---
 code --install-extension "$vsix" --force 2>/dev/null || true
