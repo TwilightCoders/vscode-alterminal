@@ -413,6 +413,20 @@ export class PtyDaemonClient extends EventEmitter {
 
       const socket = net.createConnection(this._socketPath);
       let settled = false;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        fn();
+      };
+      // A wedged handshake (connected, but the daemon never sends auth_ok /
+      // attached) must not hang forever: it would stall reattachAllDaemonPtys
+      // for every remaining session and pin the socket + listeners in memory.
+      // Time out into a rejection, which callers already handle.
+      const timeout = setTimeout(() => settle(() => {
+        socket.destroy();
+        reject(new Error(`${mode} '${ptyId}' timed out`));
+      }), 10000);
 
       socket.on("connect", () => {
         // Phase 1: authenticate
@@ -442,9 +456,10 @@ export class PtyDaemonClient extends EventEmitter {
                 return;
               }
               if (dm.type === "error") {
-                settled = true;
-                reject(new Error(`Session auth failed: ${(dm as any).message}`));
-                socket.destroy();
+                settle(() => {
+                  reject(new Error(`Session auth failed: ${(dm as any).message}`));
+                  socket.destroy();
+                });
                 return;
               }
             }
@@ -456,9 +471,10 @@ export class PtyDaemonClient extends EventEmitter {
             const result = decoder.consumeAttachResponse();
             if (result.message) {
               if (result.message.type === "error") {
-                settled = true;
-                reject(new Error(`Attach failed: ${(result.message as any).message}`));
-                socket.destroy();
+                settle(() => {
+                  reject(new Error(`Attach failed: ${(result.message as any).message}`));
+                  socket.destroy();
+                });
                 return;
               }
               phase = "raw";
@@ -478,8 +494,7 @@ export class PtyDaemonClient extends EventEmitter {
                 }
               }
 
-              settled = true;
-              resolve();
+              settle(() => resolve());
             }
           }
         };
@@ -495,10 +510,7 @@ export class PtyDaemonClient extends EventEmitter {
       });
 
       socket.on("error", (err) => {
-        if (!settled) {
-          settled = true;
-          reject(err);
-        }
+        settle(() => reject(err));
       });
     });
   }
