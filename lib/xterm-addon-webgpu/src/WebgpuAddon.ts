@@ -48,6 +48,8 @@ export class WebgpuAddon {
   private _canvas?: HTMLCanvasElement;
   private _dprObserver?: DevicePixelObserver;
   private _deviceLostSub?: IDisposable;
+  /** xterm event subscriptions (theme/options) to dispose on teardown. */
+  private _subs: IDisposable[] = [];
   private _disposed = false;
 
   private readonly _onContextLoss = new Emitter<void>();
@@ -117,9 +119,12 @@ export class WebgpuAddon {
       this._deviceLostSub = this._shared.onDeviceLost(() => {
         this._onContextLoss.fire();
       });
-      this._dprObserver = new DevicePixelObserver(() => this._renderer?.handleDevicePixelRatioChange());
+      // A DPR change alters cell dimensions, so re-measure rather than just
+      // poking the old metrics.
+      this._dprObserver = new DevicePixelObserver(() => this._refreshFont());
 
       this._installRenderer(terminal, this._renderer);
+      this._subscribeToState(terminal);
     } catch {
       // WebGPU init failed — stay a no-op so the DOM renderer keeps working.
       this._onContextLoss.fire();
@@ -135,6 +140,42 @@ export class WebgpuAddon {
     }
     renderService.setRenderer(renderer as unknown);
     renderService.handleResize(terminal.cols, terminal.rows);
+  }
+
+  /**
+   * Subscribe to the live xterm state the renderer depends on. Without this the
+   * renderer would keep the theme/font/cursor it had at activation forever (the
+   * "snapshot once" defect). Mirrors what WebglRenderer does internally, but
+   * from the addon since our renderer holds no xterm service handles.
+   */
+  private _subscribeToState(terminal: IXtermTerminalLike): void {
+    const core = terminal._core as Record<string, any> | undefined;
+    const theme = core?._themeService;
+    const opts = core?.optionsService;
+    if (theme?.onChangeColors) {
+      this._subs.push(theme.onChangeColors(() => this._refreshColors()));
+    }
+    if (opts?.onOptionChange) {
+      this._subs.push(opts.onOptionChange(() => this._refreshFont()));
+    }
+  }
+
+  /** Theme changed — push a fresh palette (no atlas clear; glyphs are untinted). */
+  private _refreshColors(): void {
+    if (this._terminal && this._renderer) {
+      this._renderer.setMetrics(this._buildMetrics(this._terminal));
+    }
+  }
+
+  /**
+   * Font/size/lineHeight/letterSpacing/cursor or DPR changed — re-measure the
+   * font (new baseline), clear the shared atlas, and push fresh metrics.
+   */
+  private _refreshFont(): void {
+    if (this._terminal && this._renderer && this._shared) {
+      this._shared.updateFontConfig(this._buildFontConfig(this._terminal));
+      this._renderer.setMetrics(this._buildMetrics(this._terminal));
+    }
   }
 
   /**
@@ -249,10 +290,32 @@ export class WebgpuAddon {
       return;
     }
     this._disposed = true;
+    for (const sub of this._subs) {
+      sub.dispose();
+    }
+    this._subs = [];
     this._dprObserver?.dispose();
     this._deviceLostSub?.dispose();
     this._renderer?.dispose();
     this._canvas?.remove();
+
+    // Restore xterm's default renderer so the Terminal keeps working after the
+    // addon unloads (mirrors WebglAddon) — otherwise it's left with no renderer
+    // and goes blank. Guarded against an already-disposed core.
+    try {
+      const core = this._terminal?._core as {
+        _store?: { _isDisposed?: boolean };
+        _renderService?: { setRenderer(r: unknown): void; handleResize(c: number, r: number): void };
+        _createRenderer?: () => unknown;
+      } | undefined;
+      if (core && !core._store?._isDisposed && core._renderService && core._createRenderer) {
+        core._renderService.setRenderer(core._createRenderer());
+        core._renderService.handleResize(this._terminal!.cols, this._terminal!.rows);
+      }
+    } catch {
+      /* terminal already torn down */
+    }
+
     if (this._shared && this._ownsDevice) {
       this._shared.release();
     }

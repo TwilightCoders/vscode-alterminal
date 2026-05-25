@@ -208,6 +208,7 @@ export class WebgpuRenderer {
     this._metrics = metrics;
     this._applyMetrics();
     this._damage.markAllDirty();
+    this._requestRedraw();
   }
 
   private _applyMetrics(): void {
