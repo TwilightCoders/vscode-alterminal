@@ -9,13 +9,23 @@ import {
   BellNotificationService,
   createBellNotificationHost,
 } from "./bellNotificationService";
+import type {
+  WebviewToExtMessage,
+  AnyMessage,
+  PerformanceData,
+  ExtractByCommand,
+} from "../shared/messages";
 
-export interface PerformanceData {
-  count: number;
-  avgInit: number;
-  avgOpenToActive: number;
-  samples: any[];
-}
+/**
+ * Handler map keyed by the command discriminator. Each handler receives the
+ * message already narrowed to its variant, so reading a field that does not
+ * exist on that command is a compile error.
+ */
+type WebviewToExtHandlers = {
+  [K in WebviewToExtMessage["command"]]?: (
+    msg: ExtractByCommand<WebviewToExtMessage, K>,
+  ) => void;
+};
 
 /**
  * MessageDispatcher
@@ -56,8 +66,8 @@ export class MessageDispatcher {
    */
   public setupMessageRouter(alterminal: vscode.WebviewView): void {
     // Provider-specific message handlers
-    const providerHandlers = {
-      fileDrop: (msg: any) =>
+    const providerHandlers: WebviewToExtHandlers = {
+      fileDrop: (msg) =>
         this.fileOperationHandler.handleDroppedFile(
           msg.tabId,
           msg.fileName,
@@ -65,27 +75,27 @@ export class MessageDispatcher {
           msg.fileSize,
           msg.fileData,
         ),
-      openFile: (msg: any) =>
+      openFile: (msg) =>
         this.fileOperationHandler.handleOpenFile(msg.filePath, msg.terminalId),
-      openUrl: (msg: any) =>
+      openUrl: (msg) =>
         this.fileOperationHandler.handleOpenUrl(msg.url),
-      metadataUpdate: (msg: any) => {
+      metadataUpdate: (msg) => {
         this.stateManager.saveMetadata(msg.state);
       },
-      bufferUpdate: (msg: any) => {
+      bufferUpdate: (msg) => {
         this.stateManager.saveBuffers(msg.buffers);
       },
-      bufferDelete: (msg: any) => {
+      bufferDelete: (msg) => {
         this.stateManager.deleteBuffer(msg.uuid);
       },
-      stateUpdate: (msg: any) => {
+      stateUpdate: (msg) => {
         // Legacy fallback: full state with buffers embedded
         this.stateManager.saveState(msg.state);
         if (this.serializerHandleMessage) {
           this.serializerHandleMessage(msg);
         }
       },
-      stateResponse: (msg: any) => {
+      stateResponse: (msg) => {
         this.stateManager.saveState(msg.state);
         if (this.serializerHandleMessage) {
           this.serializerHandleMessage(msg);
@@ -95,57 +105,61 @@ export class MessageDispatcher {
         Logger.debug("Received webviewReady message");
         this.onWebviewReady();
       },
-      switchTab: (msg: any) => {
+      switchTab: (msg) => {
         if (msg.tabId !== undefined) {
           this.bellNotifications.clearBellForTab(msg.tabId);
         }
       },
-      bellDiagnostic: (msg: any) =>
+      bellDiagnostic: (msg) =>
         Logger.warn(`🔔 Webview bell [tab ${msg.tabId}] source: ${msg.source}`),
-      playBellSound: (msg: any) =>
-        this.bellNotifications.handleBellSound(msg.tabId, msg.tabLabel),
+      playBellSound: (msg) =>
+        this.bellNotifications.handleBellSound(msg.tabId, msg.tabLabel ?? ""),
       panelFocused: () => this.bellNotifications.clearBellIndicator(),
       setDebugFilter: () => {}, // Handled in webview
       debugLog: () => {}, // Disabled
       setDeveloperMode: () => {}, // Handled in webview
-      performanceReport: (msg: any) => this._handlePerformanceReport(msg.data),
-      saveCommand: (msg: any) =>
+      performanceReport: (msg) => this._handlePerformanceReport(msg.data),
+      saveCommand: (msg) =>
         this.commandLauncher.handleSaveCommand(
           msg.tabId,
           msg.launchCommand,
           msg.tabLabel,
         ),
-      checkCommandSaved: (msg: any) =>
+      checkCommandSaved: (msg) =>
         this.commandLauncher.handleCheckCommandSaved(
           msg.launchCommand,
           alterminal.webview,
         ),
-      formatTabTitle: (msg: any) => this.onFormatTabTitle(msg),
-      bufferContent: (msg: any) =>
+      formatTabTitle: (msg) => this.onFormatTabTitle(msg),
+      bufferContent: (msg) =>
         this.tabContextMenuHandler.handleBufferContentResponse(
           msg.tabId,
           msg.buffer,
         ),
-      clipboardCopy: (msg: any) =>
+      clipboardCopy: (msg) =>
         vscode.env.clipboard.writeText(msg.text),
       openSettings: () =>
         vscode.commands.executeCommand("workbench.action.openSettings", "alterminal"),
       // PTY input — hottest message, handled inline for direct dispatch
-      data: (msg: any) => {
+      data: (msg) => {
         const d = typeof msg.data === "string" ? msg.data : "";
         this.ptyManager.writeToPty(d, msg.tabId);
       },
     };
 
     alterminal.webview.onDidReceiveMessage(
-      (message) => {
+      (message: AnyMessage) => {
         try {
           // Record user interaction for focus guard
           this.onInteraction?.();
 
-          // Direct O(1) lookup for both provider and hot-path messages
-          const handler =
-            providerHandlers[message.command as keyof typeof providerHandlers];
+          // Direct O(1) lookup for both provider and hot-path messages.
+          // TS can't correlate the indexed-access key with the handler's
+          // narrowed parameter, so the lookup is cast; each handler body is
+          // still fully typed against its own command variant.
+          const handler = providerHandlers[
+            message.command as WebviewToExtMessage["command"]
+          ] as ((msg: AnyMessage) => void) | undefined;
           if (handler) {
             handler(message);
             return;
@@ -167,7 +181,7 @@ export class MessageDispatcher {
   }
 
   private _handlePerformanceReport(data: PerformanceData): void {
-    const message = `Terminal Performance: ${data.count} samples, avg init: ${data.avgInit.toFixed(0)}ms, avg activation: ${data.avgOpenToActive.toFixed(0)}ms`;
+    const message = `Terminal Performance: ${data.count} samples, avg init: ${(data.avgInit ?? 0).toFixed(0)}ms, avg activation: ${(data.avgOpenToActive ?? 0).toFixed(0)}ms`;
     vscode.window.showInformationMessage(message);
     Logger.info("Performance Report:", data);
   }
