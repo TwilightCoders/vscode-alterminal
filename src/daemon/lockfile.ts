@@ -69,6 +69,17 @@ export function secretPath(wsHash: string): string {
   return path.join(runtimeDir(), `alterminal-daemon-${wsHash}.secret`);
 }
 
+/**
+ * Path to the daemon log file (sibling of the lockfile). A single canonical
+ * path is shared across handoffs: loomptyd opens it with O_APPEND, so the
+ * predecessor's final lines and the successor's startup lines land in one
+ * continuous timeline without clobbering — exactly what's needed to diagnose
+ * a handoff.
+ */
+export function logPath(wsHash: string): string {
+  return path.join(runtimeDir(), `alterminal-daemon-${wsHash}.log`);
+}
+
 /** Write the daemon secret atomically with owner-only permissions. */
 export function writeSecret(secretFilePath: string, secret: string): void {
   const tmp = secretFilePath + ".tmp";

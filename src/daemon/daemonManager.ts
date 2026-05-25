@@ -18,6 +18,7 @@ import {
   lockfilePath,
   socketPath,
   secretPath,
+  logPath,
   generateSecret,
   readLockfile,
   readSecret,
@@ -227,9 +228,12 @@ export class DaemonManager {
 
     return new Promise((resolve, reject) => {
       // The launcher appends trailing args to loomptyd's argv, so
-      // --handoff-listen rides through unchanged.
+      // --handoff-listen and --log ride through unchanged. The successor
+      // logs to the SAME canonical path as its predecessor (O_APPEND), so
+      // the handoff shows up as one continuous timeline.
       const launcherArgs = [
         launcher, binary, sockPath, secret, lockPath,
+        "--log", logPath(GLOBAL_DAEMON_ID),
         "--handoff-listen", handoffPath,
       ];
       const stderr: string[] = [];
@@ -392,7 +396,10 @@ export class DaemonManager {
       // setsid. The launcher breaks this tracking: VS Code only knows
       // about the launcher (which dies immediately), while loomptyd is
       // a grandchild orphaned to launchd.
-      const launcherArgs = [launcher, binary, sockPath, secret, lockPath];
+      const launcherArgs = [
+        launcher, binary, sockPath, secret, lockPath,
+        "--log", logPath(GLOBAL_DAEMON_ID),
+      ];
 
       Logger.info(`[daemon] Spawning via launcher: node ${launcherArgs.join(" ")}`);
 
