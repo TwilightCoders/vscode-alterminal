@@ -28,6 +28,12 @@
       <kbd>double-click</kbd> a word, <kbd>triple-click</kbd> a line, then ⌘C.
     </div>
   </header>
+  <div class="row" style="padding-left:0">
+    <button id="theme">Toggle theme</button>
+    <button id="fontUp">Font +</button>
+    <button id="fontDown">Font −</button>
+    <span style="color:#666">— these change xterm options live; the renderer should follow (proves state subscriptions).</span>
+  </div>
   <div id="term"></div>
   <div class="row">selection: <span id="sel">(none)</span></div>
 
@@ -97,6 +103,23 @@
       if (ours) setRenderer("WebGPU ✓ (our addon is driving this Terminal)", "gpu");
       else setRenderer("DOM (WebGPU addon did not install — check console)", "dom");
     }, 600);
+
+    // Live-state controls — exercise the addon's theme/option subscriptions.
+    const darkTheme = term.options.theme;
+    const lightTheme = {
+      background: "#fdf6e3", foreground: "#586e75", cursor: "#586e75",
+      selectionBackground: "#eee8d5",
+      red: "#dc322f", green: "#859900", yellow: "#b58900", blue: "#268bd2",
+      magenta: "#d33682", cyan: "#2aa198", white: "#073642",
+    };
+    let light = false;
+    document.getElementById("theme").onclick = () => {
+      light = !light;
+      term.options.theme = light ? lightTheme : darkTheme; // fires themeService.onChangeColors
+      term.focus();
+    };
+    document.getElementById("fontUp").onclick = () => { term.options.fontSize = term.options.fontSize + 1; term.focus(); };
+    document.getElementById("fontDown").onclick = () => { term.options.fontSize = Math.max(6, term.options.fontSize - 1); term.focus(); };
 
     term.focus();
     window.__term = term; // for poking in the console
