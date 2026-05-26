@@ -482,7 +482,8 @@
     "watch:webview": "node ./node_modules/typescript/lib/tsc.js -watch -p ./tsconfig.webview.json",
     "watch:debug": "NODE_ENV=development node ./node_modules/typescript/lib/tsc.js -watch -p ./",
     "test": "node -e \"require('fs').rmSync('out/test', {recursive:true, force:true});\" && npm run compile:tests && node ./out/test/test/runTest.js",
-    "dev:install": "bash scripts/dev-install.sh"
+    "dev:install": "bash scripts/dev-install.sh",
+    "capture": "node -e \"require('fs').rmSync('out/test', {recursive:true, force:true});\" && npm run compile:tests && node ./out/test/test/captureRunner.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
