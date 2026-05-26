@@ -1,20 +1,24 @@
 /**
  * The shared glyph atlas: a single `rgba8unorm` 2D texture array. Each array
  * layer is an independent packing surface managed by its own {@link ShelfPacker}.
- * Glyphs are keyed by `(code, bg, fg, ext)` via {@link FourKeyMap} so a styled
- * glyph is cached separately from the same codepoint in another style.
+ * Glyphs are keyed by `(code, bold, italic)` via {@link FourKeyMap}. The bitmap
+ * is a solid-white coverage mask — fg/bg color is applied in the shader, not
+ * baked in — so color is deliberately NOT part of the key (one bitmap serves a
+ * codepoint in every color).
  *
- * Eviction strategy (Phase 1): when every layer is full, the atlas performs a
- * full reset — all cached glyphs are dropped and re-rasterized on demand. This
- * is correct and simple. The {@link LruEvictor} is wired and the per-glyph LRU
- * data is maintained so the Phase-2 strategy ("evict the LRU set, repack the
- * survivors") can drop in without touching call sites.
+ * Eviction strategy: when every layer is full, the atlas evicts the
+ * least-recently-used ~half of its cold glyphs (via {@link LruEvictor}) and
+ * repacks the survivors onto freshly-reset layers — it does NOT nuke everything.
+ * Survivors are re-rasterized from their stored `text`/style and keep their LRU
+ * recency. A full reset is only the degenerate fallback when a single frame's
+ * glyphs exceed the whole atlas.
  *
- * Mid-frame reset safety: because a reset invalidates positions handed out
- * earlier in the same frame, {@link consumeReset} lets the renderer detect a
- * reset and rebuild the frame once. Glyphs allocated in the current frame are
- * never evicted (the reset only happens when even those don't fit, which for a
- * single viewport's worth of glyphs cannot occur with a reasonably sized atlas).
+ * Mid-frame safety: eviction (and any fallback reset) relocates glyph positions,
+ * so {@link consumeReset} lets the renderer detect it and rebuild the frame once
+ * on the repacked atlas. Crucially, {@link LruEvictor.selectEvictable} never
+ * returns a glyph touched in the current frame, so glyphs already drawn this
+ * frame are always preserved — a mid-frame fill relocates them but cannot
+ * corrupt them (the bug class that motivated this renderer).
  */
 import { ShelfPacker } from "./shelfPacker.js";
 import { LruEvictor } from "./lruEvictor.js";
@@ -25,6 +29,13 @@ import type { IGlyphKey, IRasterizedGlyph } from "../types.js";
 interface IAtlasEntry {
   id: number;
   glyph: IRasterizedGlyph;
+  // Identity + source needed to re-rasterize and re-key this glyph when
+  // repacking survivors during LRU eviction. (code, bold, italic) is the cache
+  // key; `text` is the actual string handed to the rasterizer.
+  code: number;
+  text: string;
+  bold: boolean;
+  italic: boolean;
 }
 
 export interface IGlyphAtlasOptions {
@@ -48,6 +59,17 @@ export class GlyphAtlas {
   private _evictor = new LruEvictor();
   private _nextId = 1;
   private _didReset = false;
+  private _evictionCount = 0;
+  private _hardResetCount = 0;
+
+  /** Diagnostics: how many LRU evict-and-repack cycles have run. */
+  public get evictionCount(): number {
+    return this._evictionCount;
+  }
+  /** Diagnostics: how many degenerate full resets have run. */
+  public get hardResetCount(): number {
+    return this._hardResetCount;
+  }
 
   constructor(
     private readonly _device: GPUDevice,
@@ -102,7 +124,15 @@ export class GlyphAtlas {
     bold: boolean,
     italic: boolean,
   ): IRasterizedGlyph | null {
-    const existing = this._entries.get(key.code, key.bg, key.fg, key.ext);
+    // The atlas bitmap is a solid-white coverage mask (fg/bg are applied in the
+    // shader, not baked in), so it depends ONLY on (code, bold, italic). Keying
+    // by color would store one identical bitmap per fg/bg combo — a gradient
+    // progress bar or powerline prompt would multiply a single block glyph into
+    // dozens of redundant entries and thrash the atlas. Key by what the bitmap
+    // actually depends on.
+    const boldKey = bold ? 1 : 0;
+    const italicKey = italic ? 1 : 0;
+    const existing = this._entries.get(key.code, boldKey, italicKey, 0);
     if (existing) {
       this._evictor.markUsed(existing.id);
       return existing.glyph;
@@ -134,23 +164,97 @@ export class GlyphAtlas {
       offset: { x: bbox.minX, y: bbox.minY },
       isColor: raster.isColor,
     };
-    this._entries.set(key.code, key.bg, key.fg, key.ext, { id, glyph });
+    this._entries.set(key.code, boldKey, italicKey, 0, { id, glyph, code: key.code, text, bold, italic });
     this._evictor.markUsed(id);
     return glyph;
   }
 
-  /** Try to place a `w x h` region across the layers, resetting if all are full. */
-  private _place(w: number, h: number): { layer: number; x: number; y: number } | null {
+  /** Allocate a `w x h` region across the layers, or null if all are full. */
+  private _allocate(w: number, h: number): { layer: number; x: number; y: number } | null {
     for (let layer = 0; layer < this._packers.length; layer++) {
       const pos = this._packers[layer].allocate(w, h);
       if (pos) {
         return { layer, x: pos.x, y: pos.y };
       }
     }
-    // Every layer is full — reset and retry on a clean layer 0.
+    return null;
+  }
+
+  /**
+   * Place a `w x h` region. When the atlas is full, evict the least-recently-used
+   * glyphs and repack the survivors rather than nuking everything. Glyphs touched
+   * in the current frame are never evicted (selectEvictable excludes them), so a
+   * fill that happens mid-frame can't corrupt glyphs already drawn this frame —
+   * it just relocates them, and the renderer rebuilds the frame via `_didReset`.
+   */
+  private _place(w: number, h: number): { layer: number; x: number; y: number } | null {
+    const direct = this._allocate(w, h);
+    if (direct) {
+      return direct;
+    }
+    if (this._evictAndRepack()) {
+      const retry = this._allocate(w, h);
+      if (retry) {
+        return retry;
+      }
+    }
+    // Degenerate: a single frame needs more than the whole atlas. Hard reset.
     this._reset();
-    const pos = this._packers[0].allocate(w, h);
-    return pos ? { layer: 0, x: pos.x, y: pos.y } : null;
+    return this._allocate(w, h);
+  }
+
+  /**
+   * Drop the least-recently-used ~half of cold glyphs (never current-frame ones)
+   * and repack the survivors onto freshly-reset layers. Returns false when there
+   * is nothing evictable (every glyph is in the current frame). Sets `_didReset`
+   * because survivor texture positions change — the renderer must rebuild.
+   */
+  private _evictAndRepack(): boolean {
+    const evictCount = Math.max(1, Math.floor(this._entries.size / 2));
+    const evictIds = new Set(this._evictor.selectEvictable(evictCount));
+    if (evictIds.size === 0) {
+      return false;
+    }
+
+    const survivors: IAtlasEntry[] = [];
+    for (const e of this._entries.values()) {
+      if (!evictIds.has(e.id)) {
+        survivors.push(e);
+      }
+    }
+
+    // Reset packing surfaces and the entry map; keep the evictor's recency for
+    // survivors (only drop the evicted ids) so LRU ordering is preserved.
+    for (const p of this._packers) {
+      p.reset();
+    }
+    this._entries.clear();
+    for (const id of evictIds) {
+      this._evictor.remove(id);
+    }
+
+    for (const e of survivors) {
+      const raster = this._rasterizer.rasterize(e.text, e.bold, e.italic);
+      const bbox = raster ? this._tightBounds(raster.imageData) : null;
+      const pos = bbox ? this._allocate(bbox.maxX - bbox.minX + 1, bbox.maxY - bbox.minY + 1) : null;
+      if (!raster || !bbox || !pos) {
+        this._evictor.remove(e.id); // couldn't re-place — drop it cleanly
+        continue;
+      }
+      this._upload(raster.imageData, bbox, pos.layer, pos.x, pos.y);
+      const glyph: IRasterizedGlyph = {
+        layer: pos.layer,
+        texturePosition: { x: pos.x, y: pos.y },
+        size: { x: bbox.maxX - bbox.minX + 1, y: bbox.maxY - bbox.minY + 1 },
+        offset: { x: bbox.minX, y: bbox.minY },
+        isColor: raster.isColor,
+      };
+      this._entries.set(e.code, e.bold ? 1 : 0, e.italic ? 1 : 0, 0, { ...e, glyph });
+    }
+
+    this._evictionCount++;
+    this._didReset = true;
+    return true;
   }
 
   private _reset(): void {
@@ -159,6 +263,7 @@ export class GlyphAtlas {
     }
     this._entries.clear();
     this._evictor.clear();
+    this._hardResetCount++;
     this._didReset = true;
   }
 

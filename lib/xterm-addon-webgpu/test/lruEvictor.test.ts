@@ -19,6 +19,18 @@ describe("LruEvictor", () => {
     assert.deepEqual(e.selectEvictable(10), []);
   });
 
+  it("drops a glyph from candidates and size once removed", () => {
+    const e = new LruEvictor();
+    e.beginFrame();
+    e.markUsed(10);
+    e.markUsed(20);
+    e.beginFrame(); // both now stale
+    e.remove(10);
+    assert.equal(e.size, 1);
+    assert.equal(e.has(10), false);
+    assert.deepEqual(e.selectEvictable(10), [20], "removed id is no longer a candidate");
+  });
+
   it("offers stale glyphs once a new frame begins", () => {
     const e = new LruEvictor();
     e.beginFrame();
