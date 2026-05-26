@@ -123,6 +123,15 @@ export class WebgpuRenderer {
   /** Cursor blink state: true = cursor visible this phase. */
   private _cursorBlinkOn = true;
   private _blinkTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Vertical band (device px, cell-local) that cell backgrounds fill — taken
+   * from the FULL BLOCK glyph U+2588, the font's reference for a fully-inked
+   * cell. Backgrounds use this instead of the full line-box height so a block
+   * character and its background share the same extent (aligned), and the
+   * font's line-gap stays as inter-line spacing rather than being painted.
+   */
+  private _fillTop = 0;
+  private _fillHeight = 0;
 
   private readonly _onRequestRedraw = new Emitter<{ start: number; end: number }>();
   public readonly onRequestRedraw: Event<{ start: number; end: number }> = this._onRequestRedraw.event;
@@ -245,6 +254,24 @@ export class WebgpuRenderer {
     }
     this._device.queue.writeBuffer(this._viewportBuffer, 0, new Float32Array([w, h, 0, 0]));
     this._damage.resize(m.rows);
+    this._computeCellFillBox();
+  }
+
+  /** Derive the cell-background fill band from the full-block glyph (U+2588). */
+  private _computeCellFillBox(): void {
+    let top = 0;
+    let height = this._metrics.deviceCellHeight;
+    try {
+      const g = this._shared.atlas.getOrAllocate({ code: 0x2588, bg: 0, fg: 0, ext: 0 }, "█", false, false);
+      if (g) {
+        top = g.offset.y;
+        height = g.size.y;
+      }
+    } catch {
+      // Atlas/rasterizer not ready — fall back to the full cell.
+    }
+    this._fillTop = top;
+    this._fillHeight = height;
   }
 
   /**
@@ -429,7 +456,15 @@ export class WebgpuRenderer {
         // inversion, not a translucent overlay). Otherwise skip the default bg.
         const bgColor = invertForCursor ? m.palette.cursor : resolved.bg;
         if (bgColor !== palette.background) {
-          this._pushRect(xPx, yPx, cellW, cellH, bgColor, 1);
+          // A focused block cursor and a selection fill the whole cell (they're
+          // continuous UI highlights). A normal cell background matches the
+          // block-glyph band so block chars and their backgrounds align, and
+          // the font's line-gap stays as inter-line spacing.
+          if (invertForCursor || ri.selected) {
+            this._pushRect(xPx, yPx, cellW, cellH, bgColor, 1);
+          } else {
+            this._pushRect(xPx, yPx + this._fillTop, cellW, this._fillHeight, bgColor, 1);
+          }
         }
         // Unfocused block cursor: hollow outline, glyph unchanged.
         if (isCursorCell && blockCursor && !m.focused) {
