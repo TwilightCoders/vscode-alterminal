@@ -571,19 +571,32 @@ export class WebgpuRenderer {
       try {
         const buf = this._getBuffer() as unknown as {
           viewportY?: number;
-          getLine?: (i: number) => { translateToString?: (trim?: boolean) => string } | undefined;
+          getLine?: (i: number) =>
+            | { getCell?: (c: number) => { getChars?: () => string; getWidth?: () => number } | undefined }
+            | undefined;
         };
         const top = buf?.viewportY ?? 0;
-        const rowText = buf?.getLine?.(top + e.y1)?.translateToString?.(false) ?? "";
-        const covered = e.y1 === e.y2 ? rowText.slice(e.x1, e.x2) : rowText.slice(e.x1);
+        const line = buf?.getLine?.(top + e.y1);
+        // Cell-accurate "covered": concatenate the actual cell chars in [x1,x2),
+        // NOT a translateToString slice (which collapses wide chars and drifts).
+        let cellCovered = "";
+        const lastCol = e.y1 === e.y2 ? e.x2 : e.cols;
+        for (let c = e.x1; c < lastCol; c++) {
+          cellCovered += line?.getCell?.(c)?.getChars?.() ?? "";
+        }
+        // Window of (col:char:width) around the link start, to expose any
+        // wide-char miscount that shifts rendered glyphs off the cell grid.
+        const win: string[] = [];
+        for (let c = Math.max(0, e.x1 - 4); c < Math.min(e.x1 + 6, e.cols); c++) {
+          const cell = line?.getCell?.(c);
+          win.push(`${c}:${JSON.stringify(cell?.getChars?.() ?? "")}:w${cell?.getWidth?.() ?? "?"}`);
+        }
         const m = this._metrics;
         // eslint-disable-next-line no-console
         console.log(
           `[alterminal/webgpu link] coords x1=${e.x1} y1=${e.y1} x2=${e.x2} y2=${e.y2} cols=${e.cols} | ` +
-            `metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth} cellH=${m.deviceCellHeight} ` +
-            `baseline=${m.baseline} mCols=${m.cols} | ` +
-            `canvas device=${this._canvas.width}x${this._canvas.height} css=${this._canvas.clientWidth}x${this._canvas.clientHeight} | ` +
-            `covered=${JSON.stringify(covered)} row=${JSON.stringify(rowText)}`,
+            `metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth} cellH=${m.deviceCellHeight} | ` +
+            `cellCovered=${JSON.stringify(cellCovered)} | cellsAroundX1=[ ${win.join("  ")} ]`,
         );
       } catch {
         /* diagnostic only */
