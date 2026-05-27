@@ -592,12 +592,22 @@ export class WebgpuRenderer {
           win.push(`${c}:${JSON.stringify(cell?.getChars?.() ?? "")}:w${cell?.getWidth?.() ?? "?"}`);
         }
         const m = this._metrics;
-        // eslint-disable-next-line no-console
-        console.log(
-          `[alterminal/webgpu link] coords x1=${e.x1} y1=${e.y1} x2=${e.x2} y2=${e.y2} cols=${e.cols} | ` +
-            `metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth} cellH=${m.deviceCellHeight} | ` +
-            `cellCovered=${JSON.stringify(cellCovered)} | cellsAroundX1=[ ${win.join("  ")} ]`,
-        );
+        const info = {
+          coords: { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols },
+          metrics: { dpr: m.devicePixelRatio, cellW: m.deviceCellWidth, cellH: m.deviceCellHeight },
+          cellCovered,
+          cellsAroundX1: win,
+        };
+        // Stash for manual inspection (type `__altLink` in the console) and log
+        // on SHORT separate lines so a single console screenshot captures it all
+        // without the right edge truncating.
+        (window as unknown as { __altLink?: unknown }).__altLink = info;
+        /* eslint-disable no-console */
+        console.log(`[altLink] coords x1=${e.x1} x2=${e.x2} y=${e.y1} cols=${e.cols}`);
+        console.log(`[altLink] metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth}`);
+        console.log(`[altLink] cellCovered=${JSON.stringify(cellCovered)}`);
+        console.log(`[altLink] cellsAroundX1=`, win);
+        /* eslint-enable no-console */
       } catch {
         /* diagnostic only */
       }
