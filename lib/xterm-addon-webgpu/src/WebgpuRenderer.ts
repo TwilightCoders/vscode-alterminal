@@ -576,9 +576,13 @@ export class WebgpuRenderer {
         const top = buf?.viewportY ?? 0;
         const rowText = buf?.getLine?.(top + e.y1)?.translateToString?.(false) ?? "";
         const covered = e.y1 === e.y2 ? rowText.slice(e.x1, e.x2) : rowText.slice(e.x1);
+        const m = this._metrics;
         // eslint-disable-next-line no-console
         console.log(
-          `[alterminal/webgpu link] x1=${e.x1} y1=${e.y1} x2=${e.x2} y2=${e.y2} cols=${e.cols} ` +
+          `[alterminal/webgpu link] coords x1=${e.x1} y1=${e.y1} x2=${e.x2} y2=${e.y2} cols=${e.cols} | ` +
+            `metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth} cellH=${m.deviceCellHeight} ` +
+            `baseline=${m.baseline} mCols=${m.cols} | ` +
+            `canvas device=${this._canvas.width}x${this._canvas.height} css=${this._canvas.clientWidth}x${this._canvas.clientHeight} | ` +
             `covered=${JSON.stringify(covered)} row=${JSON.stringify(rowText)}`,
         );
       } catch {
