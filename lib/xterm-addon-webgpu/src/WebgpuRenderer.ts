@@ -53,6 +53,8 @@ export interface IRenderMetrics {
   /** Cell size in device pixels. */
   deviceCellWidth: number;
   deviceCellHeight: number;
+  /** Device px from the cell top to the text baseline (where glyphs sit). */
+  baseline: number;
   devicePixelRatio: number;
   palette: Palette;
   focused: boolean;
@@ -524,7 +526,11 @@ export class WebgpuRenderer {
     const cellH = m.deviceCellHeight;
     const dpr = m.devicePixelRatio || 1;
     const stroke = Math.max(1, Math.round(dpr));
-    const bottomGap = Math.max(1, Math.round(dpr));
+    const gap = Math.max(1, Math.round(dpr));
+    // Sit just below the baseline (a small gap under the letters), clamped to
+    // stay inside the cell — anchoring to cellH-minus-fixed put it inside the
+    // glyphs on tight line-heights.
+    const yInCell = Math.min(Math.round(m.baseline + gap), cellH - stroke);
     const periodPx = Math.max(4, Math.round(cellH * 0.5));
     const styleId = underlineStyleToShaderId(UnderlineStyle.SINGLE);
     const [r, g, b, a] = rgbaToFloats(lu.fgRgba);
@@ -532,7 +538,7 @@ export class WebgpuRenderer {
     for (const span of linkUnderlineSpans(lu, m.rows, m.cols)) {
       const xPx = span.colStart * cellW;
       const w = (span.colEnd - span.colStart) * cellW;
-      const yBand = Math.round(span.row * cellH + cellH - bottomGap - stroke);
+      const yBand = span.row * cellH + yInCell;
       this._decorStager.push([xPx, yBand, w, stroke, r, g, b, a, styleId, periodPx, 0, 0]);
     }
   }
@@ -558,6 +564,26 @@ export class WebgpuRenderer {
           ? p.ansi[e.fg]
           : p.foreground;
       this._linkUnderline = { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols, fgRgba };
+      // TEMP diagnostic: is the underline span [x1,x2) actually over the link
+      // text, or shifted? Logs the covered substring vs the full row so we can
+      // tell a coordinate bug from a rendering bug. Remove once the horizontal
+      // offset is resolved.
+      try {
+        const buf = this._getBuffer() as unknown as {
+          viewportY?: number;
+          getLine?: (i: number) => { translateToString?: (trim?: boolean) => string } | undefined;
+        };
+        const top = buf?.viewportY ?? 0;
+        const rowText = buf?.getLine?.(top + e.y1)?.translateToString?.(false) ?? "";
+        const covered = e.y1 === e.y2 ? rowText.slice(e.x1, e.x2) : rowText.slice(e.x1);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[alterminal/webgpu link] x1=${e.x1} y1=${e.y1} x2=${e.x2} y2=${e.y2} cols=${e.cols} ` +
+            `covered=${JSON.stringify(covered)} row=${JSON.stringify(rowText)}`,
+        );
+      } catch {
+        /* diagnostic only */
+      }
     }
     this._renderFrame();
   }
@@ -628,7 +654,7 @@ export class WebgpuRenderer {
     // A 1px logical stroke; scales with DPR. (Real font underline-thickness
     // metrics would refine this; this is the cell-derived approximation.)
     const stroke = Math.max(1, Math.round(dpr));
-    const bottomGap = Math.max(1, Math.round(dpr));
+    const gap = Math.max(1, Math.round(dpr));
 
     const us = extractUnderlineStyle(cell.ext);
     if (us !== UnderlineStyle.NONE) {
@@ -641,7 +667,9 @@ export class WebgpuRenderer {
       } else if (us === UnderlineStyle.CURLY) {
         bandH = Math.max(3 * dpr, Math.round(cellH * 0.12));
       }
-      const yBand = Math.round(yPx + cellH - bottomGap - bandH);
+      // Anchor just below the baseline (small gap under the letters), clamped
+      // to keep the band inside the cell.
+      const yBand = Math.min(Math.round(yPx + this._metrics.baseline + gap), Math.round(yPx + cellH - bandH));
       // periodPx drives dashed/curly; ~half a cell reads well.
       const periodPx = Math.max(4, Math.round(cellH * 0.5));
       this._decorStager.push([xPx, yBand, cellW, Math.round(bandH), r, g, b, a, styleId, periodPx, 0, 0]);

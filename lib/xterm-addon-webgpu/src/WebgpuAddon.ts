@@ -269,6 +269,7 @@ export class WebgpuAddon {
       rows: terminal.rows,
       deviceCellWidth: d.deviceCellWidth,
       deviceCellHeight: d.deviceCellHeight,
+      baseline: d.baseline,
       devicePixelRatio: d.dpr,
       palette: this._buildPalette(terminal),
       focused,
