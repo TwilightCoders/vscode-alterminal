@@ -173,7 +173,10 @@ export class WebgpuAddon {
    */
   private _subscribeToLinks(terminal: IXtermTerminalLike): void {
     const core = terminal._core as Record<string, any> | undefined;
-    const linkifier = core?._linkifier2 ?? core?.linkifier2;
+    // `_core.linkifier` is the public getter the WebGL addon uses to reach the
+    // Linkifier2 (the instance that fires onShow/HideLinkUnderline). The
+    // `_linkifier2` fallbacks guard against version drift.
+    const linkifier = core?.linkifier ?? core?._linkifier2 ?? core?.linkifier2;
     if (!linkifier?.onShowLinkUnderline || !linkifier?.onHideLinkUnderline) {
       return;
     }
