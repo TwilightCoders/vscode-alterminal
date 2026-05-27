@@ -87,6 +87,12 @@ function cleanupPaths(paths: ReturnType<typeof uniquePaths>) {
 }
 
 suite("Daemon Integration", () => {
+  // These spawn a real loomptyd from bin/loomptyd. That binary is gitignored
+  // (built locally / vendored per-platform), so it's absent on CI runners
+  // without a loompty source tree. Skip rather than hard-fail when it's missing.
+  suiteSetup(function () {
+    if (!fs.existsSync(LOOMPTYD)) this.skip();
+  });
 
   suite("spawn + connect", () => {
     test("daemon comes up and accepts a connection with auth", async function () {

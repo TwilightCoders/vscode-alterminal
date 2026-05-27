@@ -87,55 +87,10 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: |
-          # vsce's npm list rejects cross-platform optional deps, so we build
-          # with --no-dependencies and inject node_modules into the vsix.
-          npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies -o alterminal-bare.vsix
-
-          # Unpack, inject deps, repack
-          WORK=$(mktemp -d)
-          cd "$WORK"
-          unzip -q "$GITHUB_WORKSPACE/alterminal-bare.vsix"
-
-          # Copy runtime dependencies into the vsix. The list is DERIVED from
-          # package.json (not hand-maintained) so it can never drift from the
-          # actual deps again — a stale hardcoded list once dropped
-          # @xterm/addon-search + @xterm/addon-unicode-graphemes, which 404'd
-          # in the webview and silently killed all keyboard input.
-          # Package names contain no spaces, so a space-joined list word-splits
-          # cleanly — and this avoids depending on bash 4+ (`mapfile`).
-          DEPS="$(node -e "console.log(Object.keys(require('$GITHUB_WORKSPACE/package.json').dependencies||{}).join(' '))")"
-          # Platform node-pty binaries are optionalDependencies fetched in the
-          # install step above; inject them explicitly.
-          DEPS="$DEPS @lydell/node-pty-darwin-arm64 @lydell/node-pty-darwin-x64 @lydell/node-pty-linux-arm64 @lydell/node-pty-linux-x64 @lydell/node-pty-win32-x64"
-          for dep in $DEPS; do
-            src="$GITHUB_WORKSPACE/node_modules/$dep"
-            if [ -d "$src" ]; then
-              mkdir -p "extension/node_modules/$dep"
-              cp -r "$src"/. "extension/node_modules/$dep/"
-            else
-              echo "⚠️ Missing dependency: $dep"
-            fi
-          done
-
-          # Gate: every static resource the webview loads at boot (parsed from
-          # templateUtils.ts) must be present in the package. Fails the build
-          # otherwise — this is what catches a dropped addon before release.
-          node "$GITHUB_WORKSPACE/scripts/verify-package.js" "$WORK/extension" "$GITHUB_WORKSPACE/src/utils/templateUtils.ts"
-
-          # Repackage vsix
-          rm "$GITHUB_WORKSPACE/alterminal-bare.vsix"
-          zip -qr "$GITHUB_WORKSPACE/alterminal.vsix" .
-          cd "$GITHUB_WORKSPACE"
-          rm -rf "$WORK"
-
-          # Verify size is reasonable (should be ~10MB with deps, not ~3MB without)
-          SIZE=$(stat --printf='%s' alterminal.vsix)
-          echo "VSIX size: $((SIZE / 1024 / 1024))MB ($SIZE bytes)"
-          if [ "$SIZE" -lt 5000000 ]; then
-            echo "❌ VSIX too small — dependencies likely missing"
-            exit 1
-          fi
+        # Single source of truth for packaging (shared with CI's package job)
+        # so the two can never drift: bare vsce package → inject the full prod
+        # dependency closure + platform binaries → verify-package gate → repack.
+        run: bash scripts/package-vsix.sh alterminal.vsix --all-platforms
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

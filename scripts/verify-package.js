@@ -1,27 +1,42 @@
 #!/usr/bin/env node
 //
-// verify-package.js — fail the build if the packaged vsix is missing any
-// static resource the webview actually loads.
+// verify-package.js — fail the build if the packaged vsix is missing anything
+// the extension needs at runtime, on either side of the webview boundary.
 //
-// The webview boots by loading a fixed set of node_modules scripts/styles and
-// a couple of in-tree bundles, declared in src/utils/templateUtils.ts. If any
-// of those files is absent from the package, the webview throws mid-init and
-// (historically) silently killed all keyboard input. The packaging step used
-// to copy a HAND-MAINTAINED list of deps into the vsix, which drifted from the
-// loader and dropped @xterm/addon-search + @xterm/addon-unicode-graphemes.
+// Two failure modes, both historically fatal and both silent:
 //
-// This gate ties verification to the loader itself: it parses the exact files
-// templateUtils references and checks they exist under the packaged extension
-// root. Run it in CI after repackaging, and locally before any manual package.
+//   1. Webview side. The webview boots by loading a fixed set of node_modules
+//      scripts/styles + in-tree bundles, declared in src/utils/templateUtils.ts.
+//      A missing one throws mid-init and once killed all keyboard input.
+//   2. Extension-host side. The host `require()`s node-pty, koffi, and
+//      xterm-link-provider at activation; a missing one crashes activation.
+//
+// The packaging step used to copy a HAND-MAINTAINED list of deps into the vsix,
+// which drifted from package.json and dropped @xterm/addon-search +
+// @xterm/addon-unicode-graphemes. This gate ties verification to ground truth:
+//   - webview files: parsed from the loader (templateUtils.ts)
+//   - runtime deps: every entry in package.json `dependencies` (+ the platform
+//     node-pty binaries, with --all-platforms)
+// and checks they all exist under the packaged extension root.
 //
 // Usage:
-//   node scripts/verify-package.js <packaged-extension-root> [templateUtils.ts]
+//   node scripts/verify-package.js <packaged-extension-root> [templateUtils.ts] [--all-platforms]
 //
-// <packaged-extension-root> is the directory containing the unpacked vsix's
-// `node_modules/`, `lib/`, `src/` (i.e. the `extension/` dir inside the vsix).
+// <packaged-extension-root> is the `extension/` dir inside the unpacked vsix.
+// --all-platforms additionally requires every platform node-pty binary (the
+// release injects all of them; a local single-platform build does not).
 
 const fs = require("fs");
 const path = require("path");
+
+// Platform-specific node-pty binaries the release ships for all targets.
+const PLATFORM_NODE_PTY = [
+  "@lydell/node-pty-darwin-arm64",
+  "@lydell/node-pty-darwin-x64",
+  "@lydell/node-pty-linux-arm64",
+  "@lydell/node-pty-linux-x64",
+  "@lydell/node-pty-win32-x64",
+];
 
 /**
  * Extract every static resource path (relative to the extension root) that the
@@ -59,29 +74,64 @@ function extractRequiredWebviewFiles(source) {
   return [...files].sort();
 }
 
+/**
+ * The node_modules directories that must be packaged: every runtime
+ * `dependencies` entry (these are require()d by the extension host or loaded by
+ * the webview), plus the platform node-pty binaries when allPlatforms is set.
+ * Pure function — unit-tested.
+ *
+ * @param {object} pkgJson        parsed package.json
+ * @param {{allPlatforms?: boolean}} [opts]
+ * @returns {string[]} sorted, de-duplicated relative dir paths
+ */
+function extractRequiredDependencyDirs(pkgJson, opts = {}) {
+  const dirs = new Set();
+  for (const dep of Object.keys(pkgJson.dependencies || {})) {
+    dirs.add(path.posix.join("node_modules", dep));
+  }
+  if (opts.allPlatforms) {
+    for (const dep of PLATFORM_NODE_PTY) {
+      dirs.add(path.posix.join("node_modules", dep));
+    }
+  }
+  return [...dirs].sort();
+}
+
 function main() {
-  const root = process.argv[2];
+  const args = process.argv.slice(2);
+  const allPlatforms = args.includes("--all-platforms");
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const root = positional[0];
   if (!root) {
-    console.error("usage: node scripts/verify-package.js <packaged-extension-root> [templateUtils.ts]");
+    console.error(
+      "usage: node scripts/verify-package.js <packaged-extension-root> [templateUtils.ts] [--all-platforms]",
+    );
     process.exit(2);
   }
   const templateUtilsPath =
-    process.argv[3] || path.join(__dirname, "..", "src", "utils", "templateUtils.ts");
+    positional[1] || path.join(__dirname, "..", "src", "utils", "templateUtils.ts");
+  const pkgJson = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"),
+  );
 
-  const source = fs.readFileSync(templateUtilsPath, "utf8");
-  const required = extractRequiredWebviewFiles(source);
+  const webviewFiles = extractRequiredWebviewFiles(fs.readFileSync(templateUtilsPath, "utf8"));
+  const depDirs = extractRequiredDependencyDirs(pkgJson, { allPlatforms });
+  const required = [...webviewFiles, ...depDirs];
 
   const missing = required.filter((rel) => !fs.existsSync(path.join(root, rel)));
 
   if (missing.length > 0) {
-    console.error(`❌ Packaged extension is missing ${missing.length} webview resource(s):`);
+    console.error(`❌ Packaged extension is missing ${missing.length} required resource(s):`);
     missing.forEach((m) => console.error("  - " + m));
     console.error(`\nChecked root: ${root}`);
-    console.error("These files are loaded by the webview at boot; a missing one breaks the terminal.");
+    console.error("These are loaded by the webview or required by the extension host; a missing one breaks the terminal.");
     process.exit(1);
   }
 
-  console.log(`✅ All ${required.length} webview resources present in package:`);
+  console.log(
+    `✅ All ${required.length} required resources present in package ` +
+      `(${webviewFiles.length} webview files, ${depDirs.length} dependency dirs):`,
+  );
   required.forEach((r) => console.log("  - " + r));
 }
 
@@ -89,4 +139,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { extractRequiredWebviewFiles };
+module.exports = { extractRequiredWebviewFiles, extractRequiredDependencyDirs };

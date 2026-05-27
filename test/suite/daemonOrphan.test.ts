@@ -70,6 +70,11 @@ function cleanupPaths(paths: ReturnType<typeof uniquePaths>) {
 }
 
 suite("Orphan Daemon Scenarios", () => {
+  // Spawns a real loomptyd from bin/loomptyd, which is gitignored and absent on
+  // CI runners without a loompty source tree. Skip rather than hard-fail.
+  suiteSetup(function () {
+    if (!fs.existsSync(LOOMPTYD)) this.skip();
+  });
 
   test("unlinking socket file does not kill a listening daemon", async function () {
     this.timeout(10000);

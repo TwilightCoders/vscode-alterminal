@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Newer pushes to the same ref supersede in-flight runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Build WebGPU renderer addon
+        run: |
+          cd lib/xterm-addon-webgpu
+          npm ci
+          npm run build
+      # The test host loads the extension from out/extension.js (runTest.ts
+      # points --extensionDevelopmentPath at the repo root), so a full compile
+      # must run first — not just compile:tests.
+      - run: npm run compile
+      # The @vscode/test-electron host needs a display; xvfb provides one.
+      # Daemon integration suites self-skip here (no bin/loomptyd on CI).
+      - name: Run tests
+        run: xvfb-run -a npm test
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Build WebGPU renderer addon
+        run: |
+          cd lib/xterm-addon-webgpu
+          npm ci
+          npm run build
+      - run: npm run compile
+      # Dry-run the EXACT release packaging (shared scripts/package-vsix.sh) and
+      # run the verify-package gate, so a dropped webview addon or runtime dep is
+      # caught on every push — not only when a release is cut. (No --all-platforms:
+      # this single-platform runner doesn't fetch the other OSes' node-pty
+      # binaries; the release job verifies those.)
+      - name: Package + verify (dry run)
+        run: bash scripts/package-vsix.sh /tmp/alterminal-ci.vsix

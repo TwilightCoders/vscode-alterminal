@@ -6,7 +6,7 @@ import * as path from "path";
 // of the TS build, so resolve it relative to the repo root and require it.
 // (From out/test/test/suite/, the repo root is four levels up.)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { extractRequiredWebviewFiles } = require(
+const { extractRequiredWebviewFiles, extractRequiredDependencyDirs } = require(
   path.resolve(__dirname, "../../../..", "scripts/verify-package.js"),
 );
 
@@ -61,5 +61,39 @@ suite("verify-package: webview resource extraction", () => {
       files.includes("node_modules/@xterm/xterm/lib/xterm.js"),
       "loader must reference the xterm core",
     );
+  });
+});
+
+suite("verify-package: runtime dependency dirs", () => {
+  test("maps every package.json dependency to a node_modules dir", () => {
+    const dirs = extractRequiredDependencyDirs({
+      dependencies: { foo: "1.0.0", "@scope/bar": "2.0.0" },
+    });
+    assert.deepStrictEqual(dirs, ["node_modules/@scope/bar", "node_modules/foo"]);
+  });
+
+  test("--all-platforms adds the platform node-pty binaries", () => {
+    const base = extractRequiredDependencyDirs({ dependencies: { foo: "1" } });
+    const all = extractRequiredDependencyDirs(
+      { dependencies: { foo: "1" } },
+      { allPlatforms: true },
+    );
+    assert.ok(!base.includes("node_modules/@lydell/node-pty-linux-x64"));
+    assert.ok(all.includes("node_modules/@lydell/node-pty-darwin-arm64"));
+    assert.ok(all.includes("node_modules/@lydell/node-pty-win32-x64"));
+  });
+
+  test("the real package.json still declares the extension-host runtime deps", () => {
+    const pkgPath = path.resolve(__dirname, "../../../..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    const dirs = extractRequiredDependencyDirs(pkg);
+    // These are require()d by the extension host at activation — a missing one
+    // crashes the host, the other half of the "silent drop" failure mode.
+    for (const dep of ["@lydell/node-pty", "koffi", "xterm-link-provider"]) {
+      assert.ok(
+        dirs.includes(`node_modules/${dep}`),
+        `package.json must keep ${dep} as a runtime dependency`,
+      );
+    }
   });
 });

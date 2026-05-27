@@ -18,6 +18,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 ### Technical
 
 - Centralized versioning in `src/version.ts`; the dev build number is decoupled from the curated semver.
+- **Hardened the release/packaging pipeline** against the "silently dropped dependency" class of bug. Packaging is now one shared script (`scripts/package-vsix.sh`) used by both CI and release, so they can't drift; the injected deps are the full production closure from `npm ls` (transitive, not a hand-maintained list); the `verify-package.js` gate now checks both webview-loaded files *and* extension-host runtime deps; a new `ci.yml` runs the test suite and a package+gate dry-run on every push/PR; and the vendored daemon binary no longer churns on every `npm run compile` (use `npm run vendor-daemon`).
 
 ## [0.2.0-beta.1] — 2026-05-24
 
