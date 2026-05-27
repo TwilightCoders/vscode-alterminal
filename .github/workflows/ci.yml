@@ -52,4 +52,10 @@ jobs:
       # this single-platform runner doesn't fetch the other OSes' node-pty
       # binaries; the release job verifies those.)
       - name: Package + verify (dry run)
+        # ALTERMINAL_DEV_BUILD skips verify-binaries.js (vsce's prepublish hook),
+        # which requires all 5 platform node-pty binaries. This single-platform
+        # dry-run only has Linux's; the release job fetches + verifies all of
+        # them. The verify-package gate below still runs.
+        env:
+          ALTERMINAL_DEV_BUILD: "1"
         run: bash scripts/package-vsix.sh /tmp/alterminal-ci.vsix
