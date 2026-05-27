@@ -1,5 +1,6 @@
 out/test/**
 out/**/*.map
+**/*.heapsnapshot
 src/**
 !src/templates/webview.html
 .vscode-test/**

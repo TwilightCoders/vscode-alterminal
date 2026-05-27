@@ -97,24 +97,18 @@ jobs:
           cd "$WORK"
           unzip -q "$GITHUB_WORKSPACE/alterminal-bare.vsix"
 
-          # Copy runtime dependencies into the vsix
-          DEPS=(
-            "@lydell/node-pty"
-            "@lydell/node-pty-darwin-arm64"
-            "@lydell/node-pty-darwin-x64"
-            "@lydell/node-pty-linux-arm64"
-            "@lydell/node-pty-linux-x64"
-            "@lydell/node-pty-win32-x64"
-            "@vscode/codicons"
-            "@xterm/addon-fit"
-            "@xterm/addon-serialize"
-            "@xterm/addon-unicode11"
-            "@xterm/addon-web-links"
-            "@xterm/addon-webgl"
-            "@xterm/xterm"
-            "xterm-link-provider"
-          )
-          for dep in "${DEPS[@]}"; do
+          # Copy runtime dependencies into the vsix. The list is DERIVED from
+          # package.json (not hand-maintained) so it can never drift from the
+          # actual deps again — a stale hardcoded list once dropped
+          # @xterm/addon-search + @xterm/addon-unicode-graphemes, which 404'd
+          # in the webview and silently killed all keyboard input.
+          # Package names contain no spaces, so a space-joined list word-splits
+          # cleanly — and this avoids depending on bash 4+ (`mapfile`).
+          DEPS="$(node -e "console.log(Object.keys(require('$GITHUB_WORKSPACE/package.json').dependencies||{}).join(' '))")"
+          # Platform node-pty binaries are optionalDependencies fetched in the
+          # install step above; inject them explicitly.
+          DEPS="$DEPS @lydell/node-pty-darwin-arm64 @lydell/node-pty-darwin-x64 @lydell/node-pty-linux-arm64 @lydell/node-pty-linux-x64 @lydell/node-pty-win32-x64"
+          for dep in $DEPS; do
             src="$GITHUB_WORKSPACE/node_modules/$dep"
             if [ -d "$src" ]; then
               mkdir -p "extension/node_modules/$dep"
@@ -123,6 +117,11 @@ jobs:
               echo "⚠️ Missing dependency: $dep"
             fi
           done
+
+          # Gate: every static resource the webview loads at boot (parsed from
+          # templateUtils.ts) must be present in the package. Fails the build
+          # otherwise — this is what catches a dropped addon before release.
+          node "$GITHUB_WORKSPACE/scripts/verify-package.js" "$WORK/extension" "$GITHUB_WORKSPACE/src/utils/templateUtils.ts"
 
           # Repackage vsix
           rm "$GITHUB_WORKSPACE/alterminal-bare.vsix"

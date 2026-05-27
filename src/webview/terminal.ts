@@ -242,9 +242,26 @@ export class TerminalInstance {
         minimumContrastRatio: appearance.minimumContrastRatio ?? 1,
         wordSeparator: appearance.wordSeparators || undefined,
       });
+      // Wire input/keyboard/resize handling immediately, before any addon.
+      // Addon loading below is best-effort: a missing or broken addon (e.g. a
+      // script dropped from a packaged vsix, leaving its global undefined)
+      // must NEVER prevent typing. This ordering exists because the
+      // unicode-graphemes addon once threw during init and silently skipped
+      // input wiring, killing all keyboard input on packaged builds.
+      this.setupEventHandlers();
+
       this.fitAddon = new FitAddon.FitAddon();
       this.serializeAddon = new SerializeAddon.SerializeAddon();
-      this.unicodeAddon = new (window as any).UnicodeGraphemesAddon.UnicodeGraphemesAddon();
+      // Grapheme clustering is cosmetic — guard construction so a missing or
+      // failed script can't throw and abort the rest of terminal init.
+      const UnicodeCtor = (window as any).UnicodeGraphemesAddon?.UnicodeGraphemesAddon;
+      const graphemesLoaded = !!UnicodeCtor;
+      this.unicodeAddon = UnicodeCtor ? new UnicodeCtor() : null;
+      if (!graphemesLoaded) {
+        Logger.warn(
+          `Terminal ${this.id}: unicode-graphemes addon unavailable — continuing without grapheme clustering`,
+        );
+      }
       // Renderer: WebGL (default, GPU) unless alterminal.renderer is "dom"
       // (xterm's built-in DOM renderer, no glyph atlas) or "webgpu" (the
       // experimental WebGPU addon). The `webglAddon` field holds whichever GPU
@@ -286,13 +303,12 @@ export class TerminalInstance {
       }
       this.terminal.loadAddon(this.fitAddon);
       this.terminal.loadAddon(this.serializeAddon);
-      this.terminal.loadAddon(this.unicodeAddon);
+      if (this.unicodeAddon) this.terminal.loadAddon(this.unicodeAddon);
       const SearchCtor = (window as any).SearchAddon?.SearchAddon;
       if (SearchCtor) {
         this.searchAddon = new SearchCtor();
         this.terminal.loadAddon(this.searchAddon);
       }
-      this.setupEventHandlers();
       this.lifecycleManager.on("bootReady", () => {
         if (window.tabManager?.saveToLocalState) {
           try {
@@ -302,7 +318,7 @@ export class TerminalInstance {
       });
       this.lifecycleManager.initialize();
       this.setupFilePathLinks();
-      if (this.terminal.unicode) this.terminal.unicode.activeVersion = "15-graphemes";
+      if (graphemesLoaded && this.terminal.unicode) this.terminal.unicode.activeVersion = "15-graphemes";
     } catch (e) {
       Logger.error("Terminal init failed", e);
     }
