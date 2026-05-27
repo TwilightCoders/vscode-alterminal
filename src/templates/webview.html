@@ -117,7 +117,12 @@
         .tab.active {
             background-color: var(--vscode-tab-activeBackground, rgba(60, 60, 60, 0.8));
             color: var(--vscode-tab-activeForeground, #ffffff);
-            border-bottom-color: var(--vscode-tab-activeBorder, transparent);
+            /* Clean accent line along the bottom of the selected tab, the way
+               VS Code styles the active editor tab. Prefer the theme's
+               tab.activeBorder; fall back to a subtle light grey so the
+               indicator is always present (the bare var defaults to transparent
+               on themes that don't set it). */
+            border-bottom: 1px solid var(--vscode-tab-activeBorder, rgba(204, 204, 204, 0.4));
         }
         
         .tab:hover {
