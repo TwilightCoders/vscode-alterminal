@@ -11,6 +11,7 @@ All notable changes to the Alterminal extension will be documented in this file.
 ### Fixes
 
 - **WebGPU: progress bars and colored backgrounds align.** Cell backgrounds now fill the block-glyph's vertical band rather than the full line-box cell, so block characters (`█` and partial blocks) and their backgrounds line up — and the font's line-gap stays as inter-line spacing instead of being painted.
+- **PTY daemon now ships in release builds.** The `loomptyd` binary was never bundled into the packaged vsix (CI didn't build it), so on machines with `alterminal.ptyDaemon.enabled` the daemon couldn't spawn and the terminal could become untypeable. The macOS arm64 binary is now vendored and shipped, with a platform-aware lookup (`bin/loomptyd-<platform>-<arch>`).
 
 ### Technical
 

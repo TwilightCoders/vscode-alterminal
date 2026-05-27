@@ -57,3 +57,17 @@ if [[ ! -f "$DST" || "$SRC_MTIME" -gt "$DST_MTIME" ]]; then
 else
   echo "✅ bin/loomptyd up to date"
 fi
+
+# Also refresh the platform-named, committed copy that ships in release vsixes
+# (CI has no loompty source to build from, so it relies on this vendored
+# binary). node arch uses "x64" where uname says "x86_64".
+ARCH="$(uname -m)"; [[ "$ARCH" == "x86_64" ]] && ARCH="x64"
+PLAT="$(uname -s | tr '[:upper:]' '[:lower:]')"
+VENDORED="bin/loomptyd-${PLAT}-${ARCH}"
+if [[ ! -f "$VENDORED" || "$DST" -nt "$VENDORED" ]]; then
+  cp "$DST" "$VENDORED"
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "$VENDORED" 2>/dev/null || true
+  fi
+  echo "✅ $VENDORED updated (vendored for release)"
+fi

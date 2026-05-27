@@ -460,16 +460,23 @@ export class DaemonManager {
    */
   private _findLoomptyd(): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Check extension bundle first
-      const bundled = path.join(this._extensionPath, "bin", "loomptyd");
-      try {
-        const stat = require("fs").statSync(bundled);
-        if (stat.isFile()) {
-          resolve(bundled);
-          return;
+      // Check the extension bundle first. Releases vendor a platform-specific
+      // binary (bin/loomptyd-<platform>-<arch>); local dev builds drop a
+      // generic bin/loomptyd via scripts/build-daemon.sh. Prefer the former.
+      const binDir = path.join(this._extensionPath, "bin");
+      const bundledCandidates = [
+        path.join(binDir, `loomptyd-${process.platform}-${process.arch}`),
+        path.join(binDir, "loomptyd"),
+      ];
+      for (const candidate of bundledCandidates) {
+        try {
+          if (require("fs").statSync(candidate).isFile()) {
+            resolve(candidate);
+            return;
+          }
+        } catch {
+          // Try the next candidate, then fall through to PATH search.
         }
-      } catch {
-        // Not bundled — fall through to PATH search
       }
 
       // Search PATH

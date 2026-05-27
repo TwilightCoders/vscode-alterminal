@@ -5,7 +5,13 @@ node_modules/
 *.vsix
 .vscode-test/
 build/
-bin/
+# Local dev builds drop bin/loomptyd here (scripts/build-daemon.sh). The
+# platform-named binaries are vendored/committed so CI can ship them.
+bin/*
+!bin/loomptyd-darwin-arm64
+!bin/loomptyd-darwin-x64
+!bin/loomptyd-linux-x64
+!bin/loomptyd-linux-arm64
 
 # TypeScript
 *.js.map
