@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build WebGPU renderer addon
+        run: |
+          cd lib/xterm-addon-webgpu
+          npm ci
+          npm run build
+
       - name: Install all platform binaries
         run: |
           PKGS=(

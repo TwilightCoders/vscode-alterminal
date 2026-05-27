@@ -2,6 +2,20 @@
 
 All notable changes to the Alterminal extension will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **WebGPU renderer** (`alterminal.renderer: "webgpu"`): an optional GPU terminal renderer, built from scratch as a self-contained xterm addon — instanced glyph / rectangle / decoration passes over a shared `GPUDevice`, a shelf-packed glyph atlas with LRU eviction, and font-driven cell metrics. Lighter on renderer memory than the WebGL path. Opt-in; WebGL stays the default.
+
+### Fixes
+
+- **WebGPU: progress bars and colored backgrounds align.** Cell backgrounds now fill the block-glyph's vertical band rather than the full line-box cell, so block characters (`█` and partial blocks) and their backgrounds line up — and the font's line-gap stays as inter-line spacing instead of being painted.
+
+### Technical
+
+- Centralized versioning in `src/version.ts`; the dev build number is decoupled from the curated semver.
+
 ## [0.2.0-beta.1] — 2026-05-24
 
 First beta. Big focus on the notification/bell system, tab UX, and a search bar.
