@@ -28,8 +28,24 @@ import { readCell, emptyReadCell, type IReadCell } from "./model/CellReader.js";
 import { normalizeSelection, isCellInSelection, type Selection } from "./model/selection.js";
 import { extractUnderlineStyle, FgFlags, NULL_CELL_CODE, UnderlineStyle } from "./util/attributes.js";
 import { Emitter, type Event } from "./util/event.js";
+import { linkUnderlineSpans } from "./util/linkUnderlineSpans.js";
 
 export type CursorStyle = "block" | "underline" | "bar";
+
+/**
+ * The hovered-link underline span, as emitted by xterm's
+ * `_linkifier2.onShowLinkUnderline`. Coordinates are viewport-relative cells:
+ * (x1,y1) start, (x2,y2) end, `cols` the terminal width, `fg` an optional
+ * color (256-palette index) — undefined means the default foreground.
+ */
+export interface ILinkUnderlineEvent {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  cols: number;
+  fg?: number;
+}
 
 export interface IRenderMetrics {
   cols: number;
@@ -122,6 +138,12 @@ export class WebgpuRenderer {
   private _reusableXtermCell?: import("./model/xtermTypes.js").IXtermBufferCell;
   /** Cursor blink state: true = cursor visible this phase. */
   private _cursorBlinkOn = true;
+  /**
+   * Active hovered-link underline span (fg pre-resolved to RGBA), or null.
+   * xterm draws link hover underlines via `onShowLinkUnderline`; unlike WebGL's
+   * built-in link render layer, our renderer has to draw them itself.
+   */
+  private _linkUnderline: { x1: number; y1: number; x2: number; y2: number; cols: number; fgRgba: number } | null = null;
   private _blinkTimer?: ReturnType<typeof setInterval>;
   /**
    * Vertical band (device px, cell-local) that cell backgrounds fill — taken
@@ -483,6 +505,61 @@ export class WebgpuRenderer {
     }
 
     this._pushCursor(buffer);
+    this._pushLinkUnderline();
+  }
+
+  /**
+   * Draw the hovered-link underline across its cell span. Mirrors WebGL's
+   * link render layer: single-row links underline [x1, x2); multi-row links
+   * underline [x1, cols) on the first row, full rows between, and [0, x2) on
+   * the last. A no-op when nothing is hovered.
+   */
+  private _pushLinkUnderline(): void {
+    const lu = this._linkUnderline;
+    if (!lu) {
+      return;
+    }
+    const m = this._metrics;
+    const cellW = m.deviceCellWidth;
+    const cellH = m.deviceCellHeight;
+    const dpr = m.devicePixelRatio || 1;
+    const stroke = Math.max(1, Math.round(dpr));
+    const bottomGap = Math.max(1, Math.round(dpr));
+    const periodPx = Math.max(4, Math.round(cellH * 0.5));
+    const styleId = underlineStyleToShaderId(UnderlineStyle.SINGLE);
+    const [r, g, b, a] = rgbaToFloats(lu.fgRgba);
+
+    for (const span of linkUnderlineSpans(lu, m.rows, m.cols)) {
+      const xPx = span.colStart * cellW;
+      const w = (span.colEnd - span.colStart) * cellW;
+      const yBand = Math.round(span.row * cellH + cellH - bottomGap - stroke);
+      this._decorStager.push([xPx, yBand, w, stroke, r, g, b, a, styleId, periodPx, 0, 0]);
+    }
+  }
+
+  /**
+   * Show (or, with null, hide) the hovered-link underline. Driven by xterm's
+   * `_linkifier2` show/hide events, which the addon forwards here. Triggers an
+   * immediate redraw since a hover changes no buffer content.
+   */
+  public setLinkUnderline(e: ILinkUnderlineEvent | null): void {
+    if (this._disposed) {
+      return;
+    }
+    if (!e) {
+      if (!this._linkUnderline) {
+        return; // already clear — avoid a redundant repaint
+      }
+      this._linkUnderline = null;
+    } else {
+      const p = this._metrics.palette;
+      const fgRgba =
+        typeof e.fg === "number" && e.fg >= 0 && e.fg < 256 && p.ansi[e.fg] != null
+          ? p.ansi[e.fg]
+          : p.foreground;
+      this._linkUnderline = { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols, fgRgba };
+    }
+    this._renderFrame();
   }
 
   /** Read decoration-service fg/bg overrides for a cell into the resolve input. */

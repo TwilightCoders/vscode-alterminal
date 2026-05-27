@@ -20,7 +20,7 @@
  * range pins the supported xterm versions.
  */
 import { SharedDevice } from "./shared/SharedDevice.js";
-import { WebgpuRenderer, type IRenderMetrics, type CursorStyle } from "./WebgpuRenderer.js";
+import { WebgpuRenderer, type IRenderMetrics, type CursorStyle, type ILinkUnderlineEvent } from "./WebgpuRenderer.js";
 import { isWebgpuSupported } from "./platform/deviceFeatures.js";
 import { measureFont } from "./platform/fontMetrics.js";
 import { DevicePixelObserver } from "./platform/DevicePixelObserver.js";
@@ -129,6 +129,7 @@ export class WebgpuAddon {
 
       this._installRenderer(terminal, this._renderer);
       this._subscribeToState(terminal);
+      this._subscribeToLinks(terminal);
     } catch {
       // WebGPU init failed — stay a no-op so the DOM renderer keeps working.
       this._onContextLoss.fire();
@@ -162,6 +163,26 @@ export class WebgpuAddon {
     if (opts?.onOptionChange) {
       this._subs.push(opts.onOptionChange(() => this._refreshFont()));
     }
+  }
+
+  /**
+   * Subscribe to xterm's link hover underline events. WebGL's renderer has a
+   * built-in link render layer; ours doesn't, so without this links are
+   * detected (Cmd+click works) but never underlined. `_linkifier2` is internal
+   * (see NOTE at top); guard for its absence.
+   */
+  private _subscribeToLinks(terminal: IXtermTerminalLike): void {
+    const core = terminal._core as Record<string, any> | undefined;
+    const linkifier = core?._linkifier2 ?? core?.linkifier2;
+    if (!linkifier?.onShowLinkUnderline || !linkifier?.onHideLinkUnderline) {
+      return;
+    }
+    this._subs.push(
+      linkifier.onShowLinkUnderline((e: ILinkUnderlineEvent) => this._renderer?.setLinkUnderline(e)),
+    );
+    this._subs.push(
+      linkifier.onHideLinkUnderline(() => this._renderer?.setLinkUnderline(null)),
+    );
   }
 
   /** Theme changed — push a fresh palette (no atlas clear; glyphs are untinted). */
