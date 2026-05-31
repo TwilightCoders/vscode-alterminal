@@ -241,6 +241,33 @@ export class TerminalInstance {
         drawBoldTextInBrightColors: false,
         minimumContrastRatio: appearance.minimumContrastRatio ?? 1,
         wordSeparator: appearance.wordSeparators || undefined,
+        // OSC 8 hyperlinks (e.g. Claude Code's MR/ticket/file links). xterm
+        // parses the escape and underlines the text, but does nothing on click
+        // unless we supply a handler. Mirror the regex-link policy: require
+        // cmd/ctrl, route http(s) via openUrl, file:// + bare paths via
+        // openFile. `allowNonHttpProtocols` is required for file:// + custom
+        // schemes; xterm blocks them by default for safety.
+        linkHandler: {
+          allowNonHttpProtocols: true,
+          activate: (event: MouseEvent, uri: string) => {
+            if (event && event.preventDefault) event.preventDefault();
+            if (!event.metaKey && !event.ctrlKey) return;
+            Logger.debug(`🔗 OSC8 link clicked: "${uri}"`);
+            const lower = uri.toLowerCase();
+            if (lower.startsWith("http://") || lower.startsWith("https://")) {
+              this.vscode.postMessage({ command: "openUrl", url: uri } satisfies WebviewToExtMessage);
+            } else if (lower.startsWith("file://")) {
+              const path = decodeURI(uri.replace(/^file:\/\//i, ""));
+              this.vscode.postMessage({ command: "openFile", filePath: path, terminalId: this.id } satisfies WebviewToExtMessage);
+            } else if (/^[a-z][a-z0-9+\-.]*:/i.test(uri)) {
+              // Other URI schemes (mailto:, vscode:, slack:, etc.) — let VS Code's external opener decide.
+              this.vscode.postMessage({ command: "openUrl", url: uri } satisfies WebviewToExtMessage);
+            } else {
+              // Bare path — treat as file.
+              this.vscode.postMessage({ command: "openFile", filePath: uri, terminalId: this.id } satisfies WebviewToExtMessage);
+            }
+          },
+        },
       });
       // Wire input/keyboard/resize handling immediately, before any addon.
       // Addon loading below is best-effort: a missing or broken addon (e.g. a
