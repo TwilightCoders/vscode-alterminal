@@ -587,53 +587,15 @@ export class WebgpuRenderer {
           ? p.ansi[e.fg]
           : p.foreground;
       this._linkUnderline = { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols, fgRgba };
-      // TEMP diagnostic: is the underline span [x1,x2) actually over the link
-      // text, or shifted? Logs the covered substring vs the full row so we can
-      // tell a coordinate bug from a rendering bug. Remove once the horizontal
-      // offset is resolved.
+      // Stash just the raw event coords for casual `window.__altLink` peeks.
+      // Rich provider-side diagnostic lives in terminal.ts crossLineProvider
+      // (window.__altLinks / __altLinksJSON()) so we can correlate the rendered
+      // span with the library's range + a ground-truth cell walk.
       try {
-        const buf = this._getBuffer() as unknown as {
-          viewportY?: number;
-          getLine?: (i: number) =>
-            | { getCell?: (c: number) => { getChars?: () => string; getWidth?: () => number } | undefined }
-            | undefined;
+        (window as unknown as { __altLink?: unknown }).__altLink = {
+          x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols,
         };
-        const top = buf?.viewportY ?? 0;
-        const line = buf?.getLine?.(top + e.y1);
-        // Cell-accurate "covered": concatenate the actual cell chars in [x1,x2),
-        // NOT a translateToString slice (which collapses wide chars and drifts).
-        let cellCovered = "";
-        const lastCol = e.y1 === e.y2 ? e.x2 : e.cols;
-        for (let c = e.x1; c < lastCol; c++) {
-          cellCovered += line?.getCell?.(c)?.getChars?.() ?? "";
-        }
-        // Window of (col:char:width) around the link start, to expose any
-        // wide-char miscount that shifts rendered glyphs off the cell grid.
-        const win: string[] = [];
-        for (let c = Math.max(0, e.x1 - 4); c < Math.min(e.x1 + 6, e.cols); c++) {
-          const cell = line?.getCell?.(c);
-          win.push(`${c}:${JSON.stringify(cell?.getChars?.() ?? "")}:w${cell?.getWidth?.() ?? "?"}`);
-        }
-        const m = this._metrics;
-        const info = {
-          coords: { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, cols: e.cols },
-          metrics: { dpr: m.devicePixelRatio, cellW: m.deviceCellWidth, cellH: m.deviceCellHeight },
-          cellCovered,
-          cellsAroundX1: win,
-        };
-        // Stash for manual inspection (type `__altLink` in the console) and log
-        // on SHORT separate lines so a single console screenshot captures it all
-        // without the right edge truncating.
-        (window as unknown as { __altLink?: unknown }).__altLink = info;
-        /* eslint-disable no-console */
-        console.log(`[altLink] coords x1=${e.x1} x2=${e.x2} y=${e.y1} cols=${e.cols}`);
-        console.log(`[altLink] metrics dpr=${m.devicePixelRatio} cellW=${m.deviceCellWidth}`);
-        console.log(`[altLink] cellCovered=${JSON.stringify(cellCovered)}`);
-        console.log(`[altLink] cellsAroundX1=`, win);
-        /* eslint-enable no-console */
-      } catch {
-        /* diagnostic only */
-      }
+      } catch { /* diagnostic only */ }
     }
     this._renderFrame();
   }

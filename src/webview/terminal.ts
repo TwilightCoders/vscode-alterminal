@@ -492,6 +492,16 @@ export class TerminalInstance {
             enhanced.push(link);
           }
 
+          // TEMP diagnostic for the work-mac link-underline horizontal offset.
+          // For each link the library returned, capture the wrap-group cells +
+          // joined string + an independent "ground truth" cell walk so we can
+          // tell whether the library's range.start is right or drifted. Stash
+          // last 8 on `window.__altLinks`; copy via `__altLinksJSON()` in
+          // DevTools. Remove once the offset is root-caused.
+          try {
+            TerminalInstance.captureLinkDiagnostic(terminal, y, baseLinks ?? [], enhanced);
+          } catch { /* diagnostic only */ }
+
           callback(enhanced.length > 0 ? enhanced : undefined);
         });
       },
@@ -508,9 +518,10 @@ export class TerminalInstance {
    * Apply a fresh `alterminal.*` appearance config to this already-constructed
    * terminal. The xterm constructor reads these options once at init; without
    * this method, toggling settings like `cursorBlinking` mid-session has no
-   * effect on open terminals (only new ones inherit the change). The helper
-   * mirrors the constructor's `|| fallback` semantics for keys where empty
-   * string / 0 means "no override" — see appearanceCoalesce.ts.
+   * effect on open terminals (only new ones inherit the change). Writes only
+   * to keys that actually changed, since `terminal.options.X = ...` triggers
+   * xterm's onOptionChange listeners (and our WebGPU addon's _refreshFont +
+   * setMetrics → _updateBlink) per assignment.
    */
   applyAppearance(appearance: Record<string, unknown>): void {
     if (!this.terminal) return;
@@ -522,6 +533,169 @@ export class TerminalInstance {
     // A font/cell-size change reflows. Let the fit addon recompute geometry so
     // the cell grid + cursor position stay correct.
     try { this.fitAddon?.fit?.(); } catch { /* fit is best-effort */ }
+  }
+
+  /**
+   * TEMP: Provider-side diagnostic for the link-underline horizontal offset.
+   *
+   * For each link the library produced on row `y` (1-based, scrollback-absolute),
+   * dumps the wrap-group cells + joined-string reconstruction + an INDEPENDENT
+   * walk that computes what the cell start *should* be, given the link's text
+   * position in the joined string. If our walk disagrees with the library's
+   * `range.start`, that's the bug.
+   *
+   * Anomaly classes flagged:
+   *   - width=0 cell with chars (combining/VS/ZWJ that didn't fold into prev)
+   *   - chars.length not matching the codepoint count we'd expect from width
+   *   - empty trailing cells consumed by `translateToString(trimRight=true)`
+   *     but counted by the library's per-cell walk
+   *
+   * Last 8 captures land on `window.__altLinks`. Use `window.__altLinksJSON()`
+   * to copy as JSON in DevTools. Remove once root cause is known.
+   */
+  private static captureLinkDiagnostic(
+    terminal: any,
+    y: number,
+    baseLinks: any[],
+    enhancedLinks: any[],
+  ): void {
+    if (!enhancedLinks || enhancedLinks.length === 0) return;
+
+    const buf = terminal?.buffer?.active;
+    if (!buf) return;
+    const cols: number = terminal.cols;
+
+    // y is 1-based scrollback-absolute (xterm Linkifier convention). Internally
+    // buffer.getLine takes 0-based absolute index. Walk back via isWrapped.
+    let originAbs = y - 1;
+    while (originAbs > 0) {
+      const ln = buf.getLine(originAbs);
+      if (!ln || !ln.isWrapped) break;
+      originAbs--;
+    }
+
+    // Walk forward through wrap group, collecting cells AND reconstructing
+    // both the "library-style" joined string and a "ground-truth" mapping
+    // from joined-string index → buffer (rowAbs, col).
+    type CellRec = { rowAbs: number; rowOff: number; col: number; chars: string; charsLen: number; width: number; anomaly?: string };
+    const cells: CellRec[] = [];
+    let libString = ""; // mirrors `line.translateToString(true).substring(0, cols)` joined
+    let walkString = ""; // mirrors actual cells: getChars() or " " (empty w>0) or "" (spacer w=0), advance by width||1
+    const cellOfWalkPos: Array<{ rowAbs: number; col: number }> = [];
+
+    let r = originAbs;
+    while (r < originAbs + 64) { // safety cap on wrap-group depth
+      const line = buf.getLine(r);
+      if (!line) break;
+      const isWrappedHere = r > originAbs && !!line.isWrapped;
+      if (r > originAbs && !isWrappedHere) break; // end of wrap group
+
+      // library-style: translateToString(true) is already trim-righted.
+      try { libString += String(line.translateToString(true)).substring(0, cols); } catch { /* skip */ }
+
+      // Walk this row's cells once, with width-aware advance.
+      let i = 0;
+      const lineLen = line.length;
+      while (i < lineLen) {
+        const cell = line.getCell(i);
+        if (!cell) { i++; continue; }
+        const chars: string = cell.getChars?.() ?? "";
+        const width: number = cell.getWidth?.() ?? 1;
+        const charsLen = chars.length;
+
+        let anomaly: string | undefined;
+        if (width === 0 && charsLen > 0) anomaly = "w0-with-chars";
+        else if (width === 2 && charsLen === 0) anomaly = "w2-no-chars";
+
+        cells.push({ rowAbs: r, rowOff: r - originAbs, col: i, chars, charsLen, width, anomaly });
+
+        // ground-truth walk: what translateToString would emit + the cell that
+        // string position maps back to. This is the canonical mapping.
+        const emitted = charsLen > 0 ? chars : (width > 0 ? " " : "");
+        for (let k = 0; k < emitted.length; k++) {
+          cellOfWalkPos.push({ rowAbs: r, col: i });
+        }
+        walkString += emitted;
+
+        const advance = width || 1; // translateToString advances by width||1
+        i += advance;
+      }
+      r++;
+    }
+
+    const computed = enhancedLinks.map((link, idx) => {
+      const base = baseLinks?.[idx];
+      const text: string = link?.text ?? "";
+      const libStart0 = (link?.range?.start?.x ?? 1) - 1; // 0-based col
+      const libStartY = (link?.range?.start?.y ?? 1) - 1; // 0-based abs row
+
+      // Find link.text in walkString → string position → ground-truth cell.
+      const walkPos = walkString.indexOf(text);
+      const truthCell = walkPos >= 0 ? cellOfWalkPos[walkPos] : undefined;
+      const truthCol = truthCell?.col;
+      const truthRow = truthCell?.rowAbs;
+
+      // Also check libString to detect when the library's per-line trimRight
+      // dropped chars that the cell-walk still counts (asymmetry hypothesis).
+      const libPos = libString.indexOf(text);
+
+      const delta = typeof truthCol === "number" ? libStart0 - truthCol : null;
+      const driftClass =
+        delta === null ? "no-text-in-walk"
+        : delta === 0 && truthRow === libStartY ? "match"
+        : truthRow !== libStartY ? "row-mismatch"
+        : delta > 0 ? `lib+${delta}`
+        : `lib${delta}`;
+
+      return {
+        text: text.length > 80 ? text.slice(0, 80) + "…" : text,
+        libRange: link?.range,
+        baseRange: base?.range,
+        walkPos, libPos,
+        truth: truthCell ? { rowAbs: truthRow, col: truthCol } : null,
+        libCell: { rowAbs: libStartY, col: libStart0 },
+        delta,
+        driftClass,
+      };
+    });
+
+    const anomalies = cells.filter((c) => c.anomaly);
+    const dump = {
+      ts: Date.now(),
+      providerY: y,
+      originAbs,
+      wrapRows: r - originAbs,
+      cols,
+      libStringLen: libString.length,
+      walkStringLen: walkString.length,
+      lenDelta: libString.length - walkString.length,
+      anomalyCount: anomalies.length,
+      anomalies, // small if any
+      links: computed,
+      cells, // full dump, can be large; trim if too noisy
+      libString,
+      walkString,
+    };
+
+    const w = window as unknown as {
+      __altLinks?: any[];
+      __altLinksJSON?: () => string;
+    };
+    if (!Array.isArray(w.__altLinks)) w.__altLinks = [];
+    w.__altLinks.unshift(dump);
+    if (w.__altLinks.length > 8) w.__altLinks.length = 8;
+    if (typeof w.__altLinksJSON !== "function") {
+      w.__altLinksJSON = (): string => JSON.stringify(w.__altLinks, null, 2);
+    }
+
+    // Quiet single-line console marker per capture, so Dale can spot anomalies
+    // at a glance without scrolling through dumps.
+    /* eslint-disable no-console */
+    const driftSummary = computed.map((c) => c.driftClass).join(",");
+    if (anomalies.length > 0 || computed.some((c) => c.driftClass !== "match")) {
+      console.warn(`[altLinks] y=${y} drifts=[${driftSummary}] anomalies=${anomalies.length} — call __altLinksJSON()`);
+    }
+    /* eslint-enable no-console */
   }
 
   /**
