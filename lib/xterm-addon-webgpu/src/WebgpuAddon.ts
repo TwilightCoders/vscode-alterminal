@@ -119,6 +119,11 @@ export class WebgpuAddon {
         metrics,
         screen,
         decorationService,
+        // On xterm's handleDevicePixelRatioChange / handleCharSizeChanged,
+        // rebuild the atlas + repush metrics. Otherwise glyphs stay
+        // rasterized at the old DPR and produce wide letter-spacing after
+        // a VS Code zoom or display move.
+        () => this._refreshFont(),
       );
 
       this._deviceLostSub = this._shared.onDeviceLost(() => {

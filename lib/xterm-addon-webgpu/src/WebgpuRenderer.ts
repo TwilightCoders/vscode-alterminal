@@ -27,6 +27,7 @@ import { InstanceStager } from "./model/InstanceStager.js";
 import { readCell, emptyReadCell, type IReadCell } from "./model/CellReader.js";
 import { normalizeSelection, isCellInSelection, type Selection } from "./model/selection.js";
 import { viewportCursorRow } from "./util/cursorViewport.js";
+import { onDevicePixelRatioChanged, onCharSizeChanged } from "./util/fontEventHandlers.js";
 import { extractUnderlineStyle, FgFlags, NULL_CELL_CODE, UnderlineStyle } from "./util/attributes.js";
 import { Emitter, type Event } from "./util/event.js";
 import { linkUnderlineSpans } from "./util/linkUnderlineSpans.js";
@@ -179,6 +180,15 @@ export class WebgpuRenderer {
     private readonly _screenElement: HTMLElement | null = null,
     /** xterm's decoration service — per-cell fg/bg overrides (search highlights, etc.). */
     private readonly _decorationService: IXtermDecorationService | null = null,
+    /**
+     * Called when xterm fires `handleDevicePixelRatioChange` or
+     * `handleCharSizeChanged` on us. Must rebuild the glyph atlas with
+     * fresh font config and push new metrics — otherwise the atlas stays
+     * cached at the old DPR / cell-size and glyphs render small inside
+     * normal-sized cells (the "VS Code Cmd++ → wide letter-spacing" bug).
+     * The addon binds this to its `_refreshFont`.
+     */
+    private readonly _onRefreshFont?: () => void,
   ) {
     this._device = _shared.device;
     this._metrics = metrics;
@@ -339,13 +349,14 @@ export class WebgpuRenderer {
   }
 
   public handleCharSizeChanged(): void {
-    this._applyMetrics();
-    this._requestRedraw();
+    // Delegate to the helper so the contract is pinned by
+    // test/fontEventHandlers.test.ts. The addon's _refreshFont rebuilds
+    // the atlas and calls setMetrics, which runs _applyMetrics + redraw.
+    onCharSizeChanged({ refreshFont: () => this._onRefreshFont?.() });
   }
 
   public handleDevicePixelRatioChange(): void {
-    this._applyMetrics();
-    this._requestRedraw();
+    onDevicePixelRatioChanged({ refreshFont: () => this._onRefreshFont?.() });
   }
 
   public handleBlur(): void {
