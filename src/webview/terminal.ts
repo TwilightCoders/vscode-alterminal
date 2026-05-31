@@ -4,6 +4,7 @@ import { Logger } from "./logger.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { TERMINAL_DEFAULTS } from "../constants.js";
 import type { WebviewToExtMessage } from "../shared/messages.js";
+import { coalesceAppearance } from "./appearanceCoalesce.js";
 
 interface TerminalOptions {
   autoStartPty?: boolean;
@@ -501,6 +502,26 @@ export class TerminalInstance {
     } catch (error) {
       console.error("Failed to register link provider:", error);
     }
+  }
+
+  /**
+   * Apply a fresh `alterminal.*` appearance config to this already-constructed
+   * terminal. The xterm constructor reads these options once at init; without
+   * this method, toggling settings like `cursorBlinking` mid-session has no
+   * effect on open terminals (only new ones inherit the change). The helper
+   * mirrors the constructor's `|| fallback` semantics for keys where empty
+   * string / 0 means "no override" — see appearanceCoalesce.ts.
+   */
+  applyAppearance(appearance: Record<string, unknown>): void {
+    if (!this.terminal) return;
+    const opts = this.terminal.options;
+    const writes = coalesceAppearance(opts as Record<string, unknown>, appearance);
+    for (const key of Object.keys(writes)) {
+      opts[key] = writes[key];
+    }
+    // A font/cell-size change reflows. Let the fit addon recompute geometry so
+    // the cell grid + cursor position stay correct.
+    try { this.fitAddon?.fit?.(); } catch { /* fit is best-effort */ }
   }
 
   /**

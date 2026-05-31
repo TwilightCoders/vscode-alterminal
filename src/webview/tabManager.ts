@@ -190,6 +190,15 @@ export class TabManager {
       findTabIdByCommand: (cmd) => this._findTabIdByCommand(cmd),
       reportPerformance: () => this._reportPerformance(),
       saveActiveCommand: () => { if (this.activeTabId !== null) this.saveCommand(this.activeTabId); },
+      applyTerminalAppearance: (appearance) => {
+        // Push appearance changes live to every open terminal. Without this,
+        // toggling `alterminal.cursorBlinking` (and friends) only affects
+        // terminals created AFTER the change — open ones keep their original
+        // constructor-time options.
+        for (const term of this.terminals.values()) {
+          try { term.applyAppearance(appearance); } catch (e) { Logger.warn("applyAppearance failed:", e); }
+        }
+      },
     };
   }
 
