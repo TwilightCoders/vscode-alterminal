@@ -433,13 +433,18 @@ export class WebgpuRenderer {
     this._glyphStager.reset();
     this._decorStager.reset();
 
-    // Cursor cell (viewport-relative), if visible and on-screen.
-    const cursor =
-      m.cursorVisible && this._cursorBlinkOn &&
-      buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols
-        ? { row: buffer.cursorY, col: buffer.cursorX }
-        : null;
-    const blockCursor = cursor !== null && m.cursorStyle === "block";
+    // Cursor cell (viewport-relative). `cursorPos` is the position regardless
+    // of blink phase — used for bg-fill geometry so the cursor cell keeps the
+    // same full-cell footprint across blink on/off (otherwise the off-phase
+    // would fall back to the block-glyph-band partial fill, producing the
+    // "two-size blink" artifact). `cursor` gates the actual cursor draw
+    // (invert/outline), so it goes null when blinked off.
+    const cursorOnScreen =
+      m.cursorVisible &&
+      buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols;
+    const cursorPos = cursorOnScreen ? { row: buffer.cursorY, col: buffer.cursorX } : null;
+    const cursor = cursorOnScreen && this._cursorBlinkOn ? cursorPos : null;
+    const blockCursor = cursorPos !== null && m.cursorStyle === "block";
 
     const top = buffer.viewportY;
     for (let row = 0; row < m.rows; row++) {
@@ -474,26 +479,33 @@ export class WebgpuRenderer {
         }
         const resolved = this._colorResolver.resolve(ri, palette);
 
-        const isCursorCell = cursor !== null && cursor.row === row && cursor.col === col;
-        const invertForCursor = isCursorCell && blockCursor && m.focused;
+        const isCursorCell = cursorPos !== null && cursorPos.row === row && cursorPos.col === col;
+        const invertForCursor = isCursorCell && blockCursor && m.focused && cursor !== null;
+        // Unfocused block cursor renders as a hollow outline. We suppress the
+        // cell's bg fill in that case so the outline stands out against the
+        // terminal background instead of getting camouflaged by a TUI-painted
+        // bg whose color happens to be close to palette.cursor.
+        const unfocusedOutline = isCursorCell && blockCursor && !m.focused;
 
         // Background. A focused block cursor paints the cell in the cursor
         // color and the glyph gets inverted to the accent color below (true
         // inversion, not a translucent overlay). Otherwise skip the default bg.
         const bgColor = invertForCursor ? m.palette.cursor : resolved.bg;
-        if (bgColor !== palette.background) {
+        if (bgColor !== palette.background && !unfocusedOutline) {
           // A focused block cursor and a selection fill the whole cell (they're
-          // continuous UI highlights). A normal cell background matches the
-          // block-glyph band so block chars and their backgrounds align, and
-          // the font's line-gap stays as inter-line spacing.
-          if (invertForCursor || ri.selected) {
+          // continuous UI highlights). The cursor cell also fills full-height
+          // on its blink-OFF phase — otherwise its TUI-painted bg renders as a
+          // smaller block-glyph band, producing a "two-size blink" (big bright
+          // cursor / small dim band) instead of a clean toggle. Non-cursor
+          // cells keep the block-glyph-band fill so the font's line-gap stays
+          // as inter-line spacing rather than getting painted.
+          if (invertForCursor || ri.selected || isCursorCell) {
             this._pushRect(xPx, yPx, cellW, cellH, bgColor, 1);
           } else {
             this._pushRect(xPx, yPx + this._fillTop, cellW, this._fillHeight, bgColor, 1);
           }
         }
-        // Unfocused block cursor: hollow outline, glyph unchanged.
-        if (isCursorCell && blockCursor && !m.focused) {
+        if (unfocusedOutline) {
           this._pushRectOutline(xPx, yPx, cellW, cellH, m.palette.cursor);
         }
 
