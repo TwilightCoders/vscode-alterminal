@@ -26,6 +26,7 @@ import { measureFont } from "./platform/fontMetrics.js";
 import { DevicePixelObserver } from "./platform/DevicePixelObserver.js";
 import { toRgba, type Palette } from "./util/colorUtils.js";
 import { Emitter, type Event, type IDisposable } from "./util/event.js";
+import { watchBufferChanges } from "./util/bufferChangeWatcher.js";
 import type { IWebgpuAddonOptions, IFontAtlasConfig, ISharedDevice } from "./types.js";
 import type { IXtermBuffer } from "./model/xtermTypes.js";
 
@@ -163,6 +164,17 @@ export class WebgpuAddon {
     if (opts?.onOptionChange) {
       this._subs.push(opts.onOptionChange(() => this._refreshFont()));
     }
+    // xterm's SelectionService only clears on vertical resize — switching
+    // buffer.active between normal and alt (a TUI entering vim/htop/less)
+    // leaves the absolute-coord selection pointing into the OTHER buffer's
+    // cells. Drop our cached selection on each switch so it doesn't paint
+    // the wrong rows after a TUI hands control back.
+    const bufferNamespace = (terminal as unknown as { buffer?: { onBufferChange?: unknown } }).buffer;
+    this._subs.push(
+      watchBufferChanges(bufferNamespace as Parameters<typeof watchBufferChanges>[0] ?? {}, () => {
+        this._renderer?.handleSelectionChanged(undefined, undefined, false);
+      }),
+    );
   }
 
   /**
