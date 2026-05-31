@@ -97,3 +97,34 @@ suite("verify-package: runtime dependency dirs", () => {
     }
   });
 });
+
+/**
+ * Regression guard for the dev-install activation failure: dev-install.sh
+ * once called `vsce package --no-dependencies` directly, skipping the
+ * dep-closure injection that package-vsix.sh performs — so a dev install
+ * could ship a vsix that fails `Cannot find module '@lydell/node-pty'` at
+ * activation. All packaging paths (CI, release, dev) MUST go through
+ * package-vsix.sh so the verify-package gate runs and the closure lands.
+ */
+suite("packaging: dev-install delegates to canonical script", () => {
+  const root = path.resolve(__dirname, "../../../..");
+
+  test("dev-install.sh invokes package-vsix.sh", () => {
+    const script = fs.readFileSync(path.join(root, "scripts/dev-install.sh"), "utf8");
+    assert.ok(
+      /package-vsix\.sh/.test(script),
+      "dev-install.sh must delegate packaging to scripts/package-vsix.sh so the dep closure + verify-package gate run on dev builds too",
+    );
+  });
+
+  test("dev-install.sh does not call vsce package directly (would bypass the gate)", () => {
+    const script = fs.readFileSync(path.join(root, "scripts/dev-install.sh"), "utf8");
+    // Allow comments mentioning vsce; forbid actual invocation.
+    const lines = script.split("\n").filter((l) => !/^\s*#/.test(l));
+    const body = lines.join("\n");
+    assert.ok(
+      !/\bvsce\s+package\b/.test(body) && !/@vscode\/vsce\s+package\b/.test(body),
+      "dev-install.sh must not invoke `vsce package` directly — packaging goes through scripts/package-vsix.sh",
+    );
+  });
+});

@@ -44,12 +44,14 @@ npm version "$new_version" --no-git-tag-version --allow-same-version >/dev/null
 
 vsix="alterminal-dev.vsix"
 export ALTERMINAL_DEV_BUILD=1   # verify-binaries.js: skip (local platform only)
-# vsce exits non-zero due to --no-dependencies npm install failure, but still
-# produces the vsix. Tolerate the exit code and verify the file was created.
-npx @vscode/vsce package --no-git-tag-version --skip-license --no-dependencies \
-  -o "$vsix" 2>&1 | tail -1
+# Use the ONE canonical packaging script (also used by CI + release) so the
+# dev vsix gets the SAME dep-closure injection + gate check as a release.
+# Without this, a missing runtime dep (e.g. @lydell/node-pty) silently passes
+# install and then the extension fails to activate — exactly the bug class
+# we fixed during /refactor; dev-install must not regress it.
+bash scripts/package-vsix.sh "$vsix"
 if [[ ! -f "$vsix" ]]; then
-  echo "❌ vsce failed to produce $vsix — build #$build_num not consumed"
+  echo "❌ package-vsix.sh failed to produce $vsix — build #$build_num not consumed"
   exit 1   # trap restores package.json to the curated semver
 fi
 
