@@ -236,6 +236,9 @@ export class WebgpuAddon {
       dpr, fontFamily, fontSize, fontWeight: opts.fontWeight ?? "normal",
       fontWeightBold: opts.fontWeightBold ?? "bold", letterSpacing, lineHeight,
       deviceCharWidth, deviceCharHeight, deviceCellWidth, deviceCellHeight, baseline,
+      // Keep descent so the renderer can place underlines BELOW the descender
+      // region (under p/g/y/etc.) rather than just below the baseline.
+      descent: Math.round(fm.descent),
     };
   }
 
@@ -270,6 +273,7 @@ export class WebgpuAddon {
       deviceCellWidth: d.deviceCellWidth,
       deviceCellHeight: d.deviceCellHeight,
       baseline: d.baseline,
+      descent: d.descent,
       devicePixelRatio: d.dpr,
       palette: this._buildPalette(terminal),
       focused,

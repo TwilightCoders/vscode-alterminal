@@ -55,6 +55,8 @@ export interface IRenderMetrics {
   deviceCellHeight: number;
   /** Device px from the cell top to the text baseline (where glyphs sit). */
   baseline: number;
+  /** Device px from the baseline to the deepest descender (p, g, y, etc.). */
+  descent: number;
   devicePixelRatio: number;
   palette: Palette;
   focused: boolean;
@@ -527,10 +529,12 @@ export class WebgpuRenderer {
     const dpr = m.devicePixelRatio || 1;
     const stroke = Math.max(1, Math.round(dpr));
     const gap = Math.max(1, Math.round(dpr));
-    // Sit just below the baseline (a small gap under the letters), clamped to
-    // stay inside the cell — anchoring to cellH-minus-fixed put it inside the
-    // glyphs on tight line-heights.
-    const yInCell = Math.min(Math.round(m.baseline + gap), cellH - stroke);
+    // Anchor BELOW the descender region so the stroke clears p/g/y/etc. We
+    // already know `descent` (device px from baseline to deepest descender);
+    // sitting just under it keeps the underline off the glyphs even on tight
+    // line-heights. Clamp to cell bottom so the stroke stays inside the cell.
+    const belowDescender = m.baseline + m.descent + Math.max(1, Math.round(dpr / 2));
+    const yInCell = Math.min(Math.max(belowDescender, m.baseline + gap), cellH - stroke);
     const periodPx = Math.max(4, Math.round(cellH * 0.5));
     const styleId = underlineStyleToShaderId(UnderlineStyle.SINGLE);
     const [r, g, b, a] = rgbaToFloats(lu.fgRgba);
@@ -694,9 +698,14 @@ export class WebgpuRenderer {
       } else if (us === UnderlineStyle.CURLY) {
         bandH = Math.max(3 * dpr, Math.round(cellH * 0.12));
       }
-      // Anchor just below the baseline (small gap under the letters), clamped
-      // to keep the band inside the cell.
-      const yBand = Math.min(Math.round(yPx + this._metrics.baseline + gap), Math.round(yPx + cellH - bandH));
+      // Anchor BELOW the descender region (under p/g/y/etc.) so the stroke
+      // doesn't intersect glyphs on tight line-heights. Falls back to
+      // baseline+gap when descent is unusually small; clamps to keep the band
+      // inside the cell.
+      const m = this._metrics;
+      const belowDescender = yPx + m.baseline + m.descent + Math.max(1, Math.round(dpr / 2));
+      const baselinePlusGap = yPx + m.baseline + gap;
+      const yBand = Math.min(Math.round(Math.max(belowDescender, baselinePlusGap)), Math.round(yPx + cellH - bandH));
       // periodPx drives dashed/curly; ~half a cell reads well.
       const periodPx = Math.max(4, Math.round(cellH * 0.5));
       this._decorStager.push([xPx, yBand, cellW, Math.round(bandH), r, g, b, a, styleId, periodPx, 0, 0]);
