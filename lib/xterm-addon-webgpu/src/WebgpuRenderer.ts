@@ -26,6 +26,7 @@ import { DamageTracker } from "./model/DamageTracker.js";
 import { InstanceStager } from "./model/InstanceStager.js";
 import { readCell, emptyReadCell, type IReadCell } from "./model/CellReader.js";
 import { normalizeSelection, isCellInSelection, type Selection } from "./model/selection.js";
+import { viewportCursorRow } from "./util/cursorViewport.js";
 import { extractUnderlineStyle, FgFlags, NULL_CELL_CODE, UnderlineStyle } from "./util/attributes.js";
 import { Emitter, type Event } from "./util/event.js";
 import { linkUnderlineSpans } from "./util/linkUnderlineSpans.js";
@@ -439,11 +440,17 @@ export class WebgpuRenderer {
     // would fall back to the block-glyph-band partial fill, producing the
     // "two-size blink" artifact). `cursor` gates the actual cursor draw
     // (invert/outline), so it goes null when blinked off.
-    const cursorOnScreen =
+    //
+    // xterm's `cursorY` is baseY-relative, not viewportY-relative — using it
+    // raw "drags" the cursor with scrollback and lets subsequent PTY output
+    // scribble over the visible historical buffer. Convert via the
+    // canonical viewportCursorRow helper.
+    const cursorRow = viewportCursorRow(buffer.cursorY, buffer.baseY, buffer.viewportY);
+    const cursorVisibleOnScreen =
       m.cursorVisible &&
-      buffer.cursorY >= 0 && buffer.cursorY < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols;
-    const cursorPos = cursorOnScreen ? { row: buffer.cursorY, col: buffer.cursorX } : null;
-    const cursor = cursorOnScreen && this._cursorBlinkOn ? cursorPos : null;
+      cursorRow >= 0 && cursorRow < m.rows && buffer.cursorX >= 0 && buffer.cursorX < m.cols;
+    const cursorPos = cursorVisibleOnScreen ? { row: cursorRow, col: buffer.cursorX } : null;
+    const cursor = cursorVisibleOnScreen && this._cursorBlinkOn ? cursorPos : null;
     const blockCursor = cursorPos !== null && m.cursorStyle === "block";
 
     const top = buffer.viewportY;
@@ -735,7 +742,10 @@ export class WebgpuRenderer {
     if (!m.cursorVisible || !this._cursorBlinkOn) {
       return;
     }
-    const row = buffer.cursorY; // already viewport-relative in xterm's active buffer
+    // cursorY is baseY-relative; convert to viewport row so scrollback
+    // doesn't drag the cursor (and subsequent PTY output) over visible
+    // history. See util/cursorViewport.ts.
+    const row = viewportCursorRow(buffer.cursorY, buffer.baseY, buffer.viewportY);
     const col = buffer.cursorX;
     if (row < 0 || row >= m.rows || col < 0 || col >= m.cols) {
       return;
