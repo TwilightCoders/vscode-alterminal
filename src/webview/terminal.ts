@@ -235,7 +235,19 @@ export class TerminalInstance {
         allowTransparency: false,
         experimentalCharAtlas: "dynamic",
         allowProposedApi: true,
-        convertEol: true,
+        // convertEol: true remaps bare LF → CRLF (forces column 0 on every
+        // line feed). That breaks VT spec — bare LF is IND (move down,
+        // preserve column) — and any TUI that relies on it: ncurses emits
+        // `\e[6G  \n\n\b\b❯` (col 6, advance to col 8 with spaces, two LFs to
+        // move DOWN two rows preserving column 8, then \b\b → col 6, then
+        // draw the focus marker). With convertEol on, the two \n\n collapse
+        // the cursor to column 0, the backspaces clamp, and the marker draws
+        // at the left edge instead of inside the panel. PTY line discipline
+        // (termios ONLCR) already handles `\n`→`\r\n` for cooked output; raw
+        // programs (ncurses, fullscreen TUIs) bypass it on purpose. Leaving
+        // false here is the spec-correct behavior and matches VS Code's
+        // built-in terminal.
+        convertEol: false,
         disableStdin: false,
         scrollSensitivity: 1,
         smoothScrollDuration: appearance.smoothScrolling ? 125 : 0,
