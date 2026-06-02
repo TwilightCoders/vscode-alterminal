@@ -27,6 +27,7 @@ import { DevicePixelObserver } from "./platform/DevicePixelObserver.js";
 import { toRgba, type Palette } from "./util/colorUtils.js";
 import { Emitter, type Event, type IDisposable } from "./util/event.js";
 import { watchBufferChanges } from "./util/bufferChangeWatcher.js";
+import { shouldRestoreFocus } from "./util/focusPreservation.js";
 import type { IWebgpuAddonOptions, IFontAtlasConfig, ISharedDevice } from "./types.js";
 import type { IXtermBuffer } from "./model/xtermTypes.js";
 
@@ -149,8 +150,24 @@ export class WebgpuAddon {
     if (!renderService) {
       return;
     }
+    // The async device swap can transiently blur a focused textarea (see
+    // focusPreservation): capture focus state right before the swap so we can
+    // restore it right after — making the hot-swap invisible and denying VS
+    // Code's integrated terminal the gap to grab focus mid-keystroke.
+    const textarea = (terminal.element?.querySelector(".xterm-helper-textarea") ?? null) as HTMLElement | null;
+    const activeBefore = typeof document !== "undefined" ? (document.activeElement as unknown) : null;
+    const restoreFocus = shouldRestoreFocus(activeBefore, textarea);
+
     renderService.setRenderer(renderer as unknown);
     renderService.handleResize(terminal.cols, terminal.rows);
+
+    if (restoreFocus && textarea) {
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch {
+        /* textarea removed between capture and restore */
+      }
+    }
   }
 
   /**
