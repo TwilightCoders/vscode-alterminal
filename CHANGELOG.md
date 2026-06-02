@@ -4,12 +4,21 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-06-02
+
 ### New Features
 
 - **WebGPU renderer** (`alterminal.renderer: "webgpu"`): an optional GPU terminal renderer, built from scratch as a self-contained xterm addon — instanced glyph / rectangle / decoration passes over a shared `GPUDevice`, a shelf-packed glyph atlas with LRU eviction, and font-driven cell metrics. Lighter on renderer memory than the WebGL path. Opt-in; WebGL stays the default.
 
 ### Fixes
 
+- **Focus no longer jumps to VS Code's built-in terminal mid-keystroke.** The webview's "focus" message handler had been a no-op for the project's entire life — it fetched the active terminal and discarded it — so neither the focus-guard reclaim nor the serializer's restore-focus ever landed keyboard focus back on the textarea. WebGL masked this by holding focus robustly; the WebGPU renderer's async hot-swap widened the transient-blur window and unmasked it as a steal to the integrated terminal. The reclaim now actually refocuses the textarea, is event-driven (no timers), and PTY window-raise/focus requests (XTWINOPS `CSI t`, OSC `1337;RequestAttention`) are redirected to *our* view instead of leaking to VS Code's terminal.
+- **Emoji render correctly in the WebGPU renderer.** Variation-selector emoji (`⚠️ ✏️ ❤️ 🗄️`) all collapsed to one glyph (often the "filing cabinet") because the glyph atlas keyed on the cell's trailing codepoint (`U+FE0F`), which they share. Composite glyphs are now keyed by their full string in a separate namespace, so distinct emoji can't collide.
+- **ncurses TUIs no longer smear.** `convertEol` was promoting every bare `LF` to `CR+LF`, which broke ncurses' column-preserving cursor advancement and left ghosted text. Bare `LF` is now treated as index (move down, keep column), matching a real terminal.
+- **WebGPU: zoom and display changes no longer cause wide letter-spacing.** DPR and char-size changes now re-measure the font and rebuild the glyph atlas instead of only resizing the canvas, so glyphs stay crisp after a VS Code zoom (`Cmd +`) or moving the window to a different-density display.
+- **WebGPU: stale selection no longer paints in full-screen TUIs.** A live selection is now cleared when the terminal switches between its normal and alternate buffers (entering `vim`/`htop`/`less`), so old coordinates don't highlight the wrong cells.
+- **OSC 8 hyperlinks are clickable.** Terminal-emitted hyperlinks (OSC 8) now open on click.
+- **Live appearance changes apply to open terminals.** Font/theme/cursor config updates now propagate to already-open terminals instead of only new ones.
 - **WebGPU: links are now underlined on hover.** The WebGPU renderer never subscribed to xterm's link-underline events, so detected links (Cmd+click worked) weren't highlighted. It now draws the hover underline across the link's cell span — single- and multi-row — matching the WebGL renderer.
 - **Selected tab now has a bottom accent line.** The active terminal tab's bottom border resolved to `transparent`, so it lacked the clean accent line VS Code draws under the active editor tab. It now uses `tab.activeBorder` with a subtle light-grey fallback.
 - **Keyboard input could die on packaged builds.** The release step copied a *hand-maintained* list of runtime deps into the vsix, which had drifted from `package.json` and silently dropped `@xterm/addon-search` and `@xterm/addon-unicode-graphemes`. Their `<script>` tags 404'd, and the unguarded `UnicodeGraphemesAddon` constructor threw during terminal init — *before* input handlers were wired — so the terminal rendered a prompt and blinking cursor but accepted no typing. (Dev/F5 builds, with full `node_modules`, were unaffected, which is why it only bit packaged installs.) Three independent fixes so this whole class of bug can't recur: input wiring now runs *before* any addon and optional addons are guarded (a missing cosmetic addon can never disable typing); the packaged dependency list is **derived from `package.json`** instead of hand-maintained; and a packaging gate (`scripts/verify-package.js`) fails the build if any resource the webview loads at boot is missing from the vsix.
