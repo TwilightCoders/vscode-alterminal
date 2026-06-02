@@ -23,6 +23,7 @@
 import { ShelfPacker } from "./shelfPacker.js";
 import { LruEvictor } from "./lruEvictor.js";
 import { FourKeyMap } from "../util/fourKeyMap.js";
+import { computeGlyphKey, type GlyphKeyTuple } from "../util/glyphCacheKey.js";
 import type { GlyphRasterizer } from "./glyphRasterizer.js";
 import type { IGlyphKey, IRasterizedGlyph } from "../types.js";
 
@@ -30,9 +31,10 @@ interface IAtlasEntry {
   id: number;
   glyph: IRasterizedGlyph;
   // Identity + source needed to re-rasterize and re-key this glyph when
-  // repacking survivors during LRU eviction. (code, bold, italic) is the cache
-  // key; `text` is the actual string handed to the rasterizer.
-  code: number;
+  // repacking survivors during LRU eviction. `key` is the exact 4-int atlas
+  // key (so repack re-keys identically); `text` is the actual string handed to
+  // the rasterizer.
+  key: GlyphKeyTuple;
   text: string;
   bold: boolean;
   italic: boolean;
@@ -58,6 +60,20 @@ export class GlyphAtlas {
   private _entries = new FourKeyMap<IAtlasEntry>();
   private _evictor = new LruEvictor();
   private _nextId = 1;
+  // Interning table for composite glyphs (multi-codepoint emoji / ZWJ runs),
+  // whose numeric code() collides. Maps the full glyph string → a stable id
+  // used in the composite key namespace. Kept across evict/reset so survivors'
+  // stored keys stay valid.
+  private _composite = new Map<string, number>();
+  private _compositeNext = 1;
+  private _internComposite = (text: string): number => {
+    let id = this._composite.get(text);
+    if (id === undefined) {
+      id = this._compositeNext++;
+      this._composite.set(text, id);
+    }
+    return id;
+  };
   private _didReset = false;
   private _evictionCount = 0;
   private _hardResetCount = 0;
@@ -130,9 +146,11 @@ export class GlyphAtlas {
     // progress bar or powerline prompt would multiply a single block glyph into
     // dozens of redundant entries and thrash the atlas. Key by what the bitmap
     // actually depends on.
-    const boldKey = bold ? 1 : 0;
-    const italicKey = italic ? 1 : 0;
-    const existing = this._entries.get(key.code, boldKey, italicKey, 0);
+    // Composite glyphs (emoji+VS16, ZWJ, base+combining) share a trailing
+    // code() and would collide if keyed by code alone — key them by interned
+    // string id in a separate namespace. See glyphCacheKey.ts.
+    const [k0, k1, k2, k3] = computeGlyphKey(key.code, text, bold, italic, this._internComposite);
+    const existing = this._entries.get(k0, k1, k2, k3);
     if (existing) {
       this._evictor.markUsed(existing.id);
       return existing.glyph;
@@ -164,7 +182,7 @@ export class GlyphAtlas {
       offset: { x: bbox.minX, y: bbox.minY },
       isColor: raster.isColor,
     };
-    this._entries.set(key.code, boldKey, italicKey, 0, { id, glyph, code: key.code, text, bold, italic });
+    this._entries.set(k0, k1, k2, k3, { id, glyph, key: [k0, k1, k2, k3], text, bold, italic });
     this._evictor.markUsed(id);
     return glyph;
   }
@@ -249,7 +267,7 @@ export class GlyphAtlas {
         offset: { x: bbox.minX, y: bbox.minY },
         isColor: raster.isColor,
       };
-      this._entries.set(e.code, e.bold ? 1 : 0, e.italic ? 1 : 0, 0, { ...e, glyph });
+      this._entries.set(e.key[0], e.key[1], e.key[2], e.key[3], { ...e, glyph });
     }
 
     this._evictionCount++;
@@ -330,5 +348,6 @@ export class GlyphAtlas {
     this.texture.destroy();
     this._entries.clear();
     this._evictor.clear();
+    this._composite.clear();
   }
 }
