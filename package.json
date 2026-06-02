@@ -127,6 +127,10 @@
         "title": "Alterminal: Restart PTY Daemon"
       },
       {
+        "command": "alterminal.dumpFocusDiag",
+        "title": "Alterminal: Dump Focus Diagnostics"
+      },
+      {
         "command": "alterminal.showSavedCommands",
         "title": "Launch Saved Command",
         "icon": "$(play)"

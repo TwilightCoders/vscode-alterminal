@@ -51,6 +51,8 @@ import {
   extractCwdFromOsc7,
   extractUserVars,
   replaceBelWithST,
+  detectFocusRequest,
+  describeFocusSuspects,
 } from "./dataPipeline";
 import { BoundedChunkBuffer } from "./boundedChunkBuffer";
 
@@ -71,6 +73,15 @@ export class PtyManager {
   private _expandCommand: ((cmd: string) => string) | null = null;
   private _onBell: ((tabId: number) => void) | null = null;
   private _suppressFocusStealing: boolean = true;
+  // Fired when a PTY chunk contains a genuine "raise/focus this window"
+  // request. The provider redirects this to Alterminal's own view instead of
+  // letting VS Code honour it on its integrated terminal.
+  private _onFocusRequest: ((tabId: number) => void) | null = null;
+  // Bounded diagnostic ring of focus-relevant escapes seen on the wire, so an
+  // observed steal can be attributed to actual bytes (Dale can dump via the
+  // "Alterminal: Dump Focus Diagnostics" command) rather than guessed at.
+  private _focusDiag: Array<{ ts: number; tabId: number; seqs: string[]; redirected: boolean }> = [];
+  private static readonly FOCUS_DIAG_MAX = 100;
 
   // Daemon mode: routes PTY operations through a persistent daemon process
   private _daemonClient: PtyDaemonClient | null = null;
@@ -271,6 +282,28 @@ export class PtyManager {
       if (userVars) {
         this._handleUserVarChange(tabId, userVars);
       }
+
+      // Focus-steal handling. Detect on the RAW chunk (before the filter
+      // strips it). A genuine raise/focus request is redirected to OUR view
+      // (see provider.onFocusRequest); everything focus-relevant is recorded
+      // for diagnostics so an observed steal can be pinned to actual bytes.
+      const suspects = describeFocusSuspects(data);
+      const wantsFocus = this._suppressFocusStealing && detectFocusRequest(data);
+      if (suspects.length > 0) {
+        this._focusDiag.push({
+          ts: Date.now(),
+          tabId,
+          seqs: suspects,
+          redirected: wantsFocus,
+        });
+        if (this._focusDiag.length > PtyManager.FOCUS_DIAG_MAX) {
+          this._focusDiag.splice(0, this._focusDiag.length - PtyManager.FOCUS_DIAG_MAX);
+        }
+      }
+      if (wantsFocus && this._onFocusRequest) {
+        Logger.info(`Focus request from PTY [tab ${tabId}] → redirecting to Alterminal: ${suspects.join(" ")}`);
+        this._onFocusRequest(tabId);
+      }
     }
 
     if (this._onBell && this._bellDetector.detect(tabId, data)) {
@@ -385,6 +418,23 @@ export class PtyManager {
 
   public onBell(fn: (tabId: number) => void) {
     this._onBell = fn;
+  }
+
+  /**
+   * Register the handler invoked when the PTY emits a genuine raise/focus
+   * request. The provider uses this to focus Alterminal's own view instead
+   * of letting VS Code grab its integrated terminal.
+   */
+  public onFocusRequest(fn: (tabId: number) => void) {
+    this._onFocusRequest = fn;
+  }
+
+  /**
+   * Snapshot of the focus-steal diagnostic ring (most recent last). Surfaced
+   * via the "Alterminal: Dump Focus Diagnostics" command.
+   */
+  public getFocusDiagnostics(): Array<{ ts: number; tabId: number; seqs: string[]; redirected: boolean }> {
+    return this._focusDiag.slice();
   }
 
   public setExtensionVersion(version: string) {

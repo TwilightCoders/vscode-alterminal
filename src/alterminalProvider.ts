@@ -107,6 +107,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       ),
     );
 
+    // Wire PTY-side focus requests: when a program asks to raise/focus the
+    // terminal window, focus OUR panel view (not VS Code's integrated
+    // terminal, which would otherwise honour the leaked escape).
+    this._ptyManager.onFocusRequest(() => this._reclaimFocus());
+
     // WebViewLifecycleManager needs MessageDispatcher
     this.webviewLifecycleManager = new WebViewLifecycleManager(
       this._extensionUri,
@@ -319,6 +324,34 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    */
   public async openTerminal(): Promise<void> {
     await vscode.commands.executeCommand("alterminalView.focus");
+  }
+
+  /**
+   * Reclaim focus to Alterminal — "convert the leaked focus-terminal request
+   * into a focus-OUR-plugin request." Two complementary, timer-free paths:
+   *   1. `show(false)` reveals + focuses our panel view; VS Code's own webview
+   *      re-focus then fires the webview's window 'focus' handler, which lands
+   *      keyboard focus on the xterm textarea.
+   *   2. an explicit `{command:"focus"}` message drives the now-working webview
+   *      focus handler directly (refocus.ts) — so PTY focus-requests don't
+   *      depend solely on the window-focus event firing.
+   * Both end at the same idempotent textarea focus; whichever lands last wins.
+   */
+  private _reclaimFocus(): void {
+    try {
+      this._view?.show(false);
+      this._view?.webview.postMessage({ command: "focus" } satisfies ExtToWebviewMessage);
+    } catch (e) {
+      Logger.warn("Focus reclaim failed:", e);
+    }
+  }
+
+  /**
+   * Diagnostic dump of recent focus-relevant PTY escapes (for the
+   * "Alterminal: Dump Focus Diagnostics" command).
+   */
+  public getFocusDiagnostics(): Array<{ ts: number; tabId: number; seqs: string[]; redirected: boolean }> {
+    return this._ptyManager.getFocusDiagnostics();
   }
 
   /**

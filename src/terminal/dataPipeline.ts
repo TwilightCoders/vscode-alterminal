@@ -14,7 +14,27 @@
 //   integrated terminal listens for these and steals focus when seen.
 // - OSC 1337: iTerm2 protocol (sometimes used by tools)
 // - DEC private mode ?1004: Focus reporting (in/out events VS Code may intercept)
-export const FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl])/g;
+// - CSI 1 t / CSI 5 t: XTWINOPS de-iconify / raise-window-to-front. VS Code's
+//   integrated terminal honours these and pulls focus to ITS terminal. We match
+//   ONLY the single-param raise/restore ops ([15]t) — never SGR (...m), erase
+//   (...J), cursor (...H), iconify (CSI 2 t), or multi-param XTWINOPS (CSI 10;5 t).
+export const FILTER_PATTERN = /\x1b(?:\](?:633|133|7|9|1337);[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl]|\[[15]t)/g;
+
+// GENUINE "raise / focus this window" requests. When suppression is on we
+// don't merely drop these — we redirect: focus OUR panel view instead of
+// letting VS Code grab its integrated terminal. Kept deliberately narrow
+// (no shell-integration noise, which fires on every prompt) so focus never
+// thrashes. Covers XTWINOPS raise/de-iconify and iTerm2 RequestAttention
+// (only affirmative variants — "no" cancels attention, so it doesn't grab).
+export const FOCUS_REQUEST_PATTERN =
+  /\x1b(?:\[[15]t|\]1337;RequestAttention=(?:yes|once|fireworks)(?:\x07|\x1b\\))/g;
+
+// Diagnostic-only: every focus-relevant escape worth attributing an observed
+// steal to — whether or not we strip it. Excludes OSC 9;9 (ConEmu CWD) which
+// is high-frequency noise, not a focus signal. Captures OSC 9 notifications,
+// OSC 777, OSC 1337, DEC ?1004 focus reporting, and ANY CSI window op (…t).
+export const FOCUS_SUSPECT_PATTERN =
+  /\x1b(?:\](?:9;(?!9;)|777;|1337;)[^\x07\x1b]*(?:\x07|\x1b\\)|\[\?1004[hl]|\[[0-9;]*t)/g;
 
 // Extraction patterns (separate from filter because we need capture groups)
 export const CWD_OSC_PATTERN = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
@@ -29,6 +49,34 @@ export const USER_VAR_PATTERN = /\x1b\]1337;SetUserVar=([A-Za-z0-9_]+)=([A-Za-z0
 export function filterVSCodeSequences(data: string): string {
   FILTER_PATTERN.lastIndex = 0;
   return data.replace(FILTER_PATTERN, '');
+}
+
+/**
+ * True iff `data` contains a GENUINE "raise / focus this window" request.
+ * The caller redirects this to Alterminal's own view (alterminalView.focus)
+ * rather than letting VS Code honour it on its integrated terminal. Narrow
+ * by design — shell-integration / CWD sequences fire every prompt and must
+ * NOT trigger a focus grab.
+ */
+export function detectFocusRequest(data: string): boolean {
+  FOCUS_REQUEST_PATTERN.lastIndex = 0;
+  return FOCUS_REQUEST_PATTERN.test(data);
+}
+
+/**
+ * Diagnostic: list the focus-relevant escape sequences present in `data`,
+ * with control bytes escaped for display (ESC → "\e", BEL → "\a"). Used to
+ * attribute an observed focus steal to the actual bytes on the wire instead
+ * of guessing. Returns [] for ordinary output.
+ */
+export function describeFocusSuspects(data: string): string[] {
+  FOCUS_SUSPECT_PATTERN.lastIndex = 0;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = FOCUS_SUSPECT_PATTERN.exec(data)) !== null) {
+    out.push(m[0].replace(/\x1b/g, "\\e").replace(/\x07/g, "\\a"));
+  }
+  return out;
 }
 
 /**

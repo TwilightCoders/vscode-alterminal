@@ -11,6 +11,7 @@ import { createCrossWindowBellCoordinator } from "./managers/crossWindowBell";
 import { DaemonManager } from "./daemon/daemonManager";
 import { SettingsEditor } from "./managers/settingsEditor";
 import { getVersion } from "./version";
+import { listVscodeInjectedEnv } from "./terminal/envSanitizer";
 import type { ExtToWebviewMessage } from "./shared/messages";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -37,6 +38,31 @@ export async function activate(context: vscode.ExtensionContext) {
     "setContext",
     "alterminal.debugMode",
     isDebugMode,
+  );
+
+  // --- Focus-steal "measure first" instrumentation ------------------------
+  // Alterminal is NOT VS Code's terminal, but in daemon mode our shells inherit
+  // the ext-host env, which may carry VS Code's identity (shell-integration vars
+  // + IPC hooks). Snapshot WHAT is leaking, and log terminal lifecycle/active
+  // changes, so a real session can be correlated against an observed steal —
+  // before we decide how aggressively to strip. Surfaced via the
+  // "Alterminal: Dump Focus Diagnostics" command.
+  const leakedEnvKeys = listVscodeInjectedEnv(process.env);
+  const terminalEvents: Array<{ ts: number; event: string; name: string; pid?: number }> = [];
+  const TERMINAL_EVENTS_MAX = 200;
+  const recordTerminalEvent = (event: string, term?: vscode.Terminal) => {
+    const rec = { ts: Date.now(), event, name: term?.name ?? "(none)", pid: undefined as number | undefined };
+    terminalEvents.push(rec);
+    if (terminalEvents.length > TERMINAL_EVENTS_MAX) {
+      terminalEvents.splice(0, terminalEvents.length - TERMINAL_EVENTS_MAX);
+    }
+    // processId resolves async; attach when available without blocking.
+    term?.processId.then((pid) => { rec.pid = pid ?? undefined; }, () => { /* terminal gone */ });
+  };
+  context.subscriptions.push(
+    vscode.window.onDidOpenTerminal((t) => recordTerminalEvent("open", t)),
+    vscode.window.onDidCloseTerminal((t) => recordTerminalEvent("close", t)),
+    vscode.window.onDidChangeActiveTerminal((t) => recordTerminalEvent("active", t ?? undefined)),
   );
 
   // Register window title variables. Users can add these to their
@@ -189,6 +215,45 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.commands.executeCommand(
         "alterminalView.focus",
       );
+    }),
+    vscode.commands.registerCommand("alterminal.dumpFocusDiag", async () => {
+      const diag = provider.getFocusDiagnostics();
+      const lines = [
+        `=== Alterminal focus diagnostics ===`,
+        ``,
+        `--- VS Code env leaking into spawned shells (${leakedEnvKeys.length}) ---`,
+        `(In daemon mode our shells inherit these. VSCODE_SHELL_INTEGRATION/`,
+        ` INJECTION/NONCE make the shell emit OSC 633; *_IPC_HOOK_* / GIT_* give`,
+        ` tools a live channel back into VS Code. Direct mode strips all of these.)`,
+        leakedEnvKeys.length ? `  ${leakedEnvKeys.join("\n  ")}` : `  (none — clean env)`,
+        ``,
+        `--- PTY focus-suspect sequences (${diag.length}; most recent last) ---`,
+        `("redirected=true" = a genuine raise/focus request we redirected to our view)`,
+        ...diag.map((d) => {
+          const t = new Date(d.ts).toISOString();
+          return `  ${t}  tab ${d.tabId}  redirected=${d.redirected}  ${d.seqs.join("  ")}`;
+        }),
+        diag.length ? `` : `  (none captured)`,
+        ``,
+        `--- VS Code terminal lifecycle/active changes (${terminalEvents.length}; most recent last) ---`,
+        `(A steal that lines up with an "active"/"open" of a VS Code terminal here`,
+        ` points at a real integrated terminal grabbing focus — note its name.)`,
+        ...terminalEvents.map((e) => {
+          const t = new Date(e.ts).toISOString();
+          return `  ${t}  ${e.event.padEnd(6)}  ${e.name}${e.pid ? `  (pid ${e.pid})` : ""}`;
+        }),
+        terminalEvents.length ? `` : `  (none — no VS Code terminals seen)`,
+        ``,
+        `Reproduce a steal, then read across the three sections by timestamp:`,
+        `  • PTY sequence at the steal time → byte-driven (our emission).`,
+        `  • terminal "active"/"open" at the steal time → a real VS Code terminal.`,
+        `  • neither → workbench part/composite focus (the reclaim path).`,
+      ];
+      const doc = await vscode.workspace.openTextDocument({
+        content: lines.join("\n"),
+        language: "log",
+      });
+      await vscode.window.showTextDocument(doc, { preview: false });
     }),
     vscode.commands.registerCommand("alterminal.openSettings", () => {
       _settingsEditor.open();
