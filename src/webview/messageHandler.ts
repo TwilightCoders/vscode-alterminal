@@ -6,7 +6,7 @@
  */
 
 import { Logger } from "./logger.js";
-import { refocusActiveTerminal } from "./refocus.js";
+import { refocusActiveTerminal, isXtermTextareaFocused } from "./refocus.js";
 import type {
   ExtToWebviewMessage,
   WebviewToExtMessage,
@@ -123,7 +123,14 @@ export class MessageHandler {
           // fetched the active terminal and DISCARDED it (a no-op since the
           // founding commit), so the FocusGuard reclaim and the serializer's
           // restore-focus could never actually grab the textarea. See refocus.ts.
-          refocusActiveTerminal(this.callbacks.getActiveTerminal(), requestAnimationFrame);
+          // The verifier drives a single self-correcting retry: if VS Code
+          // re-fires its own focus (to the integrated terminal) after ours, we
+          // reclaim once more on the next frame.
+          refocusActiveTerminal(
+            this.callbacks.getActiveTerminal(),
+            requestAnimationFrame,
+            () => isXtermTextareaFocused(document.activeElement),
+          );
           break;
 
         case "refresh":

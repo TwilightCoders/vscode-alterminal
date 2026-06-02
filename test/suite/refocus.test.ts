@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { refocusActiveTerminal } from "../../src/webview/refocus";
+import { refocusActiveTerminal, isXtermTextareaFocused } from "../../src/webview/refocus";
 
 /**
  * Regression guard for the focus-steal root cause.
@@ -59,5 +59,60 @@ suite("refocusActiveTerminal", () => {
       (cb) => tasks.push(cb),
     );
     assert.doesNotThrow(() => tasks.forEach((t) => t()));
+  });
+
+  suite("self-verifying retry", () => {
+    test("retries once when focus did not land on our textarea", () => {
+      let focused = 0;
+      refocusActiveTerminal(
+        { focus: () => { focused++; } },
+        (cb) => cb(),                 // run scheduled work synchronously
+        () => false,                  // verify: focus never landed
+      );
+      assert.strictEqual(focused, 2, "initial focus + exactly one retry");
+    });
+
+    test("does NOT retry when focus landed (verify passes)", () => {
+      let focused = 0;
+      refocusActiveTerminal(
+        { focus: () => { focused++; } },
+        (cb) => cb(),
+        () => true,                   // verify: focus is on our textarea
+      );
+      assert.strictEqual(focused, 1, "no retry once focus is confirmed");
+    });
+
+    test("retries AT MOST once even if focus keeps failing (no focus-fight loop)", () => {
+      let focused = 0;
+      refocusActiveTerminal(
+        { focus: () => { focused++; } },
+        (cb) => cb(),
+        () => false,                  // verify keeps failing
+      );
+      assert.strictEqual(focused, 2, "bounded to a single retry, never a loop");
+    });
+
+    test("without a verifier, behaves exactly as before (single focus, no retry)", () => {
+      let focused = 0;
+      refocusActiveTerminal({ focus: () => { focused++; } }, (cb) => cb());
+      assert.strictEqual(focused, 1);
+    });
+  });
+});
+
+suite("isXtermTextareaFocused", () => {
+  const el = (cls: string) => ({ classList: { contains: (t: string) => t === cls } });
+
+  test("true when the active element is the xterm helper textarea", () => {
+    assert.strictEqual(isXtermTextareaFocused(el("xterm-helper-textarea")), true);
+  });
+
+  test("false when focus is on some other element", () => {
+    assert.strictEqual(isXtermTextareaFocused(el("some-other-input")), false);
+  });
+
+  test("false when nothing is focused (null/undefined active element)", () => {
+    assert.strictEqual(isXtermTextareaFocused(null), false);
+    assert.strictEqual(isXtermTextareaFocused(undefined), false);
   });
 });
