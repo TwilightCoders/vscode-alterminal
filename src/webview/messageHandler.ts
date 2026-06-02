@@ -6,6 +6,7 @@
  */
 
 import { Logger } from "./logger.js";
+import { refocusActiveTerminal } from "./refocus.js";
 import type {
   ExtToWebviewMessage,
   WebviewToExtMessage,
@@ -117,8 +118,12 @@ export class MessageHandler {
           break;
 
         case "focus":
-          // Warm focus: just refresh active terminal visuals
-          this.callbacks.getActiveTerminal();
+          // Land keyboard focus on the active xterm textarea — the final,
+          // load-bearing step of every reclaim/restore path. Previously this
+          // fetched the active terminal and DISCARDED it (a no-op since the
+          // founding commit), so the FocusGuard reclaim and the serializer's
+          // restore-focus could never actually grab the textarea. See refocus.ts.
+          refocusActiveTerminal(this.callbacks.getActiveTerminal(), requestAnimationFrame);
           break;
 
         case "refresh":

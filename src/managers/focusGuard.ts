@@ -16,12 +16,9 @@ export class FocusGuard {
   private _lastInteraction = 0;
   private _view?: vscode.WebviewView;
   private _disposables: vscode.Disposable[] = [];
-  private _reclaimTimer?: ReturnType<typeof setTimeout>;
 
   /** How recently the user must have interacted for us to reclaim focus. */
   static readonly INTERACTION_WINDOW_MS = 2000;
-  /** Delay before reclaiming to let VS Code settle. */
-  static readonly RECLAIM_DELAY_MS = 150;
 
   /**
    * Record a user interaction with Alterminal (call on every webview message
@@ -70,10 +67,6 @@ export class FocusGuard {
    * Stop guarding and clean up.
    */
   public detach(): void {
-    if (this._reclaimTimer) {
-      clearTimeout(this._reclaimTimer);
-      this._reclaimTimer = undefined;
-    }
     for (const d of this._disposables) d.dispose();
     this._disposables = [];
     this._view = undefined;
@@ -102,12 +95,13 @@ export class FocusGuard {
       `Alterminal interaction — reclaiming focus`,
     );
 
-    // Small delay so VS Code finishes its focus transition before we override
-    if (this._reclaimTimer) clearTimeout(this._reclaimTimer);
-    this._reclaimTimer = setTimeout(() => {
-      this._reclaimTimer = undefined;
-      this._view?.show(false);
-    }, FocusGuard.RECLAIM_DELAY_MS);
+    // Reclaim immediately on the event — no timer. show(false) re-focuses our
+    // panel view; the webview's window 'focus' handler then lands keyboard
+    // focus on the xterm textarea. VS Code's own webview re-focus (an internal
+    // ~50ms Delayer inside WebviewElement) re-fires that focus handler AFTER
+    // the terminal's setTimeout(0) focus grab, so we win the last exchange
+    // without any timer of our own.
+    this._view.show(false);
 
     return true;
   }
