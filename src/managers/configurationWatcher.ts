@@ -82,6 +82,9 @@ export class ConfigurationWatcher {
       fontWeightBold: getInheritedSetting("fontWeightBold", "fontWeightBold", "bold"),
       lineHeight: getInheritedSetting("lineHeight", "lineHeight", 1.0),
       letterSpacing: getInheritedSetting("letterSpacing", "letterSpacing", 0),
+      // alterminal-only (no terminal.integrated counterpart): absolute px gap
+      // between lines, honored by the WebGPU renderer.
+      lineSpacing: config.get<number>("lineSpacing", 0),
       cursorStyle: getInheritedSetting("cursorStyle", "cursorStyle", "block"),
       cursorBlinking: getInheritedSetting("cursorBlinking", "cursorBlinking", false),
       copyOnSelection: getInheritedSetting("copyOnSelection", "copyOnSelection", false),
@@ -129,6 +132,7 @@ export interface AlterminalConfig {
   fontWeightBold: string;
   lineHeight: number;
   letterSpacing: number;
+  lineSpacing: number;
   cursorStyle: string;
   cursorBlinking: boolean;
   copyOnSelection: boolean;

@@ -4,6 +4,10 @@ All notable changes to the Alterminal extension will be documented in this file.
 
 ## [Unreleased]
 
+### New Features
+
+- **Line spacing** (`alterminal.lineSpacing`): extra space *between* lines, in pixels, added below each line **without** changing the line height. Distinct from `alterminal.lineHeight` (a font-size multiplier that inflates the whole line box — cursor and selection included): line spacing widens only the gap between rows, so glyphs, cursor, and selection keep their size. Honored by the WebGPU renderer (`alterminal.renderer: "webgpu"`).
+
 ## [0.2.2] — 2026-06-02
 
 ### New Features

@@ -313,7 +313,9 @@ export class TerminalInstance {
       } else if (rendererMode === "webgpu") {
         try {
           if (!WebgpuAddon?.WebgpuAddon) throw new Error("WebgpuAddon global not loaded");
-          this.webglAddon = new WebgpuAddon.WebgpuAddon();
+          // lineSpacing is alterminal-only (no xterm option), so it's passed to
+          // the addon directly rather than through the xterm Terminal config.
+          this.webglAddon = new WebgpuAddon.WebgpuAddon({ lineSpacing: appearance.lineSpacing ?? 0 });
           this.webglAddon.onContextLoss(() => {
             try { this.webglAddon?.dispose?.(); } catch {}
             this.webglAddon = null;
@@ -541,6 +543,14 @@ export class TerminalInstance {
     const writes = coalesceAppearance(opts as Record<string, unknown>, appearance);
     for (const key of Object.keys(writes)) {
       opts[key] = writes[key];
+    }
+    // lineSpacing has no xterm-option equivalent — push it straight to the
+    // WebGPU addon (other renderers don't support it and ignore it). Do this
+    // before fit() so the addon resizes its surface and fit() reads the new cell
+    // pitch when recomputing rows.
+    const ls = (appearance as { lineSpacing?: unknown }).lineSpacing;
+    if (typeof ls === "number") {
+      (this.webglAddon as { setLineSpacing?: (px: number) => void } | null)?.setLineSpacing?.(ls);
     }
     // A font/cell-size change reflows. Let the fit addon recompute geometry so
     // the cell grid + cursor position stay correct.

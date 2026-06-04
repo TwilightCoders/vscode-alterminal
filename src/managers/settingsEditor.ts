@@ -65,6 +65,8 @@ const SETTINGS: Array<{ title: string; items: SettingDescriptor[] }> = [
         description: "Line height as a multiplier of font size. 1.0 is exact; 1.2 gives each line 20% more vertical space." },
       { key: "letterSpacing", label: "Letter spacing", type: "number", inheritsFrom: "letterSpacing",
         description: "Extra horizontal space between characters in pixels. 0 is default." },
+      { key: "lineSpacing", label: "Line spacing", type: "number",
+        description: "Extra space between lines in pixels, added below each line without changing the line height (cursor/selection keep their size). Distinct from line height, which is a font-size multiplier. Requires the WebGPU renderer." },
       { key: "cursorStyle", label: "Cursor style", type: "enum",
         enumValues: ["block", "line", "underline"], inheritsFrom: "cursorStyle",
         description: "Cursor shape: solid block, vertical line, or underline." },

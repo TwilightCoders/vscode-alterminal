@@ -161,6 +161,7 @@ export class WebViewLifecycleManager {
         fontWeightBold: c.fontWeightBold,
         lineHeight: c.lineHeight,
         letterSpacing: c.letterSpacing,
+        lineSpacing: c.lineSpacing,
         cursorStyle: c.cursorStyle,
         cursorBlinking: c.cursorBlinking,
         copyOnSelection: c.copyOnSelection,

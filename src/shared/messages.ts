@@ -136,6 +136,7 @@ export interface TerminalAppearance {
   fontWeightBold?: string;
   lineHeight?: number;
   letterSpacing?: number;
+  lineSpacing?: number;
   cursorStyle?: string;
   cursorBlinking?: boolean;
   copyOnSelection?: boolean;

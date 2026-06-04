@@ -443,6 +443,12 @@
             "type": "number",
             "markdownDescription": "Terminal letter spacing in pixels. Inherits from `#terminal.integrated.letterSpacing#` when unset."
           },
+          "alterminal.lineSpacing": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "markdownDescription": "Extra space *between* lines, in pixels — added below each line **without** changing the line height. Unlike `#alterminal.lineHeight#` (a font-size multiplier that inflates the whole line box, including the cursor and selection), this only widens the gap between rows; glyphs, cursor and selection keep their size. Requires `#alterminal.renderer#` set to `webgpu`."
+          },
           "alterminal.cursorStyle": {
             "type": "string",
             "enum": [
