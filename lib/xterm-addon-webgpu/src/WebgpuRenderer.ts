@@ -54,7 +54,20 @@ export interface IRenderMetrics {
   rows: number;
   /** Cell size in device pixels. */
   deviceCellWidth: number;
+  /**
+   * Row pitch in device px — how far apart consecutive rows sit. Equals the
+   * content band plus the `lineSpacing` gap. Drives row Y positioning and the
+   * reported `dimensions` (so xterm hit-testing / selection account for the gap).
+   */
   deviceCellHeight: number;
+  /**
+   * The snug content band in device px — the line box the cursor, selection and
+   * cell backgrounds fill, and within which the glyph baseline is centered. When
+   * omitted, falls back to `deviceCellHeight` (no inter-line gap). The
+   * `deviceCellHeight - deviceCellContentHeight` difference is the gap below each
+   * line.
+   */
+  deviceCellContentHeight?: number;
   /** Device px from the cell top to the text baseline (where glyphs sit). */
   baseline: number;
   /** Device px from the baseline to the deepest descender (p, g, y, etc.). */
@@ -438,6 +451,10 @@ export class WebgpuRenderer {
     const m = this._metrics;
     const cellW = m.deviceCellWidth;
     const cellH = m.deviceCellHeight;
+    // The snug line box: cursor/selection/background fill this, the glyph
+    // baseline is centered in it, and the lineSpacing gap (cellH - bandH) sits
+    // empty below it. Falls back to the full cell when no gap is configured.
+    const bandH = m.deviceCellContentHeight ?? cellH;
     const palette = m.palette;
 
     this._shared.atlas.beginFrame();
@@ -518,13 +535,13 @@ export class WebgpuRenderer {
           // cells keep the block-glyph-band fill so the font's line-gap stays
           // as inter-line spacing rather than getting painted.
           if (invertForCursor || ri.selected || isCursorCell) {
-            this._pushRect(xPx, yPx, cellW, cellH, bgColor, 1);
+            this._pushRect(xPx, yPx, cellW, bandH, bgColor, 1);
           } else {
             this._pushRect(xPx, yPx + this._fillTop, cellW, this._fillHeight, bgColor, 1);
           }
         }
         if (unfocusedOutline) {
-          this._pushRectOutline(xPx, yPx, cellW, cellH, m.palette.cursor);
+          this._pushRectOutline(xPx, yPx, cellW, bandH, m.palette.cursor);
         }
 
         // Glyph.
@@ -533,8 +550,10 @@ export class WebgpuRenderer {
           this._pushGlyph(cell, xPx, yPx, glyphColor, resolved.dim && !invertForCursor);
         }
 
-        // Underline / strikethrough decorations.
-        this._pushDecorations(cell, xPx, yPx, cellW, cellH, resolved.fg);
+        // Underline / strikethrough decorations — anchored within the band
+        // (bandH), not the full pitch, so they sit on the text and not in the
+        // inter-line gap.
+        this._pushDecorations(cell, xPx, yPx, cellW, bandH, resolved.fg);
       }
     }
 
@@ -556,16 +575,19 @@ export class WebgpuRenderer {
     const m = this._metrics;
     const cellW = m.deviceCellWidth;
     const cellH = m.deviceCellHeight;
+    // Anchor the underline within the content band, but advance rows by the
+    // pitch — so it sits under the text, never down in the inter-line gap.
+    const bandH = m.deviceCellContentHeight ?? cellH;
     const dpr = m.devicePixelRatio || 1;
     const stroke = Math.max(1, Math.round(dpr));
     const gap = Math.max(1, Math.round(dpr));
     // Anchor BELOW the descender region so the stroke clears p/g/y/etc. We
     // already know `descent` (device px from baseline to deepest descender);
     // sitting just under it keeps the underline off the glyphs even on tight
-    // line-heights. Clamp to cell bottom so the stroke stays inside the cell.
+    // line-heights. Clamp to the band bottom so the stroke stays on the text.
     const belowDescender = m.baseline + m.descent + Math.max(1, Math.round(dpr / 2));
-    const yInCell = Math.min(Math.max(belowDescender, m.baseline + gap), cellH - stroke);
-    const periodPx = Math.max(4, Math.round(cellH * 0.5));
+    const yInCell = Math.min(Math.max(belowDescender, m.baseline + gap), bandH - stroke);
+    const periodPx = Math.max(4, Math.round(bandH * 0.5));
     const styleId = underlineStyleToShaderId(UnderlineStyle.SINGLE);
     const [r, g, b, a] = rgbaToFloats(lu.fgRgba);
 
@@ -669,7 +691,8 @@ export class WebgpuRenderer {
     xPx: number,
     yPx: number,
     cellW: number,
-    cellH: number,
+    /** The content band height (line box), NOT the row pitch — see _build. */
+    contentH: number,
     fgRgba: number,
   ): void {
     const [r, g, b, a] = rgbaToFloats(fgRgba);
@@ -688,24 +711,24 @@ export class WebgpuRenderer {
       if (us === UnderlineStyle.DOUBLE) {
         bandH = stroke * 3;
       } else if (us === UnderlineStyle.CURLY) {
-        bandH = Math.max(3 * dpr, Math.round(cellH * 0.12));
+        bandH = Math.max(3 * dpr, Math.round(contentH * 0.12));
       }
       // Anchor BELOW the descender region (under p/g/y/etc.) so the stroke
       // doesn't intersect glyphs on tight line-heights. Falls back to
       // baseline+gap when descent is unusually small; clamps to keep the band
-      // inside the cell.
+      // inside the content box (not down in the inter-line gap).
       const m = this._metrics;
       const belowDescender = yPx + m.baseline + m.descent + Math.max(1, Math.round(dpr / 2));
       const baselinePlusGap = yPx + m.baseline + gap;
-      const yBand = Math.min(Math.round(Math.max(belowDescender, baselinePlusGap)), Math.round(yPx + cellH - bandH));
-      // periodPx drives dashed/curly; ~half a cell reads well.
-      const periodPx = Math.max(4, Math.round(cellH * 0.5));
+      const yBand = Math.min(Math.round(Math.max(belowDescender, baselinePlusGap)), Math.round(yPx + contentH - bandH));
+      // periodPx drives dashed/curly; ~half the band reads well.
+      const periodPx = Math.max(4, Math.round(contentH * 0.5));
       this._decorStager.push([xPx, yBand, cellW, Math.round(bandH), r, g, b, a, styleId, periodPx, 0, 0]);
     }
 
     // Strikethrough — a thin stroke across the x-height midline.
     if (cell.fg & FgFlags.STRIKETHROUGH) {
-      const yStrike = Math.round(yPx + cellH * 0.45);
+      const yStrike = Math.round(yPx + contentH * 0.45);
       this._decorStager.push([xPx, yStrike, cellW, stroke, r, g, b, a, 4, cellW, 0, 0]);
     }
   }
@@ -725,15 +748,18 @@ export class WebgpuRenderer {
     }
     const xPx = col * m.deviceCellWidth;
     const yPx = row * m.deviceCellHeight;
+    // Cursor fills the snug band (not the pitch), so the lineSpacing gap stays
+    // empty below it rather than the cursor stretching into it.
+    const bandH = m.deviceCellContentHeight ?? m.deviceCellHeight;
     // Block cursor is handled inline in _build (true inversion / outline).
     const barW = Math.max(1, Math.round(2 * m.devicePixelRatio));
     const lineH = Math.max(1, Math.round(2 * m.devicePixelRatio));
     switch (m.cursorStyle) {
       case "bar":
-        this._pushRect(xPx, yPx, barW, m.deviceCellHeight, m.palette.cursor, 1);
+        this._pushRect(xPx, yPx, barW, bandH, m.palette.cursor, 1);
         break;
       case "underline":
-        this._pushRect(xPx, yPx + m.deviceCellHeight - lineH, m.deviceCellWidth, lineH, m.palette.cursor, 1);
+        this._pushRect(xPx, yPx + bandH - lineH, m.deviceCellWidth, lineH, m.palette.cursor, 1);
         break;
       default:
         break; // block handled in _build

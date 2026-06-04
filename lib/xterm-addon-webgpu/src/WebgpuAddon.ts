@@ -28,6 +28,7 @@ import { toRgba, type Palette } from "./util/colorUtils.js";
 import { Emitter, type Event, type IDisposable } from "./util/event.js";
 import { watchBufferChanges } from "./util/bufferChangeWatcher.js";
 import { shouldRestoreFocus } from "./util/focusPreservation.js";
+import { computeVerticalCellMetrics } from "./util/cellMetrics.js";
 import type { IWebgpuAddonOptions, IFontAtlasConfig, ISharedDevice } from "./types.js";
 import type { IXtermBuffer } from "./model/xtermTypes.js";
 
@@ -57,7 +58,28 @@ export class WebgpuAddon {
   private readonly _onContextLoss = new Emitter<void>();
   public readonly onContextLoss: Event<void> = this._onContextLoss.event;
 
-  constructor(private readonly _options: IWebgpuAddonOptions = {}) {}
+  /** Absolute inter-line gap (CSS px) added below each line; 0 = none. */
+  private _lineSpacingPx: number;
+
+  constructor(private readonly _options: IWebgpuAddonOptions = {}) {
+    this._lineSpacingPx = Math.max(0, _options.lineSpacing ?? 0);
+  }
+
+  /**
+   * Set the absolute inter-line gap (CSS px) added below each line. alterminal's
+   * `lineSpacing` has no xterm-option equivalent (xterm only has the `lineHeight`
+   * multiplier), so the addon carries it directly and re-derives metrics on
+   * change — the gap widens the row pitch without resizing the glyph/line box.
+   * No-op when unchanged.
+   */
+  public setLineSpacing(px: number): void {
+    const next = Math.max(0, px || 0);
+    if (next === this._lineSpacingPx) {
+      return;
+    }
+    this._lineSpacingPx = next;
+    this._refreshFont();
+  }
 
   public activate(terminal: IXtermTerminalLike): void {
     this._terminal = terminal;
@@ -258,18 +280,31 @@ export class WebgpuAddon {
 
     const deviceCharWidth = Math.floor((cs.width || 9) * dpr);
     const deviceCharHeight = Math.ceil((cs.height || 17) * dpr);
-    const deviceCellHeight = Math.floor(deviceCharHeight * lineHeight);
     const deviceCellWidth = deviceCharWidth + Math.round(letterSpacing);
 
-    // Baseline: the font's ascent, with any line-height leading split evenly.
     const fm = measureFont(fontFamily, fontSize * dpr, lineHeight);
-    const leading = deviceCellHeight - (fm.ascent + fm.descent);
-    const baseline = Math.round(fm.ascent + leading / 2);
+    // Split the snug line box (bandHeight) from the row pitch (band + the
+    // absolute lineSpacing gap). The gap sits BELOW each line: it widens the
+    // pitch but not the band, so glyphs/cursor/selection stay the same size and
+    // only the space between rows grows. Baseline stays centered in the band.
+    const v = computeVerticalCellMetrics({
+      deviceCharHeight,
+      lineHeight,
+      lineSpacingCssPx: this._lineSpacingPx,
+      dpr,
+      ascent: fm.ascent,
+      descent: fm.descent,
+    });
 
     return {
       dpr, fontFamily, fontSize, fontWeight: opts.fontWeight ?? "normal",
       fontWeightBold: opts.fontWeightBold ?? "bold", letterSpacing, lineHeight,
-      deviceCharWidth, deviceCharHeight, deviceCellWidth, deviceCellHeight, baseline,
+      deviceCharWidth, deviceCharHeight, deviceCellWidth,
+      // deviceCellHeight is the row PITCH (band + gap); bandHeight is the snug
+      // content box the cursor/selection/background fill.
+      deviceCellHeight: v.cellPitch,
+      bandHeight: v.bandHeight,
+      baseline: v.baseline,
       // Keep descent so the renderer can place underlines BELOW the descender
       // region (under p/g/y/etc.) rather than just below the baseline.
       descent: Math.round(fm.descent),
@@ -287,7 +322,9 @@ export class WebgpuAddon {
       lineHeight: d.lineHeight,
       devicePixelRatio: d.dpr,
       deviceCellWidth: d.deviceCellWidth,
-      deviceCellHeight: d.deviceCellHeight,
+      // The atlas rasterizes and positions glyphs within the snug band — the
+      // lineSpacing gap is empty space below, not part of the glyph cell.
+      deviceCellHeight: d.bandHeight,
       deviceCharWidth: d.deviceCharWidth,
       deviceCharHeight: d.deviceCharHeight,
       baseline: d.baseline,
@@ -305,7 +342,10 @@ export class WebgpuAddon {
       cols: terminal.cols,
       rows: terminal.rows,
       deviceCellWidth: d.deviceCellWidth,
+      // Row pitch (band + lineSpacing gap) drives row positioning + dimensions;
+      // the snug band drives cursor/selection/background heights.
       deviceCellHeight: d.deviceCellHeight,
+      deviceCellContentHeight: d.bandHeight,
       baseline: d.baseline,
       descent: d.descent,
       devicePixelRatio: d.dpr,

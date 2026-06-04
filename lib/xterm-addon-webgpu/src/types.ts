@@ -39,6 +39,15 @@ export interface IWebgpuAddonOptions {
    * preserving drop-in `new WebgpuAddon()` semantics identical to WebglAddon.
    */
   device?: ISharedDevice;
+
+  /**
+   * Absolute inter-line gap in CSS pixels, added below each line. Unlike
+   * `lineHeight` (a font-size multiplier that inflates the whole line box), this
+   * widens only the space between rows — glyphs, cursor and selection keep the
+   * snug line-box height. 0 (default) = no gap. Adjustable later via
+   * {@link WebgpuAddon.setLineSpacing}.
+   */
+  lineSpacing?: number;
 }
 
 /**
