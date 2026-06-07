@@ -16,19 +16,23 @@ import type {
 
 declare const vscode: any;
 
-export interface MessageHandlerCallbacks {
+export interface MessageStateCallbacks {
   // State management
   saveAllStates: () => any;
   saveToLocalState: () => void;
   restoreFromState: (state: any, isCold: boolean) => void;
   createDefaultState: () => any;
-  
+}
+
+export interface MessageTerminalCallbacks {
   // Terminal operations
   getActiveTerminal: () => any;
   getTerminals: () => Map<number, any>;
   writeToTerminal: (tabId: number, data: string) => void;
   ensureInitialized: () => void;
-  
+}
+
+export interface MessageTabCallbacks {
   // Tab operations
   createNewTab: (type?: string, cmd?: string | null, cwd?: string | null, shellPath?: string | null) => void;
   closeTab: (tabId: number) => void;
@@ -42,7 +46,9 @@ export interface MessageHandlerCallbacks {
   debugPasteImageBytes: () => void;
   handleGetTabBuffer: (tabId: number) => void;
   saveActiveCommand: () => void;
-  
+}
+
+export interface MessageUiCallbacks {
   // UI updates
   updateTabBarVisibility: () => void;
   updateSaveButtonVisibility: (command: any, isSaved: any) => void;
@@ -53,7 +59,9 @@ export interface MessageHandlerCallbacks {
   handleBell: (tabId: number) => void;
   handleUserVarChange: (vars: Record<string, string>, tabId: number) => void;
   scheduleSaveState: (reason: string) => void;
-  
+}
+
+export interface MessageInternalCallbacks {
   // Internal state
   getSavedCommandsSet: () => Set<string>;
   setSavedCommandsSet: (set: Set<string>) => void;
@@ -66,16 +74,93 @@ export interface MessageHandlerCallbacks {
   setBellAwareTimeout?: (minutes: number) => void;
 }
 
+export type MessageHandlerCallbacks =
+  MessageStateCallbacks &
+  MessageTerminalCallbacks &
+  MessageTabCallbacks &
+  MessageUiCallbacks &
+  MessageInternalCallbacks;
+
 /**
  * Handles message routing from extension host to appropriate callbacks
  */
 export class MessageHandler {
   private callbacks: MessageHandlerCallbacks;
   private vscode: any;
+  private _handlers: Record<string, (message: any) => void>;
 
   constructor(vscode: any, callbacks: MessageHandlerCallbacks) {
     this.vscode = vscode;
     this.callbacks = callbacks;
+    this._handlers = {
+      formatTabTitleResponse: (message) => this.handleFormatTabTitleResponse(message),
+      savedCommandsList: (message) => this.handleSavedCommandsList(message),
+      launchMenuData: (message) => this.handleLaunchMenuData(message),
+      openLaunchMenu: () => this.callbacks.openLaunchMenu(),
+      restoreState: (message) => this.handleRestoreState(message),
+      initializeEmpty: (message) => this.handleInitializeEmpty(message),
+      data: (message) => this.handleData(message),
+      reconnect: () => this.handleRedraw(),
+      redraw: () => this.handleRedraw(),
+      focus: () => {
+        refocusActiveTerminal(
+          this.callbacks.getActiveTerminal(),
+          requestAnimationFrame,
+          () => isXtermTextareaFocused(document.activeElement),
+        );
+      },
+      refresh: () => this.callbacks.resetActiveTerminal(),
+      refreshActive: () => this.handleRefreshActive(),
+      triggerResize: () => window.dispatchEvent(new Event("resize")),
+      requestState: () => this.handleRequestState(this.callbacks.saveAllStates()),
+      processChange: (message) => this.callbacks.handleProcessChange(message.processName, message.tabId),
+      bell: (message) => this.callbacks.handleBell(message.tabId),
+      checkProcessesResponse: (message) => this.callbacks.handleCheckProcessesResponse(message.tabId, message.processes),
+      cwdChange: (message) => this.callbacks.handleCwdChange(message.cwd, message.tabId),
+      userVarChange: (message) => this.callbacks.handleUserVarChange(message.vars, message.tabId),
+      createNewTab: (message) => this.callbacks.createNewTab(message.terminalType, message.launchCommand, message.cwd, message.shellPath),
+      switchToTab: (message) => {
+        if (message.tabId) {
+          this.callbacks.switchToTab(message.tabId);
+        }
+      },
+      updateFileCache: (message) => {
+        (window as any).workspaceFileCache = new Set(message.files || []);
+      },
+      fileExistsResponse: (message) => {
+        Logger.debug("🔍 File exists response:", message.filePath, "->", message.exists);
+      },
+      setDebugFilter: (message) => this.handleSetDebugFilter(message),
+      setDeveloperMode: (message) => this.handleSetDeveloperMode(message),
+      updateConfig: (message) => this.handleUpdateConfig(message),
+      collectPerformance: () => this.callbacks.reportPerformance(),
+      commandSavedResponse: (message) => this.handleCommandSavedResponse(message),
+      renameTab: (message) => {
+        Logger.debug("✏️ Received rename tab request for inline editing:", message.tabId);
+        this.callbacks.startTabRename(message.tabId);
+      },
+      closeTab: (message) => {
+        Logger.debug("❌ Received close tab request:", message.tabId);
+        this.callbacks.closeTab(message.tabId);
+      },
+      setTabIcon: (message) => {
+        Logger.debug("🎨 Received set tab icon request:", message.tabId, message.icon);
+        this.callbacks.setTabIcon(message.tabId, message.icon);
+      },
+      openIconPicker: (message) => {
+        Logger.debug("🎨 Opening icon picker for tab:", message.tabId);
+        this.callbacks.openIconPicker(message.tabId);
+      },
+      debugPasteImageBytes: () => {
+        Logger.debug("🧪 Debug: paste image bytes via bracketed paste");
+        this.callbacks.debugPasteImageBytes();
+      },
+      getTabBuffer: (message) => {
+        Logger.debug("📋 Received get tab buffer request:", message.tabId);
+        this.callbacks.handleGetTabBuffer(message.tabId);
+      },
+      saveCurrentCommand: () => this.callbacks.saveActiveCommand(),
+    };
   }
 
   /**
@@ -94,169 +179,12 @@ export class MessageHandler {
     const message = event.data as ExtToWebviewMessage;
 
     try {
-      switch (message.command) {
-        case "formatTabTitleResponse":
-          this.handleFormatTabTitleResponse(message);
-          break;
-
-        case "savedCommandsList":
-          this.handleSavedCommandsList(message);
-          break;
-
-        case "launchMenuData":
-          this.handleLaunchMenuData(message);
-          break;
-
-        case "openLaunchMenu":
-          this.callbacks.openLaunchMenu();
-          break;
-
-        case "restoreState":
-          this.handleRestoreState(message);
-          break;
-
-        case "initializeEmpty":
-          this.handleInitializeEmpty(message);
-          break;
-
-        case "data":
-          this.handleData(message);
-          break;
-
-        case "reconnect":
-        case "redraw":
-          this.handleRedraw();
-          break;
-
-        case "focus":
-          // Land keyboard focus on the active xterm textarea — the final,
-          // load-bearing step of every reclaim/restore path. Previously this
-          // fetched the active terminal and DISCARDED it (a no-op since the
-          // founding commit), so the FocusGuard reclaim and the serializer's
-          // restore-focus could never actually grab the textarea. See refocus.ts.
-          // The verifier drives a single self-correcting retry: if VS Code
-          // re-fires its own focus (to the integrated terminal) after ours, we
-          // reclaim once more on the next frame.
-          refocusActiveTerminal(
-            this.callbacks.getActiveTerminal(),
-            requestAnimationFrame,
-            () => isXtermTextareaFocused(document.activeElement),
-          );
-          break;
-
-        case "refresh":
-          this.callbacks.resetActiveTerminal();
-          break;
-
-        case "refreshActive":
-          this.handleRefreshActive();
-          break;
-
-        case "triggerResize":
-          window.dispatchEvent(new Event("resize"));
-          break;
-
-        case "requestState":
-          this.handleRequestState(this.callbacks.saveAllStates());
-          break;
-
-        case "processChange":
-          this.callbacks.handleProcessChange(message.processName, message.tabId);
-          break;
-
-        case "bell":
-          this.callbacks.handleBell(message.tabId);
-          break;
-
-        case "checkProcessesResponse":
-          this.callbacks.handleCheckProcessesResponse(message.tabId, message.processes);
-          break;
-
-        case "cwdChange":
-          this.callbacks.handleCwdChange(message.cwd, message.tabId);
-          break;
-
-        case "userVarChange":
-          this.callbacks.handleUserVarChange(message.vars, message.tabId);
-          break;
-
-        case "createNewTab":
-          this.callbacks.createNewTab(message.terminalType, message.launchCommand, message.cwd, message.shellPath);
-          break;
-
-        case "switchToTab":
-          if (message.tabId) {
-            this.callbacks.switchToTab(message.tabId);
-          }
-          break;
-
-        case "updateFileCache":
-          (window as any).workspaceFileCache = new Set(message.files || []);
-          break;
-
-        case "fileExistsResponse":
-          Logger.debug("🔍 File exists response:", message.filePath, "->", message.exists);
-          break;
-
-        case "setDebugFilter":
-          this.handleSetDebugFilter(message);
-          break;
-
-        case "setDeveloperMode":
-          this.handleSetDeveloperMode(message);
-          break;
-
-        case "updateConfig":
-          this.handleUpdateConfig(message);
-          break;
-
-        case "collectPerformance":
-          this.callbacks.reportPerformance();
-          break;
-
-        case "commandSavedResponse":
-          this.handleCommandSavedResponse(message);
-          break;
-
-        case "renameTab":
-          Logger.debug("✏️ Received rename tab request for inline editing:", message.tabId);
-          this.callbacks.startTabRename(message.tabId);
-          break;
-
-        case "closeTab":
-          Logger.debug("❌ Received close tab request:", message.tabId);
-          this.callbacks.closeTab(message.tabId);
-          break;
-
-        case "setTabIcon":
-          Logger.debug("🎨 Received set tab icon request:", message.tabId, message.icon);
-          this.callbacks.setTabIcon(message.tabId, message.icon);
-          break;
-
-        case "openIconPicker":
-          Logger.debug("🎨 Opening icon picker for tab:", message.tabId);
-          this.callbacks.openIconPicker(message.tabId);
-          break;
-
-        case "debugPasteImageBytes":
-          Logger.debug("🧪 Debug: paste image bytes via bracketed paste");
-          this.callbacks.debugPasteImageBytes();
-          break;
-
-        case "getTabBuffer":
-          Logger.debug("📋 Received get tab buffer request:", message.tabId);
-          this.callbacks.handleGetTabBuffer(message.tabId);
-          break;
-
-        case "saveCurrentCommand":
-          this.callbacks.saveActiveCommand();
-          break;
-
-        default:
-          Logger.warn("Unknown command received:", message.command);
-          break;
+      const handler = this._handlers[message.command];
+      if (handler) {
+        handler(message);
+      } else {
+        Logger.warn("Unknown command received:", message.command);
       }
-
     } catch (error) {
       Logger.error("Message handling error:", error);
     }
@@ -380,7 +308,7 @@ export class MessageHandler {
     const liveDaemonUuids = new Set<string>(message.liveDaemonUuids || []);
 
     let stateToRestore: any;
-    if (webviewState?.fullTabState) {
+    if (this.hasRestorableTabState(webviewState?.fullTabState)) {
       Logger.debug("🔄 Using webview state (more recent)");
       stateToRestore = webviewState.fullTabState;
     } else if (message.state) {
@@ -411,7 +339,7 @@ export class MessageHandler {
     Logger.debug("🆕 Received initializeEmpty command - checking for existing state");
 
     const existingState = vscode.getState();
-    if (existingState?.fullTabState) {
+    if (this.hasRestorableTabState(existingState?.fullTabState)) {
       Logger.debug("🔄 Found existing webview state, restoring instead of creating empty");
       this.callbacks.restoreFromState(existingState.fullTabState, !!message.cold);
     } else {
@@ -534,5 +462,10 @@ export class MessageHandler {
     } catch {
       /* ignore */
     }
+  }
+
+  private hasRestorableTabState(state: unknown): boolean {
+    const terminals = (state as { terminals?: unknown } | null | undefined)?.terminals;
+    return Array.isArray(terminals) && terminals.length > 0;
   }
 }
