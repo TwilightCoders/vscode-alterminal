@@ -504,8 +504,6 @@ export class TabManager {
    * Checks for running child processes first and prompts for confirmation.
    */
   closeTab(tabId) {
-    if (this.terminals.size <= 1) return; // Don't close last tab
-
     const terminal = this.terminals.get(tabId);
     if (!terminal) return;
 
@@ -612,11 +610,26 @@ export class TabManager {
       const remainingTabIds = Array.from(this.terminals.keys());
       if (remainingTabIds.length > 0) {
         this.switchToTab(remainingTabIds[0]);
+      } else {
+        this.activeTabId = null;
       }
     }
 
     // Update tab bar visibility
     this.updateTabBarVisibility();
+
+    // If the last tab was closed, clear persisted session state so the next
+    // restore starts fresh instead of reviving a dead session.
+    if (this.terminals.size === 0) {
+      const prior = vscode.getState() || {};
+      vscode.setState({
+        ...prior,
+        timestamp: Date.now(),
+      });
+      this.vscode.postMessage({
+        command: "clearWorkspaceState",
+      } satisfies WebviewToExtMessage);
+    }
 
     // Persist state after closing a tab
     try {

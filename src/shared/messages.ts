@@ -83,6 +83,7 @@ export type WebviewToExtMessage =
   | { command: "newTab"; terminalType?: string }
   // Closes a tab; the host routes this to PtyManager to dispose the PTY.
   | { command: "closeTab"; tabId: number }
+  | { command: "clearWorkspaceState" }
   | { command: "saveCommand"; tabId: number; launchCommand: string; tabLabel: string; iconClass?: string }
   | { command: "launchSavedCommand"; launchCommand: string; label?: string }
   | { command: "openSavedCommandsSettings" }

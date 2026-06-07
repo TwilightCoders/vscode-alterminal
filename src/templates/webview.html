@@ -160,20 +160,24 @@
         }
         
         .tab-launcher {
-            flex: 0 0 42px;
-            min-width: 42px;
-            max-width: 42px;
+            flex: 0 0 36px;
+            min-width: 36px;
+            max-width: 36px;
             justify-content: center;
             padding: 6px 0;
             cursor: pointer;
             color: var(--vscode-tab-inactiveForeground, #cccccc);
-            font-size: 18px;
-            font-weight: 600;
             user-select: none;
             background-color: transparent;
             border-color: transparent;
-            opacity: 0.28;
+            opacity: 0.18;
             transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        }
+
+        .tab-launcher-glyph {
+            font-size: 16px;
+            line-height: 1;
+            transform: translateY(-0.5px);
         }
 
         .tab-launcher:hover {
@@ -194,9 +198,9 @@
         }
 
         .tab-bar.multi-row .tab-launcher {
-            flex: 0 0 42px;
-            max-width: 42px;
-            min-width: 42px;
+            flex: 0 0 36px;
+            max-width: 36px;
+            min-width: 36px;
         }
 
         .container.vertical-tabs .tab-launcher {

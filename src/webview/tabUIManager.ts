@@ -224,7 +224,9 @@ export class TabUIManager {
         if (target.classList.contains("tab-close")) {
           const tab = target.closest(".tab") as HTMLElement | null;
           const tabId = tab?.dataset.tabId ? parseInt(tab.dataset.tabId) : NaN;
-          if (!isNaN(tabId)) this._callbacks.closeTab(tabId);
+          if (!isNaN(tabId) && this.canCloseTab(tab, e)) {
+            this._callbacks.closeTab(tabId);
+          }
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -339,7 +341,7 @@ export class TabUIManager {
             case "Delete":
             case "Backspace":
               const deleteTabId = parseInt(target.dataset.tabId!);
-              if (!isNaN(deleteTabId)) {
+              if (!isNaN(deleteTabId) && this.canCloseTab(target, e)) {
                 this._callbacks.closeTab(deleteTabId);
               }
               e.preventDefault();
@@ -624,9 +626,21 @@ export class TabUIManager {
     slot.setAttribute("tabindex", "0");
     slot.setAttribute("aria-label", "New terminal");
     slot.setAttribute("title", "New terminal");
-    slot.textContent = "+";
+
+    const glyph = document.createElement("span");
+    glyph.className = "tab-launcher-glyph codicon codicon-add";
+    glyph.setAttribute("aria-hidden", "true");
+    slot.appendChild(glyph);
 
     tabList.appendChild(slot);
     this._launchSlot = slot;
+  }
+
+  private canCloseTab(tab: HTMLElement | null, event: MouseEvent | KeyboardEvent): boolean {
+    if (!tab) {
+      return false;
+    }
+
+    return tab.classList.contains("active") || event.altKey;
   }
 }

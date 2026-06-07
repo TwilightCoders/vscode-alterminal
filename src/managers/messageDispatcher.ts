@@ -96,6 +96,9 @@ export class MessageDispatcher {
           this.serializerHandleMessage(msg);
         }
       },
+      clearWorkspaceState: () => {
+        this.stateManager.clearState();
+      },
       stateResponse: (msg) => {
         this.stateManager.saveState(msg.state);
         if (this.serializerHandleMessage) {
