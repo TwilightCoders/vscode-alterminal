@@ -44,6 +44,7 @@ export interface TabUIManagerCallbacks {
   // State management
   scheduleSaveState: (reason: string) => void;
   requestFormattedTitle: (tabId: number) => void;
+  openLaunchMenu: () => void;
 
   // Terminal access
   getTerminal: (tabId: number) => any;
@@ -55,6 +56,7 @@ export class TabUIManager {
   private _callbacks: TabUIManagerCallbacks;
   private _windowBlurHandler: (() => void) | null = null;
   private _container: HTMLElement | null = null;
+  private _launchSlot: HTMLElement | null = null;
 
   constructor(callbacks: TabUIManagerCallbacks) {
     this._callbacks = callbacks;
@@ -65,6 +67,7 @@ export class TabUIManager {
    */
   setup(): void {
     this.initializeEventListeners();
+    this.ensureLaunchSlot();
   }
 
   /**
@@ -73,6 +76,11 @@ export class TabUIManager {
   createTabElement(tabId: number, label: string, vscode: any): void {
     const tabList = document.querySelector(".tab-list");
     if (!tabList) return;
+    this.ensureLaunchSlot();
+    if (!this._launchSlot || this._launchSlot.parentElement !== tabList) {
+      this._launchSlot = null;
+      this.ensureLaunchSlot();
+    }
 
     // Get the terminal to check if it's a command tab
     const terminal = this._callbacks.getTerminal(tabId);
@@ -140,7 +148,7 @@ export class TabUIManager {
     tab.appendChild(closeBtn);
 
     // Append to the end of the tab list
-    tabList.appendChild(tab);
+    tabList.insertBefore(tab, this._launchSlot);
   }
 
   /**
@@ -148,7 +156,7 @@ export class TabUIManager {
    */
   updateActiveTabUI(tabId: number): void {
     // Update all tabs to inactive state
-    document.querySelectorAll(".tab").forEach((tab) => {
+    document.querySelectorAll(".tab[data-tab-id]").forEach((tab) => {
       tab.classList.remove("active");
       tab.setAttribute("aria-selected", "false");
       tab.setAttribute("tabindex", "-1");
@@ -194,10 +202,15 @@ export class TabUIManager {
         const target = e.target as HTMLElement;
         if (
           target.classList.contains("tab") ||
-          target.classList.contains("tab-close")
+          target.classList.contains("tab-close") ||
+          target.classList.contains("tab-launcher")
         ) {
           if (e.key === "Enter" || e.key === " ") {
-            target.click();
+            if (target.classList.contains("tab-launcher")) {
+              this._callbacks.openLaunchMenu();
+            } else {
+              target.click();
+            }
             e.preventDefault();
           }
         }
@@ -212,6 +225,15 @@ export class TabUIManager {
           const tab = target.closest(".tab") as HTMLElement | null;
           const tabId = tab?.dataset.tabId ? parseInt(tab.dataset.tabId) : NaN;
           if (!isNaN(tabId)) this._callbacks.closeTab(tabId);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (
+          target.classList.contains("tab-launcher") ||
+          target.parentElement?.classList.contains("tab-launcher")
+        ) {
+          this._callbacks.openLaunchMenu();
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -439,36 +461,38 @@ export class TabUIManager {
       e.preventDefault();
     });
 
-    tabBar.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!draggedTab) return;
+      tabBar.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!draggedTab) return;
 
-      const target = e.target as HTMLElement;
-      const targetTab = target.closest(".tab") as HTMLElement;
-      if (!targetTab || targetTab === draggedTab) {
-        return;
-      }
+        const target = e.target as HTMLElement;
+        const targetTab = target.closest(".tab") as HTMLElement;
+        if (!targetTab || targetTab === draggedTab) {
+          return;
+        }
 
-      // Track the target for use in dragend
-      lastTargetTab = targetTab;
+        const isLaunchTab = targetTab.classList.contains("tab-launcher");
 
-      // Clear previous indicators
+        // Track the target for use in dragend
+        lastTargetTab = targetTab;
+
+        // Clear previous indicators
       document.querySelectorAll(".tab").forEach((tab) => {
         tab.classList.remove("drag-over-left", "drag-over-right");
       });
 
-      // Determine which side to show the indicator
-      const rect = targetTab.getBoundingClientRect();
-      const midpoint = rect.left + rect.width / 2;
+        // Determine which side to show the indicator
+        const rect = targetTab.getBoundingClientRect();
+        const midpoint = rect.left + rect.width / 2;
 
-      lastInsertBefore = e.clientX < midpoint;
+        lastInsertBefore = isLaunchTab || e.clientX < midpoint;
 
-      if (lastInsertBefore) {
-        targetTab.classList.add("drag-over-left");
-      } else {
-        targetTab.classList.add("drag-over-right");
-      }
+        if (lastInsertBefore) {
+          targetTab.classList.add("drag-over-left");
+        } else {
+          targetTab.classList.add("drag-over-right");
+        }
 
       e.dataTransfer!.dropEffect = "move";
     });
@@ -582,5 +606,27 @@ export class TabUIManager {
       window.removeEventListener("blur", this._windowBlurHandler);
       this._windowBlurHandler = null;
     }
+  }
+
+  private ensureLaunchSlot(): void {
+    if (this._launchSlot?.isConnected) {
+      return;
+    }
+
+    const tabList = document.querySelector(".tab-list");
+    if (!tabList) {
+      return;
+    }
+
+    const slot = document.createElement("li");
+    slot.className = "tab tab-launcher";
+    slot.setAttribute("role", "button");
+    slot.setAttribute("tabindex", "0");
+    slot.setAttribute("aria-label", "New terminal");
+    slot.setAttribute("title", "New terminal");
+    slot.textContent = "+";
+
+    tabList.appendChild(slot);
+    this._launchSlot = slot;
   }
 }

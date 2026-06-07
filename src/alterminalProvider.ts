@@ -13,7 +13,6 @@ import { TabContextMenuHandler } from "./managers/tabContextMenuHandler";
 import { WebViewLifecycleManager } from "./managers/webviewLifecycleManager";
 import { MessageDispatcher } from "./managers/messageDispatcher";
 import { FocusGuard } from "./managers/focusGuard";
-import { ShellDetector } from "./utils/shellDetector";
 import { WebviewViewSerializer } from "./serialization/webviewViewSerializer";
 import { getVersion } from "./version";
 
@@ -76,6 +75,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.configurationWatcher = new ConfigurationWatcher(context);
     this.commandLauncher = new CommandLauncher(
       this._commandManager,
+      () => this._syncLaunchMenuData(),
     );
     this._ptyManager.setCommandExpander((cmd) => this._commandManager.expandCommand(cmd));
     this.fileOperationHandler = new FileOperationHandler(this._ptyManager);
@@ -133,7 +133,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
       }
       this._ptyManager.setSuppressFocusStealing(config.suppressFocusStealingSequences);
       // Reload saved commands so manual settings.json edits take effect
-      this._commandManager.loadSavedCommands();
+      this._commandManager.loadSavedCommands().then(() => this._syncLaunchMenuData());
     });
 
     // Apply current config to PtyManager before watcher starts firing
@@ -384,7 +384,7 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    * Show saved commands picker
    */
   public async showSavedCommands(): Promise<void> {
-    await this.commandLauncher.showSavedCommands();
+    await this.launchCommandPicker();
   }
 
   /**
@@ -406,157 +406,16 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
    */
   public async launchCommandPicker(): Promise<void> {
     try {
-      const shells = ShellDetector.detectShells();
-      const saved = this._commandManager.getSavedCommands();
+      if (this._view?.webview) {
+        await this.openTerminal();
+        this._syncLaunchMenuData();
+        this._view.webview.postMessage({
+          command: "openLaunchMenu",
+        } satisfies ExtToWebviewMessage);
+        return;
+      }
 
-      const qp = vscode.window.createQuickPick<any>();
-      qp.title = "New Terminal";
-      qp.placeholder = "Select a shell, saved command, or type a command";
-      qp.matchOnDescription = true;
-      qp.matchOnDetail = true;
-
-      // Sentinel items
-      const helpSeparator = { label: "Template Variables", kind: vscode.QuickPickItemKind.Separator } as any;
-      const helpItem = {
-        label: "$(symbol-variable) {workspace}  {workspacePath}  {user}  {platform}  {env.VAR}",
-        description: "",
-        detail: "Use these in commands to adapt per-workspace. Supports {key:default} and {key?then:else}.",
-        launchCommand: "",
-        saved: false,
-        isShell: false,
-        alwaysShow: true,
-      };
-      const editItem = {
-        label: "$(edit) Edit Saved Commands\u2026",
-        description: "",
-        detail: "Open settings to add, remove, or modify saved commands",
-        launchCommand: "",
-        saved: false,
-        isShell: false,
-        alwaysShow: true,
-      };
-
-      // Shell items
-      const shellSeparator = { label: "Shells", kind: vscode.QuickPickItemKind.Separator } as any;
-      const shellItems = shells.map((s) => ({
-        label: `$(terminal) ${s.label}${s.isDefault ? " (default)" : ""}`,
-        description: s.path,
-        launchCommand: "",
-        saved: false,
-        isShell: true,
-        shellPath: s.path,
-      }));
-
-      // Saved command items
-      const savedSeparator = saved.length > 0
-        ? { label: "Saved Commands", kind: vscode.QuickPickItemKind.Separator } as any
-        : null;
-
-      const buildItems = (value: string) => {
-        const items: any[] = [];
-
-        // Ad-hoc command if user typed something
-        const trimmed = value.trim();
-        if (trimmed && !saved.some((c) => c.command === trimmed)) {
-          const expanded = this._commandManager.expandCommand(trimmed);
-          const preview = expanded !== trimmed ? `\u2192 ${expanded}` : undefined;
-          items.push({
-            label: `Run: ${trimmed}`,
-            description: "(new command)",
-            detail: preview || "Press Enter to launch",
-            launchCommand: trimmed,
-            saved: false,
-            isShell: false,
-          });
-        }
-
-        // Shells
-        items.push(shellSeparator, ...shellItems);
-
-        // Saved commands
-        if (savedSeparator) {
-          items.push(savedSeparator);
-          for (const c of saved) {
-            const expanded = this._commandManager.expandCommand(c.command);
-            const preview = expanded !== c.command ? `\u2192 ${expanded}` : undefined;
-            const cwdHint = c.cwd ? `  \u2022  cwd: ${c.cwd}` : "";
-            items.push({
-              label: c.label,
-              description: c.command,
-              detail: preview
-                ? `${preview}${cwdHint}  \u2022  Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}`
-                : `Used ${c.count} \u2022 Last ${new Date(c.lastUsed).toLocaleDateString()}${cwdHint}`,
-              launchCommand: c.command,
-              saved: true,
-              isShell: false,
-            });
-          }
-        }
-
-        items.push(helpSeparator, helpItem, editItem);
-        return items;
-      };
-
-      qp.items = buildItems("");
-
-      const disposables: vscode.Disposable[] = [];
-      disposables.push(
-        qp.onDidChangeValue((val: string) => {
-          qp.items = buildItems(val);
-        }),
-        qp.onDidAccept(async () => {
-          const value = qp.value.trim();
-          const sel = qp.selectedItems[0];
-
-          // Handle sentinel items
-          if (sel === editItem && !value) {
-            qp.dispose();
-            // Seed template entries if the setting is empty so users can see the format
-            const config = vscode.workspace.getConfiguration("alterminal");
-            const existing = config.get<unknown[]>("savedCommands", []);
-            if (existing.length === 0) {
-              await config.update("savedCommands", [
-                { label: "Hello World", command: "echo hello" },
-                { label: "Dev Server", command: "npm run dev", cwd: "{workspacePath}" },
-              ], vscode.ConfigurationTarget.Global);
-            }
-            vscode.commands.executeCommand("workbench.action.openSettings", "alterminal.savedCommands");
-            return;
-          }
-          if (sel === helpItem && !value) return;
-
-          // Shell selected
-          if (!value && sel?.isShell) {
-            qp.dispose();
-            this.createNewTab("default", sel.shellPath);
-            return;
-          }
-
-          // Command (typed or selected saved command)
-          const commandToRun = value || (sel && !sel.isShell && sel !== helpItem && sel !== editItem ? sel.launchCommand : "");
-          const savedLabel = (!value && sel) ? sel.label : undefined;
-
-          if (!commandToRun) {
-            // No input, no selection change — open default shell
-            qp.dispose();
-            this.createNewTab();
-            return;
-          }
-
-          qp.busy = true;
-          try {
-            if (saved.some((c) => c.command === commandToRun)) {
-              await this._commandManager.launchSavedCommand(commandToRun, savedLabel);
-            } else {
-              this.createNewTabWithCommand(commandToRun);
-            }
-          } finally {
-            qp.dispose();
-          }
-        }),
-        qp.onDidHide(() => qp.dispose()),
-      );
-      qp.show();
+      await this.commandLauncher.launchCommandPicker();
     } catch (error) {
       Logger.error("Failed to open launch command picker:", error);
       vscode.window.showErrorMessage("Unable to open command launcher");
@@ -605,5 +464,12 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.focusGuard.detach();
     this._ptyManager.dispose();
     this.configurationWatcher.dispose();
+  }
+
+  private _syncLaunchMenuData(): void {
+    if (!this._view?.webview) {
+      return;
+    }
+    this.webviewLifecycleManager.pushCommandData(this._view.webview);
   }
 }

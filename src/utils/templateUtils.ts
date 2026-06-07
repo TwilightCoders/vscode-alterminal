@@ -78,6 +78,7 @@ export class TemplateUtils {
     const tabUIManagerUri = getWebviewScriptUri("tabUIManager.js");
     const layoutManagerUri = getWebviewScriptUri("layoutManager.js");
     const tabManagerUri = getWebviewScriptUri("tabManager.js");
+    const launchMenuModalUri = getWebviewScriptUri("launchMenuModal.js");
     const dragDropHandlerUri = getWebviewScriptUri("dragDropHandler.js");
     const initUri = getWebviewScriptUri("init.js");
 
@@ -150,6 +151,7 @@ export class TemplateUtils {
       tabUIManagerUri,
       layoutManagerUri,
       tabManagerUri,
+      launchMenuModalUri,
       dragDropHandlerUri,
       initUri,
     };

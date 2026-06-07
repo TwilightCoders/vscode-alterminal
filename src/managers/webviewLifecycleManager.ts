@@ -7,6 +7,8 @@ import { MessageDispatcher } from "./messageDispatcher";
 import { TemplateUtils } from "../utils/templateUtils";
 import { Logger } from "../utils/logger";
 import { CommandManager } from "../utils/commandManager";
+import { ShellDetector } from "../utils/shellDetector";
+import type { LaunchMenuData } from "../shared/messages";
 
 /**
  * WebViewLifecycleManager
@@ -117,18 +119,7 @@ export class WebViewLifecycleManager {
     // Check for developer mode
     this.onDeveloperModeCheck();
 
-    // Send saved commands list so webview can hide Save Command where appropriate
-    try {
-      const saved = this.commandManager
-        .getSavedCommands()
-        .map((c) => c.command);
-      webview.postMessage({
-        command: "savedCommandsList",
-        commands: saved,
-      } satisfies ExtToWebviewMessage);
-    } catch (e) {
-      Logger.warn("Failed sending savedCommandsList", e);
-    }
+    this.pushCommandData(webview);
 
     // Send configuration to webview
     webview.postMessage({
@@ -145,6 +136,27 @@ export class WebViewLifecycleManager {
       command: "updateConfig",
       config: this._buildWebviewConfig(),
     } satisfies ExtToWebviewMessage);
+  }
+
+  /**
+   * Send the current shell and saved-command launch data to the webview.
+   * This keeps the launch menu and save-button state in sync after saves,
+   * launches, and initial ready/restore.
+   */
+  public pushCommandData(webview: vscode.Webview): void {
+    try {
+      const launchMenuData = this._buildLaunchMenuData();
+      webview.postMessage({
+        command: "savedCommandsList",
+        commands: launchMenuData.savedCommands.map((cmd) => cmd.command),
+      } satisfies ExtToWebviewMessage);
+      webview.postMessage({
+        command: "launchMenuData",
+        data: launchMenuData,
+      } satisfies ExtToWebviewMessage);
+    } catch (e) {
+      Logger.warn("Failed sending launch menu data", e);
+    }
   }
 
   private _buildWebviewConfig() {
@@ -169,6 +181,19 @@ export class WebViewLifecycleManager {
         minimumContrastRatio: c.minimumContrastRatio,
         wordSeparators: c.wordSeparators,
       },
+    };
+  }
+
+  private _buildLaunchMenuData(): LaunchMenuData {
+    return {
+      shells: ShellDetector.detectShells(),
+      savedCommands: this.commandManager.getSavedCommands().map((cmd) => ({
+        command: cmd.command,
+        label: cmd.label,
+        count: cmd.count,
+        lastUsed: cmd.lastUsed,
+        cwd: cmd.cwd,
+      })),
     };
   }
 

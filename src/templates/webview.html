@@ -159,31 +159,51 @@
             cursor: grabbing;
         }
         
-        .tab-new {
-            display: flex;
-            align-items: center;
+        .tab-launcher {
+            flex: 0 0 42px;
+            min-width: 42px;
+            max-width: 42px;
             justify-content: center;
+            padding: 6px 0;
             cursor: pointer;
-            background-color: transparent;
             color: var(--vscode-tab-inactiveForeground, #cccccc);
-            border: none;
-            min-width: 28px;
-            transition: all 0.2s ease;
-            font-size: 16px;
-            font-weight: bold;
-            padding: 6px 10px;
-            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
+            font-size: 18px;
+            font-weight: 600;
+            user-select: none;
+            background-color: transparent;
+            border-color: transparent;
+            opacity: 0.28;
+            transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
         }
-        
-        .container.vertical-tabs .tab-new {
-            border-right: none;
-            border-bottom: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
-            width: 100%;
-        }
-        
-        .tab-new:hover {
-            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+
+        .tab-launcher:hover {
+            opacity: 1;
             color: var(--vscode-tab-activeForeground, #ffffff);
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+            border-color: rgba(128, 128, 128, 0.2);
+        }
+
+        .tab-launcher:focus,
+        .tab-launcher:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder, #007ACC);
+            outline-offset: -2px;
+            opacity: 1;
+            color: var(--vscode-tab-activeForeground, #ffffff);
+            background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
+            border-color: rgba(128, 128, 128, 0.2);
+        }
+
+        .tab-bar.multi-row .tab-launcher {
+            flex: 0 0 42px;
+            max-width: 42px;
+            min-width: 42px;
+        }
+
+        .container.vertical-tabs .tab-launcher {
+            width: 100%;
+            min-width: 0;
+            max-width: none;
+            flex: 0 0 auto;
         }
         
         .tab-label {
@@ -652,6 +672,157 @@
             outline-offset: 1px;
         }
 
+        /* Launch menu modal */
+        .launch-menu-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 72px 16px 16px;
+            z-index: 10002;
+        }
+        .launch-menu-dialog {
+            background: var(--vscode-editor-background, #1e1e1e);
+            border: 1px solid var(--vscode-widget-border, #454545);
+            border-radius: 8px;
+            padding: 16px;
+            width: min(760px, 92vw);
+            max-height: min(80vh, 680px);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        .launch-menu-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--vscode-foreground);
+            margin-bottom: 10px;
+        }
+        .launch-menu-search {
+            padding: 6px 10px;
+            font: inherit;
+            font-size: 13px;
+            color: var(--vscode-input-foreground);
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, #454545));
+            border-radius: 4px;
+            outline: none;
+            margin-bottom: 10px;
+        }
+        .launch-menu-search:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+        .launch-menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            min-height: 0;
+            flex: 1 1 auto;
+            padding-right: 2px;
+        }
+        .launch-menu-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .launch-menu-section-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--vscode-descriptionForeground, #999);
+            margin: 2px 2px 0;
+        }
+        .launch-menu-section-body {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .launch-menu-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 10px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--vscode-foreground);
+            text-align: left;
+            cursor: pointer;
+            font: inherit;
+        }
+        .launch-menu-item:hover {
+            background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+            border-color: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+        }
+        .launch-menu-item:focus,
+        .launch-menu-item:focus-visible {
+            outline: none;
+            border-color: var(--vscode-focusBorder);
+            box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+        }
+        .launch-menu-item-static {
+            cursor: default;
+            opacity: 0.95;
+        }
+        .launch-menu-item-static:hover {
+            background: transparent;
+            border-color: transparent;
+        }
+        .launch-menu-item-icon {
+            margin-top: 2px;
+            width: 16px;
+            min-width: 16px;
+            font-size: 16px;
+            color: var(--vscode-descriptionForeground, #999);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .launch-menu-item-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+        .launch-menu-item-label {
+            font-size: 13px;
+            color: var(--vscode-foreground);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .launch-menu-item-description {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground, #999);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .launch-menu-item-detail {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #999);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .launch-menu-empty {
+            padding: 16px 4px;
+            text-align: center;
+            color: var(--vscode-descriptionForeground, #999);
+            font-size: 12px;
+        }
+        .launch-menu-status {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #999);
+            min-height: 1em;
+        }
+
         /* Icon picker modal */
         .icon-picker-overlay {
             position: fixed;
@@ -875,6 +1046,7 @@
             "./keyboardManager.js": "{{keyboardManagerUri}}",
             "./tabUIManager.js": "{{tabUIManagerUri}}",
             "./layoutManager.js": "{{layoutManagerUri}}",
+            "./launchMenuModal.js": "{{launchMenuModalUri}}",
             "./tabManager.js": "{{tabManagerUri}}",
             "./dragDropHandler.js": "{{dragDropHandlerUri}}",
             "./init.js": "{{initUri}}"
@@ -890,6 +1062,7 @@
     <script type="module" src="{{keyboardManagerUri}}"></script>
     <script type="module" src="{{tabUIManagerUri}}"></script>
     <script type="module" src="{{layoutManagerUri}}"></script>
+    <script type="module" src="{{launchMenuModalUri}}"></script>
     <script type="module" src="{{tabManagerUri}}"></script>
     <script type="module" src="{{dragDropHandlerUri}}"></script>
     <script type="module" src="{{initUri}}"></script>

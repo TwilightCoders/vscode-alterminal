@@ -11,6 +11,7 @@ import type {
   ExtToWebviewMessage,
   WebviewToExtMessage,
   ExtractByCommand,
+  LaunchMenuData,
 } from "../shared/messages.js";
 
 declare const vscode: any;
@@ -36,6 +37,8 @@ export interface MessageHandlerCallbacks {
   startTabRename: (tabId: number) => void;
   setTabIcon: (tabId: number, icon: string) => void;
   openIconPicker: (tabId: number) => void;
+  setLaunchMenuData: (data: LaunchMenuData) => void;
+  openLaunchMenu: () => void;
   debugPasteImageBytes: () => void;
   handleGetTabBuffer: (tabId: number) => void;
   saveActiveCommand: () => void;
@@ -98,6 +101,14 @@ export class MessageHandler {
 
         case "savedCommandsList":
           this.handleSavedCommandsList(message);
+          break;
+
+        case "launchMenuData":
+          this.handleLaunchMenuData(message);
+          break;
+
+        case "openLaunchMenu":
+          this.callbacks.openLaunchMenu();
           break;
 
         case "restoreState":
@@ -285,6 +296,32 @@ export class MessageHandler {
       }
     } catch (e) {
       Logger.warn("Failed to handle savedCommandsList:", e);
+    }
+  }
+
+  private handleLaunchMenuData(
+    message: ExtractByCommand<ExtToWebviewMessage, "launchMenuData">,
+  ): void {
+    try {
+      this.callbacks.setLaunchMenuData(message.data);
+
+      const savedSet = new Set<string>(
+        message.data.savedCommands.map((cmd) => cmd.command),
+      );
+      this.callbacks.setSavedCommandsSet(savedSet);
+
+      for (const [id, term] of this.callbacks.getTerminals()) {
+        if (term.launchCommand && savedSet.has(term.launchCommand)) {
+          const tabEl = document.querySelector(`.tab[data-tab-id="${id}"]`);
+          if (tabEl) {
+            const ctx = JSON.parse(tabEl.getAttribute("data-vscode-context") || "{}");
+            ctx.savedCommand = true;
+            tabEl.setAttribute("data-vscode-context", JSON.stringify(ctx));
+          }
+        }
+      }
+    } catch (e) {
+      Logger.warn("Failed to handle launchMenuData:", e);
     }
   }
 

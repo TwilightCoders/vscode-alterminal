@@ -6,6 +6,7 @@ import { KeyboardManager } from "./keyboardManager.js";
 import { TabUIManager, TabUIManagerCallbacks } from "./tabUIManager.js";
 import { LayoutManager, LayoutManagerCallbacks } from "./layoutManager.js";
 import { IconPickerModal } from "./iconPickerModal.js";
+import { LaunchMenuModal } from "./launchMenuModal.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { BellAwareTracker } from "./bellAwareTracker.js";
 import { SearchBar } from "./searchBar.js";
@@ -54,6 +55,7 @@ export class TabManager {
   private _tabUIManager: TabUIManager;
   private _layoutManager: LayoutManager;
   private _iconPickerModal: IconPickerModal;
+  private _launchMenuModal: LaunchMenuModal;
   private _visibilityHandler: (() => void) | null = null;
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingTitleOpts = new Map<number, Record<string, any>>();
@@ -86,6 +88,22 @@ export class TabManager {
 
     // Icon picker modal — full codicon grid, replaces the old 12-item QuickPick.
     this._iconPickerModal = new IconPickerModal((tabId, icon) => this.setTabIcon(tabId, icon));
+    this._launchMenuModal = new LaunchMenuModal({
+      launchShell: (shellPath) => this.createNewTab("default", null, null, shellPath),
+      launchCustomCommand: (command) => this.createNewTab("command", command),
+      launchSavedCommand: (launchCommand, label) => {
+        this.vscode.postMessage({
+          command: "launchSavedCommand",
+          launchCommand,
+          label,
+        } satisfies WebviewToExtMessage);
+      },
+      openSavedCommandsSettings: () => {
+        this.vscode.postMessage({
+          command: "openSavedCommandsSettings",
+        } satisfies WebviewToExtMessage);
+      },
+    });
 
     // Initialize message handler with callbacks
     this._messageHandler = new MessageHandler(vscode, this._createMessageCallbacks());
@@ -170,6 +188,8 @@ export class TabManager {
       startTabRename: (tabId) => this.startTabRename(tabId),
       setTabIcon: (tabId, icon) => this.setTabIcon(tabId, icon),
       openIconPicker: (tabId) => this._iconPickerModal.open(tabId),
+      setLaunchMenuData: (data) => this._launchMenuModal.setData(data),
+      openLaunchMenu: () => this._launchMenuModal.open(),
       debugPasteImageBytes: () => this._debugPasteImageBytes(),
       handleGetTabBuffer: (tabId) => this.handleGetTabBuffer(tabId),
       updateTabBarVisibility: () => this.updateTabBarVisibility(),
@@ -214,6 +234,7 @@ export class TabManager {
       openTabSettings: (tabId) => this.openTabSettings(tabId),
       scheduleSaveState: (reason) => this.scheduleSaveState(reason),
       requestFormattedTitle: (tabId) => this.requestFormattedTitle(tabId),
+      openLaunchMenu: () => this._launchMenuModal.open(),
       getTerminal: (tabId) => this.terminals.get(tabId),
       getSavedCommandsSet: () => this._savedCommandsSet,
       getTitleManagers: () => this.titleManagers,
@@ -988,6 +1009,10 @@ export class TabManager {
     if (tabBar) {
       tabBar.querySelectorAll(".tab").forEach((tab) => tab.remove());
     }
+
+    // The launcher is removed with the rest of the tab strip. Rebuild it on
+    // the next insertion so restore doesn't keep a stale reference.
+    (this._tabUIManager as any)._launchSlot = null;
   }
 
   /**

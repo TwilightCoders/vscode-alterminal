@@ -37,6 +37,8 @@ export type ExtToWebviewMessage =
   | { command: "stateResponse"; state: unknown }
   // The webview reads `commands` as a flat list of command strings.
   | { command: "savedCommandsList"; commands: string[] }
+  | { command: "launchMenuData"; data: LaunchMenuData }
+  | { command: "openLaunchMenu" }
   | { command: "commandSavedResponse"; launchCommand: string; isSaved: boolean }
   | { command: "formatTabTitleResponse"; tabId: number; title: string }
   // Tab control echoed back to the webview (sent by context-menu / command handlers)
@@ -82,6 +84,8 @@ export type WebviewToExtMessage =
   // Closes a tab; the host routes this to PtyManager to dispose the PTY.
   | { command: "closeTab"; tabId: number }
   | { command: "saveCommand"; tabId: number; launchCommand: string; tabLabel: string; iconClass?: string }
+  | { command: "launchSavedCommand"; launchCommand: string; label?: string }
+  | { command: "openSavedCommandsSettings" }
   | { command: "checkCommandSaved"; launchCommand: string }
   | { command: "checkProcesses"; tabId: number }
   // Sent with the full render context; the host reads each field individually.
@@ -150,6 +154,19 @@ export interface SavedCommand {
   label?: string;
   count?: number;
   iconClass?: string;
+  lastUsed?: string;
+  cwd?: string;
+}
+
+export interface LaunchMenuShell {
+  label: string;
+  path: string;
+  isDefault: boolean;
+}
+
+export interface LaunchMenuData {
+  shells: LaunchMenuShell[];
+  savedCommands: SavedCommand[];
 }
 
 export interface PerformanceData {

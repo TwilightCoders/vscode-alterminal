@@ -21,7 +21,11 @@ function makeHarness(opts: { canHandle?: (cmd: string) => boolean } = {}) {
       canHandle: opts.canHandle ?? (() => false),
       handleMessage: spy(),
     },
-    commandLauncher: { handleSaveCommand: spy(), handleCheckCommandSaved: spy() },
+    commandLauncher: {
+      handleSaveCommand: spy(),
+      handleCheckCommandSaved: spy(),
+      handleLaunchSavedCommand: spy(),
+    },
     fileOperationHandler: { handleDroppedFile: spy(), handleOpenFile: spy(), handleOpenUrl: spy() },
     tabContextMenuHandler: { handleBufferContentResponse: spy() },
     stateManager: { saveMetadata: spy(), saveBuffers: spy(), deleteBuffer: spy(), saveState: spy() },
@@ -119,6 +123,12 @@ suite("MessageDispatcher", () => {
     const { fakes, fire } = makeHarness();
     fire({ command: "saveCommand", tabId: 1, launchCommand: "npm test", tabLabel: "Tests" });
     assert.deepEqual(fakes.commandLauncher.handleSaveCommand.calls[0], [1, "npm test", "Tests"]);
+  });
+
+  test("routes launchSavedCommand to commandLauncher", () => {
+    const { fakes, fire } = makeHarness();
+    fire({ command: "launchSavedCommand", launchCommand: "npm test", label: "Tests" });
+    assert.deepEqual(fakes.commandLauncher.handleLaunchSavedCommand.calls[0], ["npm test", "Tests"]);
   });
 
   test("routes bufferContent to tabContextMenuHandler", () => {

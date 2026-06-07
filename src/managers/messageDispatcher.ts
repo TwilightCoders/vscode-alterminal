@@ -126,10 +126,20 @@ export class MessageDispatcher {
           msg.launchCommand,
           msg.tabLabel,
         ),
+      launchSavedCommand: (msg) =>
+        this.commandLauncher.handleLaunchSavedCommand(
+          msg.launchCommand,
+          msg.label,
+        ),
       checkCommandSaved: (msg) =>
         this.commandLauncher.handleCheckCommandSaved(
           msg.launchCommand,
           alterminal.webview,
+        ),
+      openSavedCommandsSettings: () =>
+        vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "alterminal.savedCommands",
         ),
       formatTabTitle: (msg) => this.onFormatTabTitle(msg),
       bufferContent: (msg) =>

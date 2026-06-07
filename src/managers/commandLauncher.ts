@@ -16,6 +16,7 @@ import { Logger } from "../utils/logger";
 export class CommandLauncher {
   constructor(
     private readonly commandManager: CommandManager,
+    private readonly onCommandsChanged?: () => Promise<void> | void,
   ) {}
 
   /**
@@ -97,11 +98,34 @@ export class CommandLauncher {
       );
 
       Logger.info(`Command saved from tab ${tabId}: ${launchCommand}`);
+      await this.onCommandsChanged?.();
     } catch (error) {
       Logger.error("Failed to save command:", error);
       vscode.window.showErrorMessage(
         "Failed to save command. Please try again.",
       );
+    }
+  }
+
+  /**
+   * Launch a saved command requested by the webview launch menu.
+   */
+  public async handleLaunchSavedCommand(
+    launchCommand: string,
+    label?: string,
+  ): Promise<void> {
+    try {
+      if (!launchCommand) {
+        Logger.warn("Cannot launch saved command: no launch command provided");
+        return;
+      }
+
+      await this.commandManager.launchSavedCommand(launchCommand, label);
+      await this.onCommandsChanged?.();
+      Logger.info(`Launching saved command from webview: ${launchCommand}`);
+    } catch (error) {
+      Logger.error("Failed to launch saved command from webview:", error);
+      vscode.window.showErrorMessage("Failed to launch saved command");
     }
   }
 
