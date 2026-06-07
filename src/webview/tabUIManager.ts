@@ -627,10 +627,15 @@ export class TabUIManager {
     slot.setAttribute("aria-label", "New terminal");
     slot.setAttribute("title", "New terminal");
 
+    const icon = document.createElement("div");
+    icon.className = "tab-launcher-icon tab-icon";
+    icon.setAttribute("aria-hidden", "true");
+
     const glyph = document.createElement("span");
-    glyph.className = "tab-launcher-glyph codicon codicon-add";
-    glyph.setAttribute("aria-hidden", "true");
-    slot.appendChild(glyph);
+    glyph.className = "codicon codicon-diff-added";
+    icon.appendChild(glyph);
+
+    slot.appendChild(icon);
 
     tabList.appendChild(slot);
     this._launchSlot = slot;
