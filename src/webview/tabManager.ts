@@ -10,6 +10,7 @@ import { LaunchMenuModal } from "./launchMenuModal.js";
 import { Debouncer } from "../utils/debouncer.js";
 import { BellAwareTracker } from "./bellAwareTracker.js";
 import { SearchBar } from "./searchBar.js";
+import { TabSessionCoordinator } from "./tabSessionCoordinator.js";
 import type { WebviewToExtMessage } from "../shared/messages.js";
 
 /**
@@ -56,6 +57,7 @@ export class TabManager {
   private _layoutManager: LayoutManager;
   private _iconPickerModal: IconPickerModal;
   private _launchMenuModal: LaunchMenuModal;
+  private _tabSessionCoordinator: TabSessionCoordinator;
   private _visibilityHandler: (() => void) | null = null;
   private _dirtySaveTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingTitleOpts = new Map<number, Record<string, any>>();
@@ -104,6 +106,8 @@ export class TabManager {
         } satisfies WebviewToExtMessage);
       },
     });
+
+    this._tabSessionCoordinator = new TabSessionCoordinator(this);
 
     // Initialize message handler with callbacks
     this._messageHandler = new MessageHandler(vscode, this._createMessageCallbacks());
@@ -309,6 +313,45 @@ export class TabManager {
       if (term.launchCommand === cmd) return id;
     }
     return null;
+  }
+
+  /**
+   * Rebuild the launcher sentinel after a full tab-strip reset.
+   */
+  public resetLaunchSlot(): void {
+    this._tabUIManager.resetLaunchSlot();
+  }
+
+  /**
+   * Rebuild a tab DOM element with the current UI manager.
+   */
+  public createTabElement(tabId: number, label: string): void {
+    this._tabUIManager.createTabElement(tabId, label, this.vscode);
+  }
+
+  /**
+   * Wire bell/activity callbacks for a restored or created terminal.
+   */
+  public wireBellHandler(terminal: TerminalInstance): void {
+    this._wireBellHandler(terminal);
+  }
+
+  public getHistoryBannerShownEver(): boolean {
+    return this._historyBannerShownEver;
+  }
+
+  public setHistoryBannerShownEver(val: boolean): void {
+    this._historyBannerShownEver = val;
+  }
+
+  /**
+   * Cancel the init fallback timer after a successful restore.
+   */
+  public clearInitTimeout(): void {
+    if (this._initTimeoutId) {
+      clearTimeout(this._initTimeoutId);
+      this._initTimeoutId = null;
+    }
   }
 
   _recordTerminalTiming(id) {
@@ -534,19 +577,36 @@ export class TabManager {
     // Use a simple modal overlay in the webview
     const overlay = document.createElement("div");
     overlay.className = "close-confirm-overlay";
-    overlay.innerHTML = `
-      <div class="close-confirm-dialog">
-        <div class="close-confirm-title">Terminate running processes?</div>
-        <div class="close-confirm-body">Closing this tab will terminate: <strong>${processNames}</strong></div>
-        <div class="close-confirm-actions">
-          <button class="close-confirm-cancel">Cancel</button>
-          <button class="close-confirm-terminate">Terminate</button>
-        </div>
-      </div>
-    `;
+    const dialog = document.createElement("div");
+    dialog.className = "close-confirm-dialog";
 
-    const cancel = overlay.querySelector(".close-confirm-cancel") as HTMLElement;
-    const terminate = overlay.querySelector(".close-confirm-terminate") as HTMLElement;
+    const title = document.createElement("div");
+    title.className = "close-confirm-title";
+    title.textContent = "Terminate running processes?";
+
+    const body = document.createElement("div");
+    body.className = "close-confirm-body";
+    body.append("Closing this tab will terminate: ");
+    const strong = document.createElement("strong");
+    strong.textContent = processNames;
+    body.appendChild(strong);
+
+    const actions = document.createElement("div");
+    actions.className = "close-confirm-actions";
+
+    const cancel = document.createElement("button");
+    cancel.className = "close-confirm-cancel";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+
+    const terminate = document.createElement("button");
+    terminate.className = "close-confirm-terminate";
+    terminate.type = "button";
+    terminate.textContent = "Terminate";
+
+    actions.append(cancel, terminate);
+    dialog.append(title, body, actions);
+    overlay.appendChild(dialog);
 
     const dismiss = () => overlay.remove();
 
@@ -621,11 +681,7 @@ export class TabManager {
     // If the last tab was closed, clear persisted session state so the next
     // restore starts fresh instead of reviving a dead session.
     if (this.terminals.size === 0) {
-      const prior = vscode.getState() || {};
-      vscode.setState({
-        ...prior,
-        timestamp: Date.now(),
-      });
+      this.saveToLocalState();
       this.vscode.postMessage({
         command: "clearWorkspaceState",
       } satisfies WebviewToExtMessage);
@@ -894,310 +950,28 @@ export class TabManager {
    * Save state of all terminals (using WebviewViewSerializer format)
    */
   saveAllStates() {
-    Logger.debug(
-      "TabManager.saveAllStates() - Current terminals:",
-      this.terminals.size,
-    );
-    const terminals = [];
-    // Map prior persisted buffer by id so we don't erase history when serialize is suppressed
-    let priorContentById = new Map();
-    try {
-      const priorState = vscode.getState && vscode.getState();
-      if (
-        priorState &&
-        priorState.fullTabState &&
-        Array.isArray(priorState.fullTabState.terminals)
-      ) {
-        for (const t of priorState.fullTabState.terminals) {
-          // Support both old and new property names during migration
-          priorContentById.set(t.id, t.buffer || "");
-        }
-      }
-    } catch (e) {
-      Logger.warn("Could not read prior state for preservation:", e);
-    }
-
-    // Get tabs in DOM order to preserve user's reordering
-    const tabElements = document.querySelectorAll<HTMLElement>(".tab");
-    const tabIdsInOrder = Array.from(tabElements)
-      .map((tab) => parseInt(tab.dataset.tabId ?? "0", 10))
-      .filter((id) => !isNaN(id));
-
-    // Iterate in DOM order instead of Map order
-    for (const id of tabIdsInOrder) {
-      const terminal = this.terminals.get(id);
-      if (!terminal) continue;
-
-      // getState() calls serialize() internally for eligible terminals.
-      // For empty results, fall back to previously persisted buffer content.
-      const terminalData = terminal.getState();
-
-      if (!terminal.launchCommand && !terminalData.buffer && priorContentById.has(id)) {
-        const preserved = priorContentById.get(id);
-        if (preserved && preserved.length > 0) {
-          Logger.debug(
-            `🛟 Preserving prior snapshot for terminal ${id} (len=${preserved.length}) due to empty serialize()`,
-          );
-          terminalData.buffer = preserved;
-        }
-      }
-
-      // Get icon from title manager
-      const titleManager = this.titleManagers.get(id);
-      if (titleManager && titleManager.icon) {
-        terminalData.icon = titleManager.icon;
-      }
-
-      terminals.push(terminalData);
-    }
-
-    const state = {
-      terminals: terminals,
-      activeTabId: this.activeTabId,
-      timestamp: Date.now(),
-    };
-
-    Logger.debug("Final state being saved:", {
-      terminalCount: terminals.length,
-      activeTabId: this.activeTabId,
-    });
-    return state;
+    return this._tabSessionCoordinator.saveAllStates();
   }
 
   /**
    * Create a default state with one terminal
    */
   createDefaultState() {
-    return {
-      terminals: [
-        {
-          id: 1,
-          label: "Terminal",
-          buffer: "", // unified property name for serialized content
-          terminalType: "default",
-        },
-      ],
-      activeTabId: 1,
-      timestamp: Date.now(),
-    };
+    return this._tabSessionCoordinator.createDefaultState();
   }
 
   /**
    * Restore terminals from saved state
    */
   restoreFromState(savedState, isColdBoot = false) {
-    Logger.debug("TabManager.restoreFromState() called with:", {
-      hasState: !!savedState,
-      terminalCount: savedState?.terminals?.length,
-    });
-
-    // If no state or empty state, manufacture a default state
-    if (!savedState?.terminals?.length) {
-      Logger.warn("No valid saved state, manufacturing default state");
-      savedState = this.createDefaultState();
-    }
-
-    this._clearExistingState();
-
-    // Recreate terminals from saved state (in the saved order)
-    for (const terminalData of savedState.terminals) {
-      this._restoreSingleTerminal(terminalData, isColdBoot);
-    }
-
-    this._activateRestoredTab(savedState.activeTabId);
-    this._finalizeRestore(savedState);
-  }
-
-  /**
-   * Dispose existing terminals and clear tab UI before restore.
-   */
-  private _clearExistingState(): void {
-    if (this.terminals.size > 0) {
-      this.dispose();
-    }
-    this.terminals.clear();
-    this.activeTabId = null;
-
-    const tabBar = document.getElementById("tab-bar");
-    if (tabBar) {
-      tabBar.querySelectorAll(".tab").forEach((tab) => tab.remove());
-    }
-
-    // The launcher is removed with the rest of the tab strip. Rebuild it on
-    // the next insertion so restore doesn't keep a stale reference.
-    (this._tabUIManager as any)._launchSlot = null;
-  }
-
-  /**
-   * Recreate a single terminal from saved state data.
-   */
-  private _restoreSingleTerminal(terminalData: any, isColdBoot: boolean): void {
-    const terminal = new TerminalInstance(
-      terminalData.id,
-      terminalData.label,
-      this.vscode,
-      this.terminalTheme,
-      this.getThemeColor,
-      terminalData.terminalType || "default",
-      { autoStartPty: false, uuid: terminalData.uuid },
-    );
-
-    // Create container and attach
-    const container = this.createTerminalContainer(terminalData.id);
-    terminal.attachToContainer(container);
-
-    // Inject cold boot banner before restore
-    if (isColdBoot && !terminalData.launchCommand && terminalData.buffer) {
-      terminalData.buffer +=
-        "\n\n\x1b[47m\x1b[30m * \x1b[0m\x1b[48;5;69m\x1b[30m History restored \x1b[0m\n\n";
-    }
-
-    // Restore terminal state (label, terminalType, launchCommand, modes, buffer)
-    terminal.restoreFromState(terminalData);
-
-    // Start deferred PTY after terminal is ready
-    if (terminal.whenOpened && typeof terminal.whenOpened.then === "function") {
-      terminal.whenOpened.then(() => {
-        try { terminal.startDeferredPtyIfNeeded(); }
-        catch (e) { Logger.error("Deferred PTY start error:", e); }
-        try {
-          const snap = terminal.serialize();
-          if (snap?.length) {
-            Logger.debug(`Anchored snapshot post-open for terminal ${terminal.id} (chars=${snap.length})`);
-          }
-        } catch (e) { Logger.warn("Failed to update tab context:", e); }
-      });
-    } else {
-      try { terminal.startDeferredPtyIfNeeded(); }
-      catch (e) { Logger.error("Deferred PTY start error (no whenOpened):", e); }
-    }
-
-    // Track next available ID
-    if (terminalData.id >= this.nextTabId) {
-      this.nextTabId = terminalData.id + 1;
-    }
-
-    this.terminals.set(terminalData.id, terminal);
-    this._wireBellHandler(terminal);
-
-    // Create tab UI element
-    this._tabUIManager.createTabElement(
-      terminalData.id,
-      terminalData.label || "Terminal",
-      this.vscode,
-    );
-
-    // Re-render the template with current context
-    try { this.requestFormattedTitle(terminalData.id); }
-    catch (e) { Logger.warn("Failed to render title on restore:", e); }
-  }
-
-  /**
-   * Wait for all terminals to open, then switch to the saved active tab.
-   */
-  private _activateRestoredTab(savedActiveTabId: number | null): void {
-    const targetId = savedActiveTabId && this.terminals.has(savedActiveTabId)
-      ? savedActiveTabId
-      : Array.from(this.terminals.keys())[0];
-
-    if (targetId) {
-      const allOpenPromises = Array.from(this.terminals.values())
-        .map((t) => t.whenOpened.catch(() => {}));
-      Promise.all(allOpenPromises).then(() => {
-        this.switchToTab(targetId);
-      });
-    }
-  }
-
-  /**
-   * Show interface, persist state, and clean up init timeout after restore.
-   */
-  private _finalizeRestore(savedState: any): void {
-    this._layoutManager.showInterface();
-
-    if (this._initTimeoutId) {
-      clearTimeout(this._initTimeoutId);
-      this._initTimeoutId = null;
-    }
-
-    const existing = vscode.getState() || {};
-    vscode.setState({
-      ...existing,
-      fullTabState: savedState,
-      timestamp: Date.now(),
-    });
-
-    this.saveToLocalState();
-    Logger.debug("Restore complete -", this.terminals.size, "terminals, active tab:", this.activeTabId);
+    return this._tabSessionCoordinator.restoreFromState(savedState, isColdBoot);
   }
 
   /**
    * Save state synchronously to webview storage
    */
   saveToLocalState() {
-    try {
-      // DEFENSIVE: Never save empty state - we always have at least 1 tab
-      if (this.terminals.size === 0) {
-        Logger.debug("🛡️ Skipping save - no terminals yet (probably not restored)");
-        return;
-      }
-
-      const fullState = this.saveAllStates();
-      Logger.debug(
-        "TabManager saving state synchronously:",
-        fullState ? `${fullState.terminals?.length} terminals` : "no state",
-      );
-
-      // Save synchronously to webview state - this persists across sessions
-      const prior = vscode.getState() || {};
-      vscode.setState({
-        ...prior,
-        fullTabState: fullState,
-        timestamp: Date.now(),
-        // Ensure persistence of the one-time banner flag once we've done a cold boot
-        historyBannerShownOnce:
-          prior.historyBannerShownOnce || this._historyBannerShownEver || false,
-      });
-
-      // Send split messages to extension for persistent storage (non-critical, async)
-      try {
-        // Build metadata (no buffers) for clean, inspectable storage
-        const metadata = {
-          terminals: fullState.terminals.map((t: any) => {
-            const { buffer, ...meta } = t;
-            return meta;
-          }),
-          activeTabId: fullState.activeTabId,
-          timestamp: fullState.timestamp,
-        };
-        this.vscode.postMessage({
-          command: "metadataUpdate",
-          state: metadata,
-        } satisfies WebviewToExtMessage);
-
-        // Send dirty buffers keyed by UUID
-        const buffers: Record<string, string> = {};
-        for (const t of fullState.terminals) {
-          if (t.uuid && t.buffer) {
-            buffers[t.uuid] = t.buffer;
-          }
-        }
-        if (Object.keys(buffers).length > 0) {
-          this.vscode.postMessage({
-            command: "bufferUpdate",
-            buffers,
-          } satisfies WebviewToExtMessage);
-        }
-      } catch (msgError) {
-        // Don't fail if async message fails during shutdown
-        Logger.warn(
-          "⚠️ Could not send state to extension (probably shutting down):",
-          msgError,
-        );
-      }
-    } catch (error) {
-      Logger.error("Failed to save state:", error);
-    }
+    return this._tabSessionCoordinator.saveToLocalState();
   }
 
   /**

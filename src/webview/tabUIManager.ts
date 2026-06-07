@@ -610,6 +610,14 @@ export class TabUIManager {
     }
   }
 
+  /**
+   * Drop the cached launcher sentinel so the next tab insertion rebuilds it.
+   * Used when the tab strip is recreated wholesale during restore.
+   */
+  resetLaunchSlot(): void {
+    this._launchSlot = null;
+  }
+
   private ensureLaunchSlot(): void {
     if (this._launchSlot?.isConnected) {
       return;
