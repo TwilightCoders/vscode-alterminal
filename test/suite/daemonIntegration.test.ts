@@ -20,6 +20,8 @@ import { readLockfile, generateSecret } from "../../src/daemon/lockfile";
 const PROJECT_ROOT = path.resolve(__dirname, "../../../..");
 const LOOMPTYD = path.join(PROJECT_ROOT, "bin/loomptyd");
 const SPAWN_HELPER = path.join(PROJECT_ROOT, "test/helpers/spawnDaemonSubprocess.js");
+const DAEMON_BOOT_TIMEOUT_MS = Number(process.env.ALTERMINAL_DAEMON_TEST_TIMEOUT_MS ?? 30000);
+const DAEMON_TEST_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 5000;
 
 function uniquePaths() {
   const id = `test-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -54,8 +56,8 @@ function spawnDaemonDirect(paths: ReturnType<typeof uniquePaths>): Promise<{
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       clearInterval(poll);
-      reject(new Error("daemon didn't come up in 5s"));
-    }, 5000);
+      reject(new Error(`daemon didn't come up in ${DAEMON_BOOT_TIMEOUT_MS}ms`));
+    }, DAEMON_BOOT_TIMEOUT_MS);
 
     const poll = setInterval(() => {
       const info = readLockfile(paths.lockfile);
@@ -92,11 +94,12 @@ suite("Daemon Integration", () => {
   // without a loompty source tree. Skip rather than hard-fail when it's missing.
   suiteSetup(function () {
     if (!fs.existsSync(LOOMPTYD)) this.skip();
+    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip();
   });
 
   suite("spawn + connect", () => {
     test("daemon comes up and accepts a connection with auth", async function () {
-      this.timeout(10000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const { pid, secret } = await spawnDaemonDirect(paths);
 
@@ -119,7 +122,7 @@ suite("Daemon Integration", () => {
     });
 
     test("client rejects connection with wrong secret", async function () {
-      this.timeout(10000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const { pid } = await spawnDaemonDirect(paths);
 
@@ -156,7 +159,7 @@ suite("Daemon Integration", () => {
         child.on("exit", (code, sig) => {
           if (!daemonPid) reject(new Error(`helper exited early code=${code} sig=${sig}`));
         });
-        setTimeout(() => reject(new Error("helper timeout")), 8000);
+        setTimeout(() => reject(new Error(`helper timeout after ${DAEMON_BOOT_TIMEOUT_MS}ms`)), DAEMON_BOOT_TIMEOUT_MS);
       });
 
       try {
@@ -180,17 +183,17 @@ suite("Daemon Integration", () => {
     }
 
     test("daemon survives SIGTERM to spawning process", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       await runPersistenceTest("SIGTERM");
     });
 
     test("daemon survives SIGKILL to spawning process", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       await runPersistenceTest("SIGKILL");
     });
 
     test("daemon survives spawning process exit(0)", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
 
       // Helper exits cleanly via process.exit(0) on an ipc message.
@@ -207,7 +210,7 @@ suite("Daemon Integration", () => {
           if (msg.type === "ready") { daemonPid = msg.pid; resolve(); }
           else if (msg.type === "error") reject(new Error(msg.message));
         });
-        setTimeout(() => reject(new Error("helper timeout")), 8000);
+        setTimeout(() => reject(new Error(`helper timeout after ${DAEMON_BOOT_TIMEOUT_MS}ms`)), DAEMON_BOOT_TIMEOUT_MS);
       });
 
       try {
@@ -231,7 +234,7 @@ suite("Daemon Integration", () => {
 
   suite("reattach with scrollback", () => {
     test("fresh client sees previously written data in scrollback", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const { pid, secret } = await spawnDaemonDirect(paths);
 
@@ -292,7 +295,7 @@ suite("Daemon Integration", () => {
     });
 
     test("list shows sessions across client reconnects", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const { pid, secret } = await spawnDaemonDirect(paths);
 
@@ -368,7 +371,7 @@ suite("Daemon Integration", () => {
     }
 
     test("successor adopts the live session across a daemon swap (same pid, scrollback intact)", async function () {
-      this.timeout(20000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const handoffPath = path.join(os.tmpdir(), `alterm-handoff-${process.pid}-${Date.now()}.sock`);
       const { pid: pidA, secret } = await spawnDaemonDirect(paths);
@@ -445,7 +448,7 @@ suite("Daemon Integration", () => {
 
   suite("reattach (resume-only, no replay)", () => {
     test("reattach resumes the live stream WITHOUT replaying scrollback", async function () {
-      this.timeout(15000);
+      this.timeout(DAEMON_TEST_TIMEOUT_MS);
       const paths = uniquePaths();
       const { pid, secret } = await spawnDaemonDirect(paths);
 

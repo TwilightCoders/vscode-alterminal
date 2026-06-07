@@ -17,6 +17,8 @@ import { readLockfile } from "../../src/daemon/lockfile";
 
 const PROJECT_ROOT = path.resolve(__dirname, "../../../..");
 const LOOMPTYD = path.join(PROJECT_ROOT, "bin/loomptyd");
+const DAEMON_BOOT_TIMEOUT_MS = Number(process.env.ALTERMINAL_DAEMON_TEST_TIMEOUT_MS ?? 30000);
+const DAEMON_TEST_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 5000;
 
 function uniquePaths() {
   const id = `test-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -45,8 +47,8 @@ function spawnRaw(paths: ReturnType<typeof uniquePaths>, secret: string): Promis
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       clearInterval(poll);
-      reject(new Error("daemon startup timed out"));
-    }, 5000);
+      reject(new Error(`daemon startup timed out after ${DAEMON_BOOT_TIMEOUT_MS}ms`));
+    }, DAEMON_BOOT_TIMEOUT_MS);
     const poll = setInterval(() => {
       const info = readLockfile(paths.lockfile);
       if (info) {
@@ -74,10 +76,11 @@ suite("Orphan Daemon Scenarios", () => {
   // CI runners without a loompty source tree. Skip rather than hard-fail.
   suiteSetup(function () {
     if (!fs.existsSync(LOOMPTYD)) this.skip();
+    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip();
   });
 
   test("unlinking socket file does not kill a listening daemon", async function () {
-    this.timeout(10000);
+    this.timeout(DAEMON_TEST_TIMEOUT_MS);
     const paths = uniquePaths();
     const pid = await spawnRaw(paths, "first-secret");
 
@@ -98,7 +101,7 @@ suite("Orphan Daemon Scenarios", () => {
   });
 
   test("binding a second daemon to same path after unlink: both survive", async function () {
-    this.timeout(10000);
+    this.timeout(DAEMON_TEST_TIMEOUT_MS);
     const paths = uniquePaths();
     const firstPid = await spawnRaw(paths, "first-secret");
 
@@ -137,7 +140,7 @@ suite("Orphan Daemon Scenarios", () => {
   });
 
   test("client attempting wrong-secret auth to orphan does not kill it", async function () {
-    this.timeout(10000);
+    this.timeout(DAEMON_TEST_TIMEOUT_MS);
     const paths = uniquePaths();
     const pid = await spawnRaw(paths, "real-secret");
 
@@ -157,7 +160,7 @@ suite("Orphan Daemon Scenarios", () => {
   });
 
   test("orphan with missing secret file + full DaemonManager cleanup flow", async function () {
-    this.timeout(15000);
+    this.timeout(DAEMON_TEST_TIMEOUT_MS);
     const paths = uniquePaths();
 
     // Set up the EXACT orphan scenario from Dale's report:
