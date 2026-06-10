@@ -164,7 +164,10 @@ export class TabManager {
     this._initTimeoutId = setTimeout(() => {
       if (this.terminals.size === 0) {
         Logger.warn("⏰ Init timeout - no state received, creating default terminal");
-        this.restoreFromState(this.createDefaultState(), true);
+        this._tabSessionCoordinator.restoreFromState(
+          this._tabSessionCoordinator.createDefaultState(),
+          true,
+        );
       }
     }, 5000);
 
@@ -177,10 +180,10 @@ export class TabManager {
    */
   private _createMessageCallbacks(): MessageHandlerCallbacks {
     return {
-      saveAllStates: () => this.saveAllStates(),
+      saveAllStates: () => this._tabSessionCoordinator.saveAllStates(),
       saveToLocalState: () => this.saveToLocalState(),
-      restoreFromState: (state, isCold) => this.restoreFromState(state, isCold),
-      createDefaultState: () => this.createDefaultState(),
+      restoreFromState: (state, isCold) => this._tabSessionCoordinator.restoreFromState(state, isCold),
+      createDefaultState: () => this._tabSessionCoordinator.createDefaultState(),
       getActiveTerminal: () => this.getActiveTerminal(),
       getTerminals: () => this.terminals,
       writeToTerminal: (tabId, data) => this.writeToTerminal(tabId, data),
@@ -944,27 +947,6 @@ export class TabManager {
       tabId: tabId,
       buffer: buffer,
     } satisfies WebviewToExtMessage);
-  }
-
-  /**
-   * Save state of all terminals (using WebviewViewSerializer format)
-   */
-  saveAllStates() {
-    return this._tabSessionCoordinator.saveAllStates();
-  }
-
-  /**
-   * Create a default state with one terminal
-   */
-  createDefaultState() {
-    return this._tabSessionCoordinator.createDefaultState();
-  }
-
-  /**
-   * Restore terminals from saved state
-   */
-  restoreFromState(savedState, isColdBoot = false) {
-    return this._tabSessionCoordinator.restoreFromState(savedState, isColdBoot);
   }
 
   /**
