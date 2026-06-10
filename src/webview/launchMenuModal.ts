@@ -55,9 +55,19 @@ export class LaunchMenuModal {
     const dialog = document.createElement("div");
     dialog.className = "launch-menu-dialog";
 
+    const header = document.createElement("div");
+    header.className = "launch-menu-header";
+
     const title = document.createElement("div");
     title.className = "launch-menu-title";
     title.textContent = "New Terminal";
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "launch-menu-close codicon codicon-close";
+    closeButton.title = "Close";
+    closeButton.setAttribute("aria-label", "Close");
+    closeButton.addEventListener("click", () => this.close());
 
     const search = document.createElement("input");
     search.type = "text";
@@ -77,7 +87,8 @@ export class LaunchMenuModal {
     const status = document.createElement("div");
     status.className = "launch-menu-status";
 
-    dialog.append(title, search, list, empty, status);
+    header.append(title, closeButton);
+    dialog.append(header, search, list, empty, status);
     overlay.appendChild(dialog);
 
     overlay.addEventListener("click", (e) => {
