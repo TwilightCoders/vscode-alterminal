@@ -33,16 +33,16 @@ export class TabContextMenuHandler {
         await this.handleSaveCommand(args);
         break;
       case "renameTab":
-        await this.handleRenameTab(args);
+        this.forwardTabCommand(args, "renameTab");
         break;
       case "closeTab":
-        this.handleCloseTab(args);
+        this.forwardTabCommand(args, "closeTab");
         break;
       case "showTabBuffer":
         await this.handleShowTabBuffer(args);
         break;
       case "setTabIcon":
-        await this.handleSetTabIcon(args);
+        this.forwardTabCommand(args, "openIconPicker");
         break;
       default:
         Logger.warn(`Unknown context menu command: ${command}`);
@@ -92,62 +92,33 @@ export class TabContextMenuHandler {
   }
 
   /**
-   * Start inline rename for a tab
+   * Forward a tab-scoped menu action to the webview after the shared tabId
+   * guard + error handling. Used by the pure-forwarding actions (rename, close,
+   * icon picker), which differ only by the outbound command. Actions with real
+   * bodies (saveTabCommand, showTabBuffer) stay as their own methods.
    */
-  private async handleRenameTab(args: any): Promise<void> {
+  private forwardTabCommand(
+    args: any,
+    command: "renameTab" | "closeTab" | "openIconPicker",
+  ): void {
     try {
       const tabId = args?.tabId;
-
       if (!tabId) {
-        Logger.warn("Cannot rename tab: no tab ID provided");
+        Logger.warn(`Cannot ${command}: no tab ID provided`);
         vscode.window.showErrorMessage("No tab selected");
         return;
       }
-
       const webview = this.getWebview();
       if (webview) {
-        // Send rename command to webview to start inline editing
         webview.postMessage({
-          command: "renameTab",
+          command,
           tabId: parseInt(tabId),
         } satisfies ExtToWebviewMessage);
-
-        Logger.info(`Context menu - Starting inline rename for tab ${tabId}`);
+        Logger.info(`Context menu - ${command} for tab ${tabId}`);
       }
     } catch (error) {
-      Logger.error("Failed to start tab rename from context menu:", error);
-      vscode.window.showErrorMessage(
-        "Failed to start tab rename. Please try again.",
-      );
-    }
-  }
-
-  /**
-   * Close a tab via context menu
-   */
-  private handleCloseTab(args: any): void {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot close tab: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      const webview = this.getWebview();
-      if (webview) {
-        // Send close command to webview
-        webview.postMessage({
-          command: "closeTab",
-          tabId: parseInt(tabId),
-        } satisfies ExtToWebviewMessage);
-
-        Logger.info(`Context menu - Closed tab ${tabId}`);
-      }
-    } catch (error) {
-      Logger.error("Failed to close tab from context menu:", error);
-      vscode.window.showErrorMessage("Failed to close tab. Please try again.");
+      Logger.error(`Failed to ${command} from context menu:`, error);
+      vscode.window.showErrorMessage("Tab action failed. Please try again.");
     }
   }
 
@@ -220,38 +191,6 @@ export class TabContextMenuHandler {
       Logger.error("Failed to show tab buffer:", error);
       vscode.window.showErrorMessage(
         "Failed to show tab buffer. Please try again.",
-      );
-    }
-  }
-
-  /**
-   * Show icon picker and set tab icon
-   */
-  private async handleSetTabIcon(args: any): Promise<void> {
-    try {
-      const tabId = args?.tabId;
-
-      if (!tabId) {
-        Logger.warn("Cannot set icon: no tab ID provided");
-        vscode.window.showErrorMessage("No tab selected");
-        return;
-      }
-
-      // The picker lives in the webview now — full searchable grid of all
-      // ~525 codicons instead of the old 12-item QuickPick. The webview
-      // applies the chosen icon directly through its tabManager.setTabIcon
-      // path, so no postMessage round-trip back to the host is needed.
-      const webview = this.getWebview();
-      if (webview) {
-        webview.postMessage({
-          command: "openIconPicker",
-          tabId: parseInt(tabId),
-        } satisfies ExtToWebviewMessage);
-      }
-    } catch (error) {
-      Logger.error("Failed to open icon picker:", error);
-      vscode.window.showErrorMessage(
-        "Failed to open icon picker. Please try again.",
       );
     }
   }

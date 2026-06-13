@@ -464,6 +464,11 @@ export class AlterminalProvider implements vscode.WebviewViewProvider {
     this.focusGuard.detach();
     this._ptyManager.dispose();
     this.configurationWatcher.dispose();
+    // Clear the singleton so getInstance() can't return a disposed provider
+    // (only if it still points at us — don't clobber a newer instance).
+    if (AlterminalProvider._instance === this) {
+      AlterminalProvider._instance = undefined;
+    }
   }
 
   private _syncLaunchMenuData(): void {
