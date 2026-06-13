@@ -10,8 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build + unit/integration tests on the org-scoped self-hosted runner on
-  # november (ops/gh-runner/). Any org repo can target it the same way.
+  # Build + unit/integration tests on november's self-hosted runner — the
+  # gh-run-club multi-repo runner (github.com/TwilightCoders/gh-run-club; see
+  # ops/gh-runner/README.md). Any repo registered on it targets it the same way.
   test:
     runs-on: self-hosted
     steps:
@@ -37,10 +38,10 @@ jobs:
   # TwilightCoders/loompty); until it exists the job is green with a warning,
   # not red.
   daemon-tests:
-    # Runs on the self-hosted runner on november (TrueNAS) — see ops/gh-runner/.
-    # The image bakes the C++ build + Electron/xvfb deps, so this job's heavy
-    # work (compile loomptyd + run the test host) costs no GitHub minutes. If
-    # the runner is offline the job queues until it's back.
+    # Runs on november's self-hosted gh-run-club runner (see ops/gh-runner/
+    # README.md). november's local Dockerfile.runner overlay bakes the C++ build
+    # + Electron/xvfb deps, so this job's heavy work (compile loomptyd + run the
+    # test host) costs no GitHub minutes. If the runner is offline it queues.
     runs-on: self-hosted
     steps:
       - name: Gate on loompty access
