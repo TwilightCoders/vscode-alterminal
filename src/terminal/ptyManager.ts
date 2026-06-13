@@ -38,6 +38,7 @@ import * as pty from "@lydell/node-pty";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
+import * as crypto from "crypto";
 import { execFile, execFileSync } from "child_process";
 import { Logger } from "../utils/logger";
 import { Debouncer } from "../utils/debouncer";
@@ -936,7 +937,10 @@ export class PtyManager {
   ): Promise<string> {
     const tempDir = os.tmpdir();
     const safeName = path.basename(fileName).replace(/[/\\]/g, "_");
-    const tempFileName = `alterminal-${Date.now()}-${safeName}`;
+    // Random component (not Date.now): unpredictable name closes the temp-file
+    // pre-creation/symlink race, and is collision-free for multiple drops within
+    // the same millisecond.
+    const tempFileName = `alterminal-${crypto.randomBytes(8).toString("hex")}-${safeName}`;
     const tempFilePath = path.join(tempDir, tempFileName);
 
     let buffer: Buffer;
@@ -947,8 +951,9 @@ export class PtyManager {
       buffer = Buffer.from(fileData, "utf8");
     }
 
-    await fs.promises.writeFile(tempFilePath, buffer);
-    await fs.promises.chmod(tempFilePath, 0o644);
+    // wx: fail rather than clobber/follow a pre-existing path; 0o600: owner-only
+    // (the consuming program runs as the same user).
+    await fs.promises.writeFile(tempFilePath, buffer, { flag: "wx", mode: 0o600 });
     setTimeout(() => fs.promises.unlink(tempFilePath).catch(() => {}), 60_000);
     return tempFilePath;
   }
