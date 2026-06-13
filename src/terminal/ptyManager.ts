@@ -47,6 +47,7 @@ import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
 import { sanitizeSpawnEnv } from "./envSanitizer";
 import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
+import { shellEscape } from "../daemon/ptyDaemonClient";
 import type { ExtToWebviewMessage } from "../shared/messages";
 import {
   filterVSCodeSequences,
@@ -846,8 +847,9 @@ export class PtyManager {
   }
 
   public sendFilePath(filePath: string, tabId: number): void {
-    const escapedPath = filePath.replace(/'/g, "'\\''");
-    const text = `'${escapedPath}' `;
+    // shellEscape: quote+escape only when needed; trailing space lets the user
+    // keep typing. Shared with the daemon-spawn escaping (one quoting rule).
+    const text = `${shellEscape(filePath)} `;
     // Daemon mode
     const ptyId = this._tabPtyIds.get(tabId);
     if (ptyId && this._daemonClient?.connected) {
@@ -942,13 +944,11 @@ export class PtyManager {
   ): Promise<void> {
     try {
       const tempFilePath = await this.writeDroppedFileToTemp(fileData, fileName);
-      // Quoted path — for shell consumers. The trailing space lets the
-      // user keep typing right after.
-      this.writeToPty(`'${tempFilePath}' `, tabId);
+      // Escaped path for shell consumers; trailing space lets the user keep typing.
+      this.writeToPty(`${shellEscape(tempFilePath)} `, tabId);
     } catch (error) {
       Logger.error("Error writing file to temp:", error);
-      const escapedName = fileName.replace(/'/g, "'\\''");
-      this.writeToPty(`'${escapedName}' `, tabId);
+      this.writeToPty(`${shellEscape(fileName)} `, tabId);
     }
   }
 
