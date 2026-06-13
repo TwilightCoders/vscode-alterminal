@@ -13,7 +13,7 @@ jobs:
   # Build + unit/integration tests on the org-scoped self-hosted runner on
   # november (ops/gh-runner/). Any org repo can target it the same way.
   test:
-    runs-on: [self-hosted, november]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -41,7 +41,7 @@ jobs:
     # The image bakes the C++ build + Electron/xvfb deps, so this job's heavy
     # work (compile loomptyd + run the test host) costs no GitHub minutes. If
     # the runner is offline the job queues until it's back.
-    runs-on: [self-hosted, november]
+    runs-on: self-hosted
     steps:
       - name: Gate on loompty access
         id: gate
