@@ -75,7 +75,12 @@
             justify-content: space-between;
             background-color: var(--vscode-tab-inactiveBackground, rgba(45, 45, 45, 0.5));
             color: var(--vscode-tab-inactiveForeground, #cccccc);
-            border: 1px solid rgba(128, 128, 128, 0.2);
+            /* No visible outline — tabs are delineated by background color
+               only, like native VS Code editor tabs. The border is kept
+               transparent (not removed) so the per-side rules below
+               (vertical-tab separators, single-row active merge) still occupy
+               their 1px and tab geometry stays aligned. */
+            border: 1px solid transparent;
             cursor: default;
             padding: 6px 10px;
             margin: 0;
@@ -87,6 +92,15 @@
             text-overflow: ellipsis;
             overflow: visible;
             font-size: 12px;
+        }
+
+        /* Thin vertical separator between horizontal tabs — native VS Code's
+           tab.border, a hairline that in most themes reads as the active-tab
+           background color. Only the right edge is drawn (top/bottom stay
+           transparent), so tabs get a separator, not a box. Vertical tabs
+           override this with a bottom separator instead (see below). */
+        .container:not(.vertical-tabs) .tab {
+            border-right: 1px solid var(--vscode-tab-border, rgba(128, 128, 128, 0.35));
         }
 
         /* When tabs wrap to multiple rows, add subtle separation */
@@ -117,14 +131,22 @@
         .tab.active {
             background-color: var(--vscode-tab-activeBackground, rgba(60, 60, 60, 0.8));
             color: var(--vscode-tab-activeForeground, #ffffff);
-            /* Clean accent line along the bottom of the selected tab, the way
-               VS Code styles the active editor tab. Prefer the theme's
-               tab.activeBorder; fall back to a subtle light grey so the
-               indicator is always present (the bare var defaults to transparent
-               on themes that don't set it). */
-            border-bottom: 1px solid var(--vscode-tab-activeBorder, rgba(204, 204, 204, 0.4));
+            /* The selected tab is distinguished by its lighter background only —
+               no accent line, no outline — matching native VS Code editor tabs.
+               (Single-row active also merges into the content below; see the
+               rule beneath this one.) */
         }
-        
+
+        /* Single horizontal row: the active tab merges into the content below —
+           no line beneath it — like a native VS Code editor tab. It covers the
+           tab-bar's bottom rule via a 1px negative margin + a bottom border
+           tinted to the active background. Multi-row keeps its row separators;
+           vertical tabs keep their stacking borders. */
+        .container:not(.vertical-tabs) .tab-bar:not(.multi-row) .tab.active {
+            border-bottom: 1px solid var(--vscode-tab-activeBackground, rgba(60, 60, 60, 0.8));
+            margin-bottom: -1px;
+        }
+
         .tab:hover {
             background-color: var(--vscode-tab-hoverBackground, rgba(70, 70, 70, 0.7));
         }
@@ -366,16 +388,16 @@
         .tab-close {
             font-size: 14px;
             line-height: 1;
-            width: 16px;
-            height: 16px;
-            min-width: 16px;
+            width: 20px;
+            height: 20px;
+            min-width: 20px;
             padding: 0;
-            margin-left: 6px;
+            margin-left: 4px;
             border: none;
             background: transparent;
             color: inherit;
             cursor: pointer;
-            border-radius: 3px;
+            border-radius: 5px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -390,7 +412,7 @@
         }
 
         .tab-close:hover {
-            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+            background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.5));
             color: var(--vscode-tab-activeForeground, #ffffff);
         }
 
