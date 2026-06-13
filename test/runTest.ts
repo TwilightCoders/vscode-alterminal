@@ -1,3 +1,4 @@
+import * as os from "os";
 import * as path from "path";
 import { runTests } from "@vscode/test-electron";
 
@@ -24,8 +25,23 @@ async function main() {
     // Passed to --extensionTestsPath
     const extensionTestsPath = path.resolve(__dirname, "./suite/index");
 
+    // VS Code's test harness opens an IPC control socket under the user-data
+    // dir. The default (<extensionDevelopmentPath>/.vscode-test/user-data) lives
+    // under the checkout path, which on a deep CI layout (e.g. the self-hosted
+    // runner's agents/<repo>/_work/<repo>/<repo>/…) pushes the socket past the
+    // ~108-char AF_UNIX limit → `listen EINVAL`. Pin user-data + extensions to a
+    // short tmp dir so the socket path stays short regardless of checkout depth.
+    // pid keeps concurrent runs from colliding.
+    const shortBase = path.join(os.tmpdir(), `at-vsct-${process.pid}`);
+    const userDataDir = path.join(shortBase, "u");
+    const extensionsDir = path.join(shortBase, "x");
+
     // Download VS Code, unzip it and run the integration test
-    await runTests({ extensionDevelopmentPath, extensionTestsPath });
+    await runTests({
+      extensionDevelopmentPath,
+      extensionTestsPath,
+      launchArgs: ["--user-data-dir", userDataDir, "--extensions-dir", extensionsDir],
+    });
   } catch (err) {
     console.error("Failed to run tests");
     process.exit(1);
