@@ -13,6 +13,7 @@ import * as net from "net";
 import { StringDecoder } from "string_decoder";
 import { EventEmitter } from "events";
 import { Logger } from "../utils/logger";
+import { ALTERMINAL_FORWARD_ENV_KEYS } from "../constants";
 import {
   type ClientMessage,
   type DaemonMessage,
@@ -43,14 +44,12 @@ const RESPONSE_TYPES = new Set<string>([
   "error",
 ]);
 
-/** Env vars to forward to daemon-spawned sessions via command prefix. */
-const FORWARD_ENV_KEYS = [
-  "TERM",
-  "COLORTERM",
-  "TERM_PROGRAM",
-  "TERM_PROGRAM_VERSION",
-  "ALTERMINAL_SHELL_INIT",
-];
+/**
+ * Env vars forwarded to daemon-spawned sessions via command prefix. The
+ * canonical list lives in constants (ALTERMINAL_FORWARD_ENV_KEYS) so it can't
+ * drift from the identity vars the direct-spawn path (PtyManager) sets.
+ */
+const FORWARD_ENV_KEYS = ALTERMINAL_FORWARD_ENV_KEYS;
 
 export class PtyDaemonClient extends EventEmitter {
   private _controlSocket: net.Socket | null = null;

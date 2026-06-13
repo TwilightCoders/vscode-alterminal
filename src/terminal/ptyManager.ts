@@ -44,6 +44,7 @@ import { Debouncer } from "../utils/debouncer";
 import { BellDetector } from "./bellDetector";
 import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
+import { sanitizeSpawnEnv } from "./envSanitizer";
 import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
 import type { ExtToWebviewMessage } from "../shared/messages";
 import {
@@ -700,14 +701,10 @@ export class PtyManager {
       process.env.USERPROFILE ||
       process.cwd();
 
-    // Build clean environment
-    const cleanEnv: { [key: string]: string } = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value === undefined) continue;
-      if (key.startsWith("VSCODE_") || key.startsWith("ELECTRON_")) continue;
-      if ((key === "GIT_ASKPASS" || key === "SSH_ASKPASS") && /vscode|Code/i.test(value)) continue;
-      cleanEnv[key] = value;
-    }
+    // Build clean environment — strip VS Code-injected vars so our shells don't
+    // masquerade as the integrated terminal. Shared predicate with the diagnostic
+    // ("what's leaking?") path; see envSanitizer.
+    const cleanEnv = sanitizeSpawnEnv(process.env);
 
     // Set up shell integration for CWD reporting via OSC 7
     const shellIntEnv: Record<string, string> = {};
@@ -735,6 +732,10 @@ export class PtyManager {
       this._shellIntegrationTabs.add(tabId);
     }
 
+    // Identity + shell-integration vars below (TERM, COLORTERM, TERM_PROGRAM,
+    // TERM_PROGRAM_VERSION, ALTERMINAL_SHELL_INIT via shellIntEnv) must stay in
+    // sync with ALTERMINAL_FORWARD_ENV_KEYS — daemon mode forwards exactly that
+    // set, so a var added here but not there silently won't reach daemon shells.
     const fullEnv = {
       ...cleanEnv,
       ...shellIntEnv,

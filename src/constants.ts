@@ -15,6 +15,22 @@ export const TERMINAL_DEFAULTS = {
   COLOR_TERM: "truecolor",
 } as const;
 
+/**
+ * Env vars that mark a spawned shell as Alterminal's and drive shell
+ * integration. Single source of truth shared by the two spawn paths:
+ *   - direct mode — PtyManager builds these into the spawn env, and
+ *   - daemon mode — PtyDaemonClient forwards exactly these to daemon sessions,
+ *     which otherwise inherit only the daemon's own env.
+ * Keep in sync with the identity vars PtyManager sets on `fullEnv`.
+ */
+export const ALTERMINAL_FORWARD_ENV_KEYS = [
+  "TERM",
+  "COLORTERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+  "ALTERMINAL_SHELL_INIT",
+] as const;
+
 // Polling Intervals (milliseconds)
 export const INTERVALS = {
   PROCESS_MONITORING: 1000,
