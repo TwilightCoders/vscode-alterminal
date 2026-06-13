@@ -28,8 +28,76 @@ jobs:
       # must run first — not just compile:tests.
       - run: npm run compile
       # The @vscode/test-electron host needs a display; xvfb provides one.
-      # Daemon integration suites self-skip here (no bin/loomptyd on CI).
+      # Daemon integration suites self-skip here (no bin/loomptyd on this job);
+      # the daemon-tests job below builds loomptyd and runs them for real.
       - name: Run tests
+        run: xvfb-run -a npm test
+
+  # Exercises the real daemon contract (spawn/connect/persistence/handoff/
+  # reattach/orphan) against a freshly-built loomptyd — the coverage whose
+  # absence let the loompty 0.3.1 --lockfile break ship silently. loompty is a
+  # separate PRIVATE repo, so this needs a read-access token. Add a repo/org
+  # secret named LOOMPTY_TOKEN (a PAT or deploy key with read on
+  # TwilightCoders/loompty); until it exists the job is green with a warning,
+  # not red.
+  daemon-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on loompty access
+        id: gate
+        env:
+          LOOMPTY_TOKEN: ${{ secrets.LOOMPTY_TOKEN }}
+        run: |
+          if [ -n "$LOOMPTY_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::LOOMPTY_TOKEN secret not set — daemon contract tests skipped. Add a read-access token for TwilightCoders/loompty to enable them."
+          fi
+      - uses: actions/checkout@v6
+        if: steps.gate.outputs.enabled == 'true'
+      - uses: actions/setup-node@v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 22
+      - name: Checkout loompty
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: TwilightCoders/loompty
+          token: ${{ secrets.LOOMPTY_TOKEN }}
+          path: loompty-src
+      - name: Install loompty build deps
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config libuv1-dev
+      - name: Build loomptyd
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          cmake -S loompty-src -B loompty-src/build -DLOOM_BUILD_TESTS=OFF
+          cmake --build loompty-src/build --target loomptyd -j"$(nproc)"
+          mkdir -p bin
+          cp loompty-src/build/loomptyd bin/loomptyd
+      - name: Install deps
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm ci
+      - name: Build WebGPU renderer addon
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          cd lib/xterm-addon-webgpu
+          npm ci
+          npm run build
+      # compile runs scripts/build-daemon.sh, which finds no loompty source at
+      # its default LOOM_DIR and skips — leaving the bin/loomptyd we just built.
+      - name: Compile
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm run compile
+      - name: Run tests (incl. daemon contract)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          ALTERMINAL_RUN_DAEMON_TESTS: "1"
         run: xvfb-run -a npm test
 
   package:
