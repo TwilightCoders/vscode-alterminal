@@ -890,17 +890,17 @@ export class TerminalInstance {
   write(data) {
     if (!this.terminal) return;
     try {
-      const buf = this.terminal.buffer?.active;
-      const ydispBefore = buf?.viewportY ?? -1;
+      // Scroll-snap diagnostic (two buffer.active reads + compare per chunk) is
+      // gated to dev mode — this is the hottest webview path.
+      const diag = (window as any).DEVELOPER_MODE === true;
+      const buf = diag ? this.terminal.buffer?.active : null;
+      const ydispBefore = diag ? (buf?.viewportY ?? -1) : -1;
       this.terminal.write(data);
       this._isDirty = true;
-      // Detect viewport snap — log if ydisp changes unexpectedly
-      const ydispAfter = buf?.viewportY ?? -1;
-      if (ydispBefore !== -1 && ydispAfter !== ydispBefore) {
-        const ybase = buf?.baseY ?? -1;
-        const wasScrolledUp = ydispBefore < ybase;
-        if (wasScrolledUp) {
-          Logger.warn(`[scroll-snap] tab ${this.id}: ydisp ${ydispBefore}→${ydispAfter} (ybase=${ybase})`);
+      if (diag) {
+        const ydispAfter = buf?.viewportY ?? -1;
+        if (ydispBefore !== -1 && ydispAfter !== ydispBefore && ydispBefore < (buf?.baseY ?? -1)) {
+          Logger.warn(`[scroll-snap] tab ${this.id}: ydisp ${ydispBefore}→${ydispAfter} (ybase=${buf?.baseY ?? -1})`);
         }
       }
     } catch (error) {

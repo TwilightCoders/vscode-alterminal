@@ -274,12 +274,19 @@ export class PtyManager {
     const hasEsc = data.indexOf('\x1b') !== -1;
 
     if (hasEsc) {
-      const cwd = this._extractCwdFromOsc7(data);
+      // Cheap indexOf pre-gates: the extractor regexes can only match when their
+      // OSC prefix is present, so skip the full-chunk scan otherwise. TUIs emit
+      // ESC on nearly every chunk but rarely OSC 7 / OSC 1337, so this avoids two
+      // global-regex passes per chunk on the hot path. (Strict supersets of
+      // CWD_OSC_PATTERN / USER_VAR_PATTERN — behaviour-identical.)
+      const cwd = data.indexOf("\x1b]7;") !== -1 ? this._extractCwdFromOsc7(data) : null;
       if (cwd && cwd !== this._currentWorkingDirs.get(tabId)) {
         this._handleCwdChange(tabId, cwd);
       }
 
-      const userVars = this._extractUserVars(data);
+      const userVars = data.indexOf("\x1b]1337;SetUserVar=") !== -1
+        ? this._extractUserVars(data)
+        : null;
       if (userVars) {
         this._handleUserVarChange(tabId, userVars);
       }
