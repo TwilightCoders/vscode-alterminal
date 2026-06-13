@@ -187,7 +187,14 @@ export class PtyDaemonClient extends EventEmitter {
         envParts.push(`${key}=${shellEscape(env[key])}`);
       }
     }
-    const shellCmd = args.length > 0 ? `${shell} ${args.join(" ")}` : shell;
+    // loomptyd runs `command` through a shell, so the shell path and every arg
+    // must be shell-escaped — otherwise a space/quote/metachar in a launch
+    // command, workspace path, or shell-integration arg breaks out of the
+    // intended `-c <cmd>` (direct mode is array-safe via pty.spawn; this path
+    // must match that guarantee).
+    const shellCmd = args.length > 0
+      ? `${shellEscape(shell)} ${args.map(shellEscape).join(" ")}`
+      : shellEscape(shell);
     const command = envParts.length > 0
       ? `env ${envParts.join(" ")} ${shellCmd}`
       : shellCmd;
