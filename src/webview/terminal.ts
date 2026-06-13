@@ -99,6 +99,7 @@ export class TerminalInstance {
   private _visibilityInstalled?: boolean;
   private _resizeObserver?: ResizeObserver;
   private _visibilityHandler?: () => void;
+  private _resizeTimeout?: ReturnType<typeof setTimeout>;
   private _webglContextLostHandlers?: Array<{ canvas: HTMLCanvasElement; handler: (e: Event) => void }>;
 
   constructor(
@@ -740,12 +741,12 @@ export class TerminalInstance {
       this, // Pass TerminalInstance reference for interaction tracking
     );
 
-    // Set up resize handler - coordinate with PTY backend
-    let resizeTimeout;
+    // Set up resize handler - coordinate with PTY backend. The debounce timer
+    // lives on the instance so disposeEventHandlers() can clear it — otherwise a
+    // resize within the 50ms window fires sendResizeToPty on a torn-down terminal.
     this.resizeDisposable = this.terminal.onResize((size) => {
-      // Debounce resize events to reduce flickering
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
+      clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = setTimeout(() => {
         this.sendResizeToPty(size.cols, size.rows);
       }, 50);
     });

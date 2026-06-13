@@ -37,6 +37,10 @@ export class WebviewViewSerializer {
   private _alterminal?: vscode.WebviewView;
   private _context: vscode.ExtensionContext;
   private _didInitialViewRestore = false;
+  // Disposables for the current webview's lifecycle listeners. setAlterminal()
+  // runs per resolveWebviewView, so these must be torn down before re-registering
+  // or each reload stacks another visibility/dispose listener on a dead webview.
+  private _lifecycleDisposables: vscode.Disposable[] = [];
 
   constructor(context: vscode.ExtensionContext) {
     this._context = context;
@@ -64,9 +68,13 @@ export class WebviewViewSerializer {
     if (!this._alterminal) {
       return;
     }
+    // Tear down any prior webview's listeners before re-registering (setAlterminal
+    // runs on every resolveWebviewView).
+    this._lifecycleDisposables.forEach((d) => d.dispose());
+    this._lifecycleDisposables = [];
     // Monitor visibility changes for SUBSEQUENT visibility toggles (after initial restore)
     // Initial restore is handled by webviewReady message -> StateManager.restoreWebviewState
-    this._alterminal.onDidChangeVisibility(() => {
+    this._lifecycleDisposables.push(this._alterminal.onDidChangeVisibility(() => {
       if (this._alterminal?.visible) {
         // Only send focus/restore for subsequent visibility changes
         // Initial restore is handled by webviewReady -> StateManager
@@ -78,12 +86,12 @@ export class WebviewViewSerializer {
       } else {
         this.saveState();
       }
-    });
+    }));
 
     // Monitor disposal
-    this._alterminal.onDidDispose(() => {
+    this._lifecycleDisposables.push(this._alterminal.onDidDispose(() => {
       this.saveState();
-    });
+    }));
   }
 
   /**

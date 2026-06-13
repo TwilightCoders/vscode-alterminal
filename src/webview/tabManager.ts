@@ -611,7 +611,13 @@ export class TabManager {
     dialog.append(title, body, actions);
     overlay.appendChild(dialog);
 
-    const dismiss = () => overlay.remove();
+    // dismiss() also detaches the document keydown listener so every dismissal
+    // path cleans it up — a mouse-dismiss (Cancel/Terminate) previously leaked it,
+    // leaving a stale handler that could fire _doCloseTab on the wrong tab.
+    const dismiss = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", keyHandler);
+    };
 
     cancel.addEventListener("click", dismiss);
     terminate.addEventListener("click", () => {
@@ -619,15 +625,13 @@ export class TabManager {
       this._doCloseTab(tabId);
     });
 
-    // Escape key cancels
+    // Escape cancels; Enter confirms
     const keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         dismiss();
-        document.removeEventListener("keydown", keyHandler);
       } else if (e.key === "Enter") {
         dismiss();
         this._doCloseTab(tabId);
-        document.removeEventListener("keydown", keyHandler);
       }
     };
     document.addEventListener("keydown", keyHandler);

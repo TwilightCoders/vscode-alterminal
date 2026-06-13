@@ -22,6 +22,10 @@ import type { LaunchMenuData } from "../shared/messages";
  */
 export class WebViewLifecycleManager {
   private _webviewInitialized = false;
+  // Per-webview lifecycle listeners; disposed before re-registering since
+  // resolveWebviewView (→ these setups) runs on every webview (re)creation.
+  private _visibilityDisposable?: vscode.Disposable;
+  private _disposalDisposable?: vscode.Disposable;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -203,7 +207,9 @@ export class WebViewLifecycleManager {
    * This handler only manages the _webviewInitialized flag.
    */
   private setupVisibilityHandler(alterminal: vscode.WebviewView): void {
-    alterminal.onDidChangeVisibility(() => {
+    // Dispose any prior webview's listener — this runs per resolveWebviewView.
+    this._visibilityDisposable?.dispose();
+    this._visibilityDisposable = alterminal.onDidChangeVisibility(() => {
       if (alterminal.visible) {
         Logger.info("🔍 [FOCUS DEBUG] Extension host: Webview became visible");
         this.messageDispatcher.clearBellIndicator();
@@ -219,7 +225,8 @@ export class WebViewLifecycleManager {
    * Set up disposal handler
    */
   private setupDisposalHandler(alterminal: vscode.WebviewView): void {
-    alterminal.onDidDispose(() => {
+    this._disposalDisposable?.dispose();
+    this._disposalDisposable = alterminal.onDidDispose(() => {
       this._webviewInitialized = false;
     });
   }
