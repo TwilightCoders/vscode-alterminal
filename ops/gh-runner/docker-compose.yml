@@ -1,0 +1,31 @@
+# Self-hosted GitHub Actions runner for TwilightCoders/vscode-alterminal,
+# running on november (TrueNAS SCALE, Docker-native). Deploy from
+# /mnt/tank1/apps/gh-runner/ with `docker compose up -d --build`.
+#
+# Auth: put exactly one of RUNNER_TOKEN (short-lived registration token) or
+# ACCESS_TOKEN (a fine-grained PAT with repo Administration: read+write) in
+# .env. ACCESS_TOKEN is preferred — it lets the runner re-register itself, so
+# it survives a container recreate; a RUNNER_TOKEN only bootstraps once.
+#
+# No docker socket is mounted on purpose: alterminal's CI jobs don't use
+# docker, so the runner stays unprivileged.
+services:
+  runner:
+    build: .
+    image: alterminal-gh-runner:jammy
+    container_name: gh-runner-alterminal
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RUNNER_SCOPE: repo
+      REPO_URL: https://github.com/TwilightCoders/vscode-alterminal
+      RUNNER_NAME: november
+      LABELS: self-hosted,linux,x64,november
+      EPHEMERAL: "false"
+      DISABLE_AUTO_UPDATE: "false"
+    # november has 16 cores / 31GB; leave headroom for the NAS itself.
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 8g
