@@ -10,28 +10,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build + unit/integration tests on the self-hosted november runner via the
+  # org-wide reusable suite (TwilightCoders/.github). First consumer of the
+  # shared workflow — other repos opt in the same way. The non-daemon suites
+  # run here; daemon-tests stays a bespoke job below.
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-      - run: npm ci
-      - name: Build WebGPU renderer addon
-        run: |
-          cd lib/xterm-addon-webgpu
-          npm ci
-          npm run build
-      # The test host loads the extension from out/extension.js (runTest.ts
-      # points --extensionDevelopmentPath at the repo root), so a full compile
-      # must run first — not just compile:tests.
-      - run: npm run compile
-      # The @vscode/test-electron host needs a display; xvfb provides one.
-      # Daemon integration suites self-skip here (no bin/loomptyd on this job);
-      # the daemon-tests job below builds loomptyd and runs them for real.
-      - name: Run tests
-        run: xvfb-run -a npm test
+    uses: TwilightCoders/.github/.github/workflows/november-ci.yml@main
+    with:
+      runs-on: self-hosted
+      node-version: "22"
+      build: |
+        (cd lib/xterm-addon-webgpu && npm ci && npm run build)
+        npm run compile
+      test: npm test
+      xvfb: true
 
   # Exercises the real daemon contract (spawn/connect/persistence/handoff/
   # reattach/orphan) against a freshly-built loomptyd — the coverage whose
