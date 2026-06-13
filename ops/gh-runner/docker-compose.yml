@@ -18,9 +18,14 @@ services:
     container_name: gh-runner-alterminal
     restart: unless-stopped
     env_file: .env
+    # NOTE: repo scope. Org scope (RUNNER_SCOPE=org + ORG_NAME) registers fine and
+    # the Default group shows All-repositories + correct labels, but GitHub did
+    # not dispatch this private repo's jobs to the org runner (they queued
+    # indefinitely) — unresolved without admin:org to inspect org-side routing
+    # (possibly a Free-org org-runner limitation). Repo scope is proven working.
     environment:
-      RUNNER_SCOPE: org
-      ORG_NAME: TwilightCoders
+      RUNNER_SCOPE: repo
+      REPO_URL: https://github.com/TwilightCoders/vscode-alterminal
       RUNNER_NAME: november
       LABELS: self-hosted,linux,x64,november
       EPHEMERAL: "false"

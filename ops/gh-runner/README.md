@@ -1,12 +1,18 @@
 # Self-hosted CI runner (november)
 
-An **org-scoped** self-hosted GitHub Actions runner for the `TwilightCoders`
-org, so private-repo CI runs on the NAS for free instead of burning GitHub's
-private-repo minutes. Any repo in the org uses it by adding `runs-on: self-hosted`
-(or `[self-hosted, november]`) to a job — no per-repo runner setup.
+A self-hosted GitHub Actions runner on november (TrueNAS) so private-repo CI
+runs on the NAS for free instead of burning GitHub's private-repo minutes.
+A repo uses it by adding `runs-on: self-hosted` to a job.
 
 - **Host:** november (TrueNAS SCALE, Docker-native), `/mnt/tank1/apps/gh-runner/`
-- **Scope:** org `TwilightCoders` (Default runner group → all repos)
+- **Scope:** **repo** (`TwilightCoders/vscode-alterminal`). ⚠️ Org scope was tried
+  and **doesn't work**: the runner registered fine at org scope (Default group →
+  All repositories, correct labels, Idle), but GitHub never dispatched this
+  private repo's jobs to it — they queued indefinitely; switching back to repo
+  scope ran the same jobs immediately. Likely a Free-org org-runner limitation
+  (org self-hosted runners not serving private repos) or an org policy needing
+  `admin:org` to inspect. For "any repo on the NAS": either run one runner
+  container per repo (repo scope each), or resolve the org-dispatch issue first.
 - **Labels:** `self-hosted, linux, x64, november`
 - **Security:** private repos only. A self-hosted runner reachable by a *public*
   repo lets fork PRs run arbitrary code on the LAN — keep it off public/fork PRs.
