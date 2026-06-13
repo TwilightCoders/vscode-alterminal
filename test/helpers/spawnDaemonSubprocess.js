@@ -2,20 +2,23 @@
 // Spawns loomptyd exactly the way DaemonManager does, reports the
 // daemon PID to the parent, then sits idle until killed.
 //
-// Usage: node spawnDaemonSubprocess.js <loomptyd> <socket> <lockfile> <log>
+// Usage: node spawnDaemonSubprocess.js <loomptyd> <socket> <log>
+//
+// loomptyd (>=0.3.1) auto-derives its pidfile as <socket>.pid; the old
+// --lockfile flag was removed, so the helper polls <socket>.pid (plain pid).
 
 const cp = require("child_process");
 const fs = require("fs");
 const crypto = require("crypto");
 
-const [, , binary, socketPath, lockPath, logPath] = process.argv;
+const [, , binary, socketPath, logPath] = process.argv;
+const pidPath = socketPath + ".pid";
 
 const secret = crypto.randomBytes(16).toString("hex");
 
 const child = cp.spawn(binary, [
   "--socket", socketPath,
   "--secret", secret,
-  "--lockfile", lockPath,
   "--log", logPath,
 ], {
   detached: true,
@@ -25,22 +28,22 @@ child.stdout.resume();
 child.stderr.resume();
 child.unref();
 
-// Poll for lockfile
+// Poll for the pidfile loomptyd writes once the control socket is bound.
 const startedAt = Date.now();
 const poll = setInterval(() => {
+  let pid = NaN;
   try {
-    const raw = fs.readFileSync(lockPath, "utf8");
-    const info = JSON.parse(raw);
-    if (info && info.pid && info.socketPath) {
-      clearInterval(poll);
-      process.send({ type: "ready", pid: info.pid });
-    }
+    pid = Number.parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
   } catch {
-    if (Date.now() - startedAt > 5000) {
-      clearInterval(poll);
-      process.send({ type: "error", message: "daemon startup timeout in helper" });
-      process.exit(1);
-    }
+    // not up yet
+  }
+  if (Number.isInteger(pid) && pid > 0) {
+    clearInterval(poll);
+    process.send({ type: "ready", pid });
+  } else if (Date.now() - startedAt > 5000) {
+    clearInterval(poll);
+    process.send({ type: "error", message: "daemon startup timeout in helper" });
+    process.exit(1);
   }
 }, 50);
 

@@ -4,9 +4,10 @@ import * as os from "os";
 import * as path from "path";
 import {
   workspaceHash,
-  readLockfile,
-  writeLockfile,
-  removeLockfile,
+  pidfilePath,
+  socketPath,
+  readPidfile,
+  removePidfile,
   writeSecret,
   readSecret,
   removeSecret,
@@ -50,56 +51,56 @@ suite("Lockfile Utilities", () => {
     });
   });
 
-  suite("readLockfile / writeLockfile", () => {
-    test("round-trips lockfile data", () => {
-      const lockPath = path.join(tmpDir, "test.json");
-      const info = { pid: 12345, socketPath: "/tmp/test.sock", version: "1" };
-      writeLockfile(lockPath, info);
-
-      const result = readLockfile(lockPath);
-      assert.ok(result);
-      assert.strictEqual(result!.pid, 12345);
-      assert.strictEqual(result!.socketPath, "/tmp/test.sock");
-      assert.strictEqual(result!.version, "1");
-    });
-
-    test("returns null for missing file", () => {
-      const result = readLockfile(path.join(tmpDir, "nonexistent.json"));
-      assert.strictEqual(result, null);
-    });
-
-    test("returns null for corrupt JSON", () => {
-      const lockPath = path.join(tmpDir, "corrupt.json");
-      fs.writeFileSync(lockPath, "not json {{{");
-      assert.strictEqual(readLockfile(lockPath), null);
-    });
-
-    test("returns null for JSON missing required fields", () => {
-      const lockPath = path.join(tmpDir, "partial.json");
-      fs.writeFileSync(lockPath, JSON.stringify({ pid: 1 }));
-      assert.strictEqual(readLockfile(lockPath), null);
-    });
-
-    test("lockfile has restricted permissions", () => {
-      const lockPath = path.join(tmpDir, "perms.json");
-      writeLockfile(lockPath, { pid: 1, socketPath: "/s", version: "1" });
-      const stat = fs.statSync(lockPath);
-      // Owner read/write only (0o600)
-      assert.strictEqual(stat.mode & 0o777, 0o600);
+  suite("pidfilePath", () => {
+    test("is the socket path with a .pid suffix (loomptyd's auto-derived pidfile)", () => {
+      const hash = workspaceHash(["/some/project"]);
+      assert.strictEqual(pidfilePath(hash), socketPath(hash) + ".pid");
     });
   });
 
-  suite("removeLockfile", () => {
-    test("removes an existing lockfile", () => {
-      const lockPath = path.join(tmpDir, "remove-me.json");
-      fs.writeFileSync(lockPath, "{}");
-      removeLockfile(lockPath);
-      assert.ok(!fs.existsSync(lockPath));
+  suite("readPidfile", () => {
+    test("reads a plain decimal pid", () => {
+      const pidPath = path.join(tmpDir, "test.sock.pid");
+      fs.writeFileSync(pidPath, "12345\n");
+      assert.strictEqual(readPidfile(pidPath), 12345);
     });
 
-    test("does not throw for missing file", () => {
+    test("tolerates no trailing newline", () => {
+      const pidPath = path.join(tmpDir, "nonl.sock.pid");
+      fs.writeFileSync(pidPath, "678");
+      assert.strictEqual(readPidfile(pidPath), 678);
+    });
+
+    test("returns null for a missing file", () => {
+      assert.strictEqual(readPidfile(path.join(tmpDir, "nope.sock.pid")), null);
+    });
+
+    test("returns null for an empty file (daemon created it but hasn't written the pid)", () => {
+      const pidPath = path.join(tmpDir, "empty.sock.pid");
+      fs.writeFileSync(pidPath, "");
+      assert.strictEqual(readPidfile(pidPath), null);
+    });
+
+    test("returns null for non-numeric / zero / negative contents", () => {
+      for (const bad of ["garbage", "0", "-1", "  "]) {
+        const pidPath = path.join(tmpDir, `bad-${Buffer.from(bad).toString("hex")}.sock.pid`);
+        fs.writeFileSync(pidPath, bad);
+        assert.strictEqual(readPidfile(pidPath), null, `expected null for ${JSON.stringify(bad)}`);
+      }
+    });
+  });
+
+  suite("removePidfile", () => {
+    test("removes an existing pidfile", () => {
+      const pidPath = path.join(tmpDir, "remove-me.sock.pid");
+      fs.writeFileSync(pidPath, "1\n");
+      removePidfile(pidPath);
+      assert.ok(!fs.existsSync(pidPath));
+    });
+
+    test("does not throw for a missing file", () => {
       assert.doesNotThrow(() => {
-        removeLockfile(path.join(tmpDir, "already-gone.json"));
+        removePidfile(path.join(tmpDir, "already-gone.sock.pid"));
       });
     });
   });

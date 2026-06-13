@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { PtyDaemonClient } from "../../src/daemon/ptyDaemonClient";
-import { readLockfile, generateSecret } from "../../src/daemon/lockfile";
+import { readPidfile, generateSecret } from "../../src/daemon/lockfile";
 
 /**
  * Daemon integration tests — spawn real loomptyd, exercise the client.
@@ -26,10 +26,11 @@ const DAEMON_TEST_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 5000;
 function uniquePaths() {
   const id = `test-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const dir = os.tmpdir();
+  const socket = path.join(dir, `alterm-${id}.sock`);
   return {
-    socket:   path.join(dir, `alterm-${id}.sock`),
-    lockfile: path.join(dir, `alterm-${id}.json`),
-    log:      path.join(dir, `alterm-${id}.log`),
+    socket,
+    pidfile: socket + ".pid", // loomptyd auto-derives this from --socket
+    log:     path.join(dir, `alterm-${id}.log`),
   };
 }
 
@@ -43,7 +44,6 @@ function spawnDaemonDirect(paths: ReturnType<typeof uniquePaths>): Promise<{
   const child = cp.spawn(LOOMPTYD, [
     "--socket", paths.socket,
     "--secret", secret,
-    "--lockfile", paths.lockfile,
     "--log", paths.log,
   ], {
     detached: true,
@@ -60,11 +60,11 @@ function spawnDaemonDirect(paths: ReturnType<typeof uniquePaths>): Promise<{
     }, DAEMON_BOOT_TIMEOUT_MS);
 
     const poll = setInterval(() => {
-      const info = readLockfile(paths.lockfile);
-      if (info) {
+      const pid = readPidfile(paths.pidfile);
+      if (pid) {
         clearInterval(poll);
         clearTimeout(timeout);
-        resolve({ pid: info.pid, secret, child });
+        resolve({ pid, secret, child });
       }
     }, 50);
   });
@@ -146,7 +146,7 @@ suite("Daemon Integration", () => {
 
       const child = cp.fork(
         SPAWN_HELPER,
-        [LOOMPTYD, paths.socket, paths.lockfile, paths.log],
+        [LOOMPTYD, paths.socket, paths.log],
         { stdio: ["ignore", "pipe", "pipe", "ipc"] },
       );
 
@@ -200,7 +200,7 @@ suite("Daemon Integration", () => {
       // This simulates VS Code's extension host clean shutdown.
       const child = cp.fork(
         SPAWN_HELPER,
-        [LOOMPTYD, paths.socket, paths.lockfile, paths.log],
+        [LOOMPTYD, paths.socket, paths.log],
         { stdio: ["ignore", "pipe", "pipe", "ipc"] },
       );
 
@@ -347,7 +347,6 @@ suite("Daemon Integration", () => {
       const child = cp.spawn(LOOMPTYD, [
         "--socket", paths.socket,
         "--secret", secret,
-        "--lockfile", paths.lockfile,
         "--handoff-listen", handoffPath,
       ], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
       child.stdout!.resume();

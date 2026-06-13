@@ -15,15 +15,15 @@ import * as fs from "fs";
 import { Logger } from "../utils/logger";
 import { PtyDaemonClient } from "./ptyDaemonClient";
 import {
-  lockfilePath,
+  pidfilePath,
   socketPath,
   secretPath,
   logPath,
   generateSecret,
-  readLockfile,
+  readPidfile,
   readSecret,
   writeSecret,
-  removeLockfile,
+  removePidfile,
   removeSecret,
   removeStaleSocket,
   isProcessAlive,
@@ -157,7 +157,6 @@ export class DaemonManager {
     }
 
     const sockPath = socketPath(GLOBAL_DAEMON_ID);
-    const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
     const secret = readSecret(secretPath(GLOBAL_DAEMON_ID));
     if (!secret) {
       Logger.warn("[daemon] no secret on file — cannot hand off; staying on current daemon");
@@ -174,7 +173,7 @@ export class DaemonManager {
     try {
       Logger.info("[daemon] starting zero-downtime handoff...");
       // 1. Bring up the successor listening on the handoff socket.
-      await this._spawnSuccessorForHandoff(sockPath, lockPath, secret, handoffPath);
+      await this._spawnSuccessorForHandoff(sockPath, secret, handoffPath);
 
       // 2. Tell the old daemon to transfer its sessions to the successor.
       //    Fire-and-forget: on success it shuts down silently. Mark our own
@@ -214,7 +213,6 @@ export class DaemonManager {
    */
   private async _spawnSuccessorForHandoff(
     sockPath: string,
-    lockPath: string,
     secret: string,
     handoffPath: string,
   ): Promise<void> {
@@ -232,7 +230,7 @@ export class DaemonManager {
       // logs to the SAME canonical path as its predecessor (O_APPEND), so
       // the handoff shows up as one continuous timeline.
       const launcherArgs = [
-        launcher, binary, sockPath, secret, lockPath,
+        launcher, binary, sockPath, secret,
         "--log", logPath(GLOBAL_DAEMON_ID),
         "--handoff-listen", handoffPath,
       ];
@@ -271,34 +269,35 @@ export class DaemonManager {
   // Internal
   // -------------------------------------------------------------------------
 
-  /** Try connecting to an existing daemon via lockfile. */
+  /** Try connecting to an existing daemon, discovered via its `<socket>.pid` pidfile. */
   private async _tryConnect(): Promise<PtyDaemonClient | null> {
-    const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
-    const lockInfo = readLockfile(lockPath);
-    if (!lockInfo || !isProcessAlive(lockInfo.pid)) {
-      Logger.info(`[daemon] _tryConnect: lockInfo=${!!lockInfo} alive=${lockInfo ? isProcessAlive(lockInfo.pid) : "n/a"}`);
-      // Clean up stale lockfile
-      if (lockInfo) {
-        removeLockfile(lockPath);
-        removeStaleSocket(lockInfo.socketPath);
+    const sockPath = socketPath(GLOBAL_DAEMON_ID);
+    const pidPath = pidfilePath(GLOBAL_DAEMON_ID);
+    const pid = readPidfile(pidPath);
+    if (!pid || !isProcessAlive(pid)) {
+      Logger.info(`[daemon] _tryConnect: pid=${pid ?? "none"} alive=${pid ? isProcessAlive(pid) : "n/a"}`);
+      // Stale pidfile from a crashed daemon — clean it (and the dead socket) up.
+      if (pid) {
+        removePidfile(pidPath);
+        removeStaleSocket(sockPath);
       }
       return null;
     }
 
     const secret = readSecret(secretPath(GLOBAL_DAEMON_ID));
     if (!secret) {
-      Logger.info("[daemon] _tryConnect: lockfile exists but no secret file");
+      Logger.info("[daemon] _tryConnect: pidfile exists but no secret file");
       return null;
     }
 
     try {
       const client = new PtyDaemonClient(this._sessionId, secret);
-      await client.connect(lockInfo.socketPath);
+      await client.connect(sockPath);
       const alive = await client.ping();
       if (alive) {
         this._client = client;
         this._setupDisconnectHandler(client);
-        Logger.info(`Connected to PTY daemon (PID ${lockInfo.pid})`);
+        Logger.info(`Connected to PTY daemon (PID ${pid})`);
         return client;
       }
       client.disconnect();
@@ -308,24 +307,23 @@ export class DaemonManager {
     }
 
     // Clean up after failed connection
-    removeLockfile(lockPath);
+    removePidfile(pidPath);
     removeSecret(secretPath(GLOBAL_DAEMON_ID));
-    removeStaleSocket(socketPath(GLOBAL_DAEMON_ID));
+    removeStaleSocket(sockPath);
     return null;
   }
 
   /** Spawn a new daemon and connect to it. Caller holds the spawn lock. */
   private async _spawnAndConnect(): Promise<PtyDaemonClient | null> {
-    const lockPath = lockfilePath(GLOBAL_DAEMON_ID);
     const sockPath = socketPath(GLOBAL_DAEMON_ID);
 
     // Clean up any leftover state
-    removeLockfile(lockPath);
+    removePidfile(pidfilePath(GLOBAL_DAEMON_ID));
     removeSecret(secretPath(GLOBAL_DAEMON_ID));
     removeStaleSocket(sockPath);
 
     try {
-      const daemonSecret = await this._spawnDaemon(lockPath, sockPath);
+      const daemonSecret = await this._spawnDaemon(sockPath);
       const client = new PtyDaemonClient(this._sessionId, daemonSecret);
       await client.connect(sockPath);
       this._client = client;
@@ -381,13 +379,14 @@ export class DaemonManager {
    * Spawn the loomptyd daemon binary.
    * loomptyd daemonizes via setsid (no fork), so the spawned process IS
    * the daemon — it keeps running rather than parent-exiting. We detect
-   * readiness by polling for the lockfile it writes once the control
-   * socket is bound.
+   * readiness by polling for the `<socket>.pid` pidfile it writes once the
+   * control socket is bound.
    */
-  private async _spawnDaemon(lockPath: string, sockPath: string): Promise<string> {
+  private async _spawnDaemon(sockPath: string): Promise<string> {
     const secret = generateSecret();
     const binary = await this._findLoomptyd();
     const launcher = path.join(this._extensionPath, "scripts", "spawn-loomptyd.js");
+    const pidPath = pidfilePath(GLOBAL_DAEMON_ID);
 
     return new Promise((resolve, reject) => {
       // Route through a short-lived Node launcher that spawns loomptyd
@@ -395,9 +394,10 @@ export class DaemonManager {
       // kills them directly on close — which kills loomptyd even with
       // setsid. The launcher breaks this tracking: VS Code only knows
       // about the launcher (which dies immediately), while loomptyd is
-      // a grandchild orphaned to launchd.
+      // a grandchild orphaned to launchd. loomptyd auto-derives its
+      // pidfile from --socket (<socket>.pid), so no lockfile arg is passed.
       const launcherArgs = [
-        launcher, binary, sockPath, secret, lockPath,
+        launcher, binary, sockPath, secret,
         "--log", logPath(GLOBAL_DAEMON_ID),
       ];
 
@@ -422,20 +422,20 @@ export class DaemonManager {
       }, 10000);
 
       const poll = setInterval(() => {
-        const info = readLockfile(lockPath);
-        if (info) {
+        const pid = readPidfile(pidPath);
+        if (pid) {
           writeSecret(secretPath(GLOBAL_DAEMON_ID), secret);
           clearInterval(poll);
           clearTimeout(timeout);
-          Logger.info(`[daemon] loomptyd ready, PID ${info.pid}`);
+          Logger.info(`[daemon] loomptyd ready, PID ${pid}`);
           resolve(secret);
         }
       }, 100);
 
       // Launcher exits quickly after spawning loomptyd. If it exits
-      // non-zero before the lockfile appears, the spawn itself failed.
+      // non-zero before the pidfile appears, the spawn itself failed.
       launcherProc.on("exit", (code, signal) => {
-        if (code !== 0 && code !== null && !readLockfile(lockPath)) {
+        if (code !== 0 && code !== null && !readPidfile(pidPath)) {
           clearInterval(poll);
           clearTimeout(timeout);
           reject(new Error(

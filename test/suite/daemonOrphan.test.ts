@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { PtyDaemonClient } from "../../src/daemon/ptyDaemonClient";
-import { readLockfile } from "../../src/daemon/lockfile";
+import { readPidfile } from "../../src/daemon/lockfile";
 
 /**
  * Orphan-daemon scenarios.
@@ -23,10 +23,11 @@ const DAEMON_TEST_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 5000;
 function uniquePaths() {
   const id = `test-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const dir = os.tmpdir();
+  const socket = path.join(dir, `alterm-${id}.sock`);
   return {
-    socket:   path.join(dir, `alterm-${id}.sock`),
-    lockfile: path.join(dir, `alterm-${id}.json`),
-    log:      path.join(dir, `alterm-${id}.log`),
+    socket,
+    pidfile: socket + ".pid", // loomptyd auto-derives this from --socket
+    log:     path.join(dir, `alterm-${id}.log`),
   };
 }
 
@@ -34,7 +35,6 @@ function spawnRaw(paths: ReturnType<typeof uniquePaths>, secret: string): Promis
   const child = cp.spawn(LOOMPTYD, [
     "--socket", paths.socket,
     "--secret", secret,
-    "--lockfile", paths.lockfile,
     "--log", paths.log,
   ], {
     detached: true,
@@ -50,11 +50,11 @@ function spawnRaw(paths: ReturnType<typeof uniquePaths>, secret: string): Promis
       reject(new Error(`daemon startup timed out after ${DAEMON_BOOT_TIMEOUT_MS}ms`));
     }, DAEMON_BOOT_TIMEOUT_MS);
     const poll = setInterval(() => {
-      const info = readLockfile(paths.lockfile);
-      if (info) {
+      const pid = readPidfile(paths.pidfile);
+      if (pid) {
         clearInterval(poll);
         clearTimeout(timer);
-        resolve(info.pid);
+        resolve(pid);
       }
     }, 50);
   });
@@ -107,7 +107,7 @@ suite("Orphan Daemon Scenarios", () => {
 
     try {
       // Simulate what _spawnAndConnect does: remove all state files
-      fs.unlinkSync(paths.lockfile);
+      fs.unlinkSync(paths.pidfile);
       try { fs.unlinkSync(paths.socket); } catch {}
 
       // Spawn a second daemon at the same socket path
@@ -120,9 +120,9 @@ suite("Orphan Daemon Scenarios", () => {
       assert.ok(isAlive(secondPid), `second daemon (PID ${secondPid}) should be alive`);
       assert.notStrictEqual(firstPid, secondPid, "pids should differ");
 
-      // The lockfile should reflect the newer daemon
-      const info = readLockfile(paths.lockfile);
-      assert.strictEqual(info?.pid, secondPid, "lockfile points to the new daemon");
+      // The pidfile should reflect the newer daemon
+      const newPid = readPidfile(paths.pidfile);
+      assert.strictEqual(newPid, secondPid, "pidfile points to the new daemon");
 
       // Connection to the socket path goes to the new daemon (most recent bind)
       const client = new PtyDaemonClient("s", "second-secret");
@@ -131,9 +131,9 @@ suite("Orphan Daemon Scenarios", () => {
       client.disconnect();
     } finally {
       killPid(firstPid);
-      // The second pid is whatever readLockfile says — kill that too
-      const info = readLockfile(paths.lockfile);
-      if (info?.pid && info.pid !== firstPid) killPid(info.pid);
+      // The second pid is whatever the pidfile says — kill that too
+      const livePid = readPidfile(paths.pidfile);
+      if (livePid && livePid !== firstPid) killPid(livePid);
       await sleep(200);
       cleanupPaths(paths);
     }
@@ -172,12 +172,12 @@ suite("Orphan Daemon Scenarios", () => {
     try {
       // Verify orphan state matches Dale's diagnostic output
       assert.ok(isAlive(orphanPid), "orphan is alive");
-      const info = readLockfile(paths.lockfile);
-      assert.strictEqual(info?.pid, orphanPid, "lockfile points to orphan");
+      const livePid = readPidfile(paths.pidfile);
+      assert.strictEqual(livePid, orphanPid, "pidfile points to orphan");
       // No secret file exists — we never wrote one
 
       // Simulate _spawnAndConnect's cleanup: remove lockfile + socket
-      fs.unlinkSync(paths.lockfile);
+      fs.unlinkSync(paths.pidfile);
       try { fs.unlinkSync(paths.socket); } catch {}
 
       // Now spawn a replacement (what _spawnDaemon does)
@@ -201,8 +201,8 @@ suite("Orphan Daemon Scenarios", () => {
       client.disconnect();
     } finally {
       killPid(orphanPid);
-      const info = readLockfile(paths.lockfile);
-      if (info?.pid && info.pid !== orphanPid) killPid(info.pid);
+      const livePid = readPidfile(paths.pidfile);
+      if (livePid && livePid !== orphanPid) killPid(livePid);
       await sleep(200);
       cleanupPaths(paths);
     }

@@ -8,21 +8,24 @@
 // loomptyd is a grandchild, untracked by VS Code, orphaned to launchd
 // as soon as we exit.
 //
-// Usage (as argv): <loomptyd-path> <socket> <secret> <lockfile> [--log PATH]
+// Usage (as argv): <loomptyd-path> <socket> <secret> [extra loomptyd args...]
+//
+// loomptyd (>=0.3.1) auto-derives its pidfile as <socket>.pid; the old
+// --lockfile flag was removed, so no lockfile path is passed. Any extra args
+// (e.g. --log PATH, --handoff-listen PATH) ride through to loomptyd verbatim.
 
 const cp = require("child_process");
 
-const [, , loomptyd, socket, secret, lockfile, ...rest] = process.argv;
+const [, , loomptyd, socket, secret, ...rest] = process.argv;
 
-if (!loomptyd || !socket || !secret || !lockfile) {
-  console.error("usage: spawn-loomptyd.js <loomptyd> <socket> <secret> <lockfile> [--log PATH]");
+if (!loomptyd || !socket || !secret) {
+  console.error("usage: spawn-loomptyd.js <loomptyd> <socket> <secret> [extra loomptyd args...]");
   process.exit(1);
 }
 
 const args = [
   "--socket", socket,
   "--secret", secret,
-  "--lockfile", lockfile,
   ...rest,
 ];
 

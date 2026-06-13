@@ -9,7 +9,6 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { DaemonLockfile } from "./protocol";
 
 /**
  * Derive a deterministic short hash from workspace folder URIs.
@@ -25,9 +24,14 @@ function runtimeDir(): string {
   return process.env.XDG_RUNTIME_DIR || os.tmpdir();
 }
 
-/** Lockfile path for a given workspace hash. */
-export function lockfilePath(wsHash: string): string {
-  return path.join(runtimeDir(), `alterminal-daemon-${wsHash}.json`);
+/**
+ * Pidfile path for a given workspace hash. loomptyd (≥0.3.1) auto-derives its
+ * ownership pidfile as `<socket>.pid` — a plain-text decimal pid, flock-held,
+ * auto-released on exit. There is no separate JSON lockfile anymore, so daemon
+ * discovery keys off this sibling of the socket path.
+ */
+export function pidfilePath(wsHash: string): string {
+  return socketPath(wsHash) + ".pid";
 }
 
 /** Socket path for a given workspace hash. */
@@ -43,22 +47,18 @@ export function generateSecret(): string {
   return crypto.randomBytes(16).toString("hex");
 }
 
-/** Write the lockfile atomically with restricted permissions (owner-only). */
-export function writeLockfile(lockPath: string, info: DaemonLockfile): void {
-  const tmp = lockPath + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(info, null, 2), { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(tmp, lockPath);
-}
-
-/** Read and parse the lockfile, returning null if missing or corrupt. */
-export function readLockfile(lockPath: string): DaemonLockfile | null {
+/**
+ * Read the daemon pidfile written by loomptyd (`<socket>.pid`): a single
+ * decimal pid. Returns the pid, or null if the file is missing, empty, or not
+ * yet populated. loomptyd `open(O_CREAT)`s the file before writing the pid, so
+ * a caller polling for readiness must treat the empty-file case as "not up yet"
+ * — hence the positive-integer guard rather than trusting mere existence.
+ */
+export function readPidfile(pidPath: string): number | null {
   try {
-    const raw = fs.readFileSync(lockPath, "utf8");
-    const data = JSON.parse(raw);
-    if (!data.pid || !data.socketPath) {
-      return null;
-    }
-    return data as DaemonLockfile;
+    const raw = fs.readFileSync(pidPath, "utf8").trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
   }
@@ -105,10 +105,10 @@ export function removeSecret(secretFilePath: string): void {
   }
 }
 
-/** Delete the lockfile. */
-export function removeLockfile(lockPath: string): void {
+/** Delete the daemon pidfile (best-effort; loomptyd also unlinks its own on a clean exit). */
+export function removePidfile(pidPath: string): void {
   try {
-    fs.unlinkSync(lockPath);
+    fs.unlinkSync(pidPath);
   } catch {
     // already gone
   }
