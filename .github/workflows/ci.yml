@@ -10,20 +10,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build + unit/integration tests on the self-hosted november runner via the
-  # org-wide reusable suite (TwilightCoders/.github). First consumer of the
-  # shared workflow — other repos opt in the same way. The non-daemon suites
-  # run here; daemon-tests stays a bespoke job below.
+  # Build + unit/integration tests on the self-hosted november runner.
+  # (The org-wide reusable suite lives in TwilightCoders/.github and is wired to
+  # run here too, but consuming a private cross-repo reusable workflow needs an
+  # org-level Actions policy that requires admin:org — staged until that's set;
+  # see ops/gh-runner/README.) Inline here so it runs on the NAS today.
   test:
-    uses: TwilightCoders/.github/.github/workflows/november-ci.yml@main
-    with:
-      runs-on: self-hosted
-      node-version: "22"
-      build: |
-        (cd lib/xterm-addon-webgpu && npm ci && npm run build)
-        npm run compile
-      test: npm test
-      xvfb: true
+    runs-on: [self-hosted, november]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Build WebGPU renderer addon
+        run: |
+          cd lib/xterm-addon-webgpu
+          npm ci
+          npm run build
+      - run: npm run compile
+      - name: Run tests
+        run: xvfb-run -a npm test
 
   # Exercises the real daemon contract (spawn/connect/persistence/handoff/
   # reattach/orphan) against a freshly-built loomptyd — the coverage whose
