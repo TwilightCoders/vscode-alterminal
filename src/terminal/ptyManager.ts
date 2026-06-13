@@ -653,7 +653,7 @@ export class PtyManager {
 
     // Determine what command/shell to spawn based on terminal type
     const userShell = shellPath || this._getDefaultShell();
-    let command: string;
+    const command = userShell;
     let args: string[];
 
     const isWindowsPowerShell = process.platform === "win32" &&
@@ -664,42 +664,18 @@ export class PtyManager {
     const expandedCommand = launchCommand && this._expandCommand
       ? this._expandCommand(launchCommand) : launchCommand;
 
-    switch (terminalType) {
-      case "command":
-        // Use shell with -c to execute command with full environment
-        if (expandedCommand) {
-          command = userShell;
-          if (isWindowsPowerShell) {
-            args = ["-NoLogo", "-Command", expandedCommand];
-          } else if (isWindowsCmd) {
-            args = ["/c", expandedCommand];
-          } else {
-            args = ["-l", "-i", "-c", expandedCommand];
-          }
-        } else {
-          command = userShell;
-          if (isWindowsPowerShell) {
-            args = ["-NoLogo"];
-          } else if (isWindowsCmd) {
-            args = [];
-          } else {
-            args = ["-l", "-i"];
-          }
-        }
-        break;
-
-      case "shell":
-      case "default":
-      default:
-        command = userShell;
-        if (isWindowsPowerShell) {
-          args = ["-NoLogo"];
-        } else if (isWindowsCmd) {
-          args = [];
-        } else {
-          args = ["-l", "-i"];
-        }
-        break;
+    // Interactive/login base args per shell family (this matrix was repeated
+    // three times across the terminal-type branches). A "command" terminal just
+    // appends the run-a-command flag + the command on top of the base.
+    const baseArgs = isWindowsPowerShell ? ["-NoLogo"] : isWindowsCmd ? [] : ["-l", "-i"];
+    if (terminalType === "command" && expandedCommand) {
+      args = isWindowsPowerShell
+        ? [...baseArgs, "-Command", expandedCommand]
+        : isWindowsCmd
+          ? ["/c", expandedCommand]
+          : [...baseArgs, "-c", expandedCommand];
+    } else {
+      args = baseArgs;
     }
 
     const resolvedCwd =
