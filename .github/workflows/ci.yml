@@ -41,7 +41,11 @@ jobs:
   # TwilightCoders/loompty); until it exists the job is green with a warning,
   # not red.
   daemon-tests:
-    runs-on: ubuntu-latest
+    # Runs on the self-hosted runner on november (TrueNAS) — see ops/gh-runner/.
+    # The image bakes the C++ build + Electron/xvfb deps, so this job's heavy
+    # work (compile loomptyd + run the test host) costs no GitHub minutes. If
+    # the runner is offline the job queues until it's back.
+    runs-on: [self-hosted, november]
     steps:
       - name: Gate on loompty access
         id: gate
