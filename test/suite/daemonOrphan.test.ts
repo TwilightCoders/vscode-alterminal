@@ -75,8 +75,12 @@ suite("Orphan Daemon Scenarios", () => {
   // Spawns a real loomptyd from bin/loomptyd, which is gitignored and absent on
   // CI runners without a loompty source tree. Skip rather than hard-fail.
   suiteSetup(function () {
-    if (!fs.existsSync(LOOMPTYD)) this.skip();
-    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip();
+    // Opt-in only; once opted in, a missing binary fails loudly rather than
+    // silently skipping the daemon contract (see daemonIntegration).
+    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip(); // aborts the hook
+    if (!fs.existsSync(LOOMPTYD)) {
+      throw new Error(`ALTERMINAL_RUN_DAEMON_TESTS=1 but loomptyd not found at ${LOOMPTYD}`);
+    }
   });
 
   test("unlinking socket file does not kill a listening daemon", async function () {

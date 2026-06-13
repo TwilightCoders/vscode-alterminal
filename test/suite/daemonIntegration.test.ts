@@ -93,8 +93,13 @@ suite("Daemon Integration", () => {
   // (built locally / vendored per-platform), so it's absent on CI runners
   // without a loompty source tree. Skip rather than hard-fail when it's missing.
   suiteSetup(function () {
-    if (!fs.existsSync(LOOMPTYD)) this.skip();
-    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip();
+    // Opt-in only (these spawn a real daemon). But once opted in, a missing
+    // binary must FAIL, not silently skip — otherwise a misconfigured CI claims
+    // the daemon contract is covered when it ran nothing.
+    if (process.env.ALTERMINAL_RUN_DAEMON_TESTS !== "1") this.skip(); // aborts the hook
+    if (!fs.existsSync(LOOMPTYD)) {
+      throw new Error(`ALTERMINAL_RUN_DAEMON_TESTS=1 but loomptyd not found at ${LOOMPTYD}`);
+    }
   });
 
   suite("spawn + connect", () => {
