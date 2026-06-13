@@ -10,11 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build + unit/integration tests on the self-hosted november runner.
-  # (The org-wide reusable suite lives in TwilightCoders/.github and is wired to
-  # run here too, but consuming a private cross-repo reusable workflow needs an
-  # org-level Actions policy that requires admin:org — staged until that's set;
-  # see ops/gh-runner/README.) Inline here so it runs on the NAS today.
+  # Build + unit/integration tests on the org-scoped self-hosted runner on
+  # november (ops/gh-runner/). Any org repo can target it the same way.
   test:
     runs-on: [self-hosted, november]
     steps:

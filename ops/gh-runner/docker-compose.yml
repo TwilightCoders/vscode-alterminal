@@ -1,14 +1,16 @@
-# Self-hosted GitHub Actions runner for TwilightCoders/vscode-alterminal,
-# running on november (TrueNAS SCALE, Docker-native). Deploy from
-# /mnt/tank1/apps/gh-runner/ with `docker compose up -d --build`.
+# Self-hosted GitHub Actions runner for the TwilightCoders ORG (every repo can
+# target it with `runs-on: self-hosted`), running on november (TrueNAS SCALE,
+# Docker-native). Deploy from /mnt/tank1/apps/gh-runner/ with
+# `docker compose up -d --build`.
 #
-# Auth: put exactly one of RUNNER_TOKEN (short-lived registration token) or
-# ACCESS_TOKEN (a fine-grained PAT with repo Administration: read+write) in
-# .env. ACCESS_TOKEN is preferred — it lets the runner re-register itself, so
-# it survives a container recreate; a RUNNER_TOKEN only bootstraps once.
+# Auth: put exactly one of RUNNER_TOKEN (short-lived ORG registration token from
+# Org Settings → Actions → Runners → New runner) or ACCESS_TOKEN (a PAT with org
+# "Self-hosted runners" read+write) in .env. ACCESS_TOKEN is preferred — it lets
+# the runner re-register itself, so it survives a container recreate; a
+# RUNNER_TOKEN only bootstraps once (and expires ~1h).
 #
-# No docker socket is mounted on purpose: alterminal's CI jobs don't use
-# docker, so the runner stays unprivileged.
+# No docker socket is mounted on purpose: CI jobs here don't use docker, so the
+# runner stays unprivileged.
 services:
   runner:
     build: .
@@ -17,8 +19,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      RUNNER_SCOPE: repo
-      REPO_URL: https://github.com/TwilightCoders/vscode-alterminal
+      RUNNER_SCOPE: org
+      ORG_NAME: TwilightCoders
       RUNNER_NAME: november
       LABELS: self-hosted,linux,x64,november
       EPHEMERAL: "false"
