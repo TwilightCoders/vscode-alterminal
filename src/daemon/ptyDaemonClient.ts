@@ -104,7 +104,7 @@ export class PtyDaemonClient extends EventEmitter {
             if (dm.type === "error") {
               socket.removeListener("data", onData);
               settled = true;
-              reject(new Error(`Auth failed: ${(dm as any).message}`));
+              reject(new Error(`Auth failed: ${dm.message}`));
               socket.destroy();
               return;
             }
@@ -210,13 +210,13 @@ export class PtyDaemonClient extends EventEmitter {
     });
 
     if (response.type === "error") {
-      throw new Error((response as any).message);
+      throw new Error(response.message);
     }
     if (response.type !== "spawned") {
       throw new Error(`Unexpected response: ${response.type}`);
     }
 
-    const pid = (response as any).pid as number;
+    const pid = response.pid;
 
     // Attach a raw data socket for this session
     await this._attachSession(ptyId);
@@ -259,9 +259,7 @@ export class PtyDaemonClient extends EventEmitter {
     const id = this._nextId();
     const response = await this._request({ type: "list", id });
     if (response.type === "ptyList") {
-      const sessions = (response as any).sessions as Array<{
-        name: string; pid: number; cwd: string; cols: number; rows: number; alive: boolean;
-      }>;
+      const sessions = response.sessions;
       return sessions.map((s) => ({
         ptyId: s.name,
         pid: s.pid,
@@ -377,9 +375,9 @@ export class PtyDaemonClient extends EventEmitter {
     // Asynchronous events from daemon
     switch (msg.type) {
       case "exit": {
-        const name = (msg as any).name as string;
-        const exitCode = (msg as any).exitCode as number;
-        const signal = (msg as any).signal as number | undefined;
+        const name = msg.name;
+        const exitCode = msg.exitCode;
+        const signal = msg.signal;
         this.emit("exit", name, exitCode, signal);
         // Clean up session socket
         const sock = this._sessionSockets.get(name);
@@ -391,7 +389,7 @@ export class PtyDaemonClient extends EventEmitter {
         break;
       }
       case "bell": {
-        const name = (msg as any).name as string;
+        const name = msg.name;
         this.emit("bell", name);
         break;
       }
@@ -463,7 +461,7 @@ export class PtyDaemonClient extends EventEmitter {
               }
               if (dm.type === "error") {
                 settle(() => {
-                  reject(new Error(`Session auth failed: ${(dm as any).message}`));
+                  reject(new Error(`Session auth failed: ${dm.message}`));
                   socket.destroy();
                 });
                 return;
@@ -477,8 +475,11 @@ export class PtyDaemonClient extends EventEmitter {
             const result = decoder.consumeAttachResponse();
             if (result.message) {
               if (result.message.type === "error") {
+                // Capture outside the closure — the discriminated-union narrowing
+                // on the property access doesn't persist into the deferred settle.
+                const errText = result.message.message;
                 settle(() => {
-                  reject(new Error(`Attach failed: ${(result.message as any).message}`));
+                  reject(new Error(`Attach failed: ${errText}`));
                   socket.destroy();
                 });
                 return;
