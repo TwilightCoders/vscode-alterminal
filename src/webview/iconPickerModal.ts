@@ -1,47 +1,35 @@
 /**
  * Tab Icon Picker — webview-side modal.
  *
- * Renders a searchable grid of all VS Code codicons (~525). Replaces the
- * 12-item QuickPick that the host used to show. On selection, invokes
- * onSelect(tabId, "$(icon-name)") — the caller is responsible for
- * applying the icon and persisting state.
+ * Renders a searchable grid of all VS Code codicons. Replaces the 12-item
+ * QuickPick the host used to show. On selection, invokes
+ * onSelect(tabId, "$(icon-name)") — the caller applies the icon and persists.
  *
- * Single instance per webview — opening while one is mounted is a no-op
- * (the existing one keeps focus). Esc, backdrop click, or selection
- * dismisses it.
+ * Shell (overlay/dialog/header/× close, backdrop + Esc dismissal) comes from
+ * {@link BaseModal}; this class only builds the search + grid body. Single
+ * instance per webview — opening while mounted refocuses the search.
  */
 
 import { CODICON_NAMES } from "../generated/codicons.js";
+import { BaseModal } from "./baseModal.js";
 
 export type IconPickerSelectHandler = (tabId: number, icon: string) => void;
 
-export class IconPickerModal {
-  private overlay: HTMLElement | null = null;
+export class IconPickerModal extends BaseModal {
   private currentTabId: number | null = null;
-  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private search: HTMLInputElement | null = null;
+  private grid: HTMLElement | null = null;
 
-  constructor(private readonly onSelect: IconPickerSelectHandler) {}
+  constructor(private readonly onSelect: IconPickerSelectHandler) {
+    super("icon-picker", "Choose tab icon");
+  }
 
   open(tabId: number): void {
-    if (this.overlay) {
-      // Already open — refocus the search input.
-      const search = this.overlay.querySelector<HTMLInputElement>(".icon-picker-search");
-      search?.focus();
-      return;
-    }
-
     this.currentTabId = tabId;
+    this.mount();
+  }
 
-    const overlay = document.createElement("div");
-    overlay.className = "icon-picker-overlay";
-
-    const dialog = document.createElement("div");
-    dialog.className = "icon-picker-dialog";
-
-    const title = document.createElement("div");
-    title.className = "icon-picker-title";
-    title.textContent = "Choose tab icon";
-
+  protected buildBody(dialog: HTMLElement): void {
     const search = document.createElement("input");
     search.type = "text";
     search.className = "icon-picker-search";
@@ -62,11 +50,10 @@ export class IconPickerModal {
     status.className = "icon-picker-status";
     status.textContent = `${CODICON_NAMES.length} icons · click to select · Esc to cancel`;
 
-    dialog.append(title, search, grid, empty, status);
-    overlay.appendChild(dialog);
+    dialog.append(search, grid, empty, status);
 
-    // Populate full grid up front. 525 items × tiny cells is well within
-    // what the browser handles without virtualization; jank-free.
+    // Populate full grid up front. ~500 tiny cells is well within what the
+    // browser handles without virtualization; jank-free.
     const fragment = document.createDocumentFragment();
     for (const name of CODICON_NAMES) {
       fragment.appendChild(this.buildCell(name));
@@ -95,40 +82,35 @@ export class IconPickerModal {
       this.selectAndClose(cell.dataset.name);
     });
 
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) this.close();
-    });
-
-    this.keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        this.close();
-      } else if (e.key === "Enter") {
-        // Enter selects the first visible cell — quick search→pick flow.
-        const first = grid.querySelector<HTMLElement>('.icon-picker-cell:not([style*="display: none"])');
-        if (first?.dataset.name) {
-          e.preventDefault();
-          this.selectAndClose(first.dataset.name);
-        }
-      }
-    };
-    document.addEventListener("keydown", this.keyHandler);
-
-    document.body.appendChild(overlay);
-    this.overlay = overlay;
-
-    // Defer focus so the modal is in the DOM before we steal focus.
-    requestAnimationFrame(() => search.focus());
+    this.search = search;
+    this.grid = grid;
   }
 
-  close(): void {
-    if (this.keyHandler) {
-      document.removeEventListener("keydown", this.keyHandler);
-      this.keyHandler = null;
-    }
-    this.overlay?.remove();
-    this.overlay = null;
+  protected onShown(): void {
+    this.search?.focus();
+  }
+
+  protected onReopen(): void {
+    this.search?.focus();
+  }
+
+  protected onClose(): void {
     this.currentTabId = null;
+    this.search = null;
+    this.grid = null;
+  }
+
+  protected onKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Enter") {
+      // Enter selects the first visible cell — quick search→pick flow.
+      const first = this.grid?.querySelector<HTMLElement>(
+        '.icon-picker-cell:not([style*="display: none"])',
+      );
+      if (first?.dataset.name) {
+        e.preventDefault();
+        this.selectAndClose(first.dataset.name);
+      }
+    }
   }
 
   private buildCell(name: string): HTMLElement {

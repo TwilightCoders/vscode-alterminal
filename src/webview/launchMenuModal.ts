@@ -13,6 +13,7 @@
  */
 
 import type { LaunchMenuData, SavedCommand } from "../shared/messages.js";
+import { BaseModal } from "./baseModal.js";
 
 export interface LaunchMenuModalCallbacks {
   launchShell: (shellPath: string) => void;
@@ -23,52 +24,29 @@ export interface LaunchMenuModalCallbacks {
 
 type LaunchItemKind = "shell" | "saved" | "custom" | "help" | "settings";
 
-export class LaunchMenuModal {
-  private overlay: HTMLElement | null = null;
-  private dialog: HTMLElement | null = null;
+export class LaunchMenuModal extends BaseModal {
   private search: HTMLInputElement | null = null;
   private list: HTMLElement | null = null;
   private empty: HTMLElement | null = null;
   private status: HTMLElement | null = null;
   private data: LaunchMenuData | null = null;
-  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
-  constructor(private readonly callbacks: LaunchMenuModalCallbacks) {}
+  constructor(private readonly callbacks: LaunchMenuModalCallbacks) {
+    super("launch-menu", "New Terminal");
+  }
 
   public setData(data: LaunchMenuData): void {
     this.data = data;
-    if (this.overlay) {
+    if (this.isOpen) {
       this.render();
     }
   }
 
   public open(): void {
-    if (this.overlay) {
-      this.search?.focus();
-      this.search?.select();
-      return;
-    }
+    this.mount();
+  }
 
-    const overlay = document.createElement("div");
-    overlay.className = "launch-menu-overlay";
-
-    const dialog = document.createElement("div");
-    dialog.className = "launch-menu-dialog";
-
-    const header = document.createElement("div");
-    header.className = "launch-menu-header";
-
-    const title = document.createElement("div");
-    title.className = "launch-menu-title";
-    title.textContent = "New Terminal";
-
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "launch-menu-close codicon codicon-close";
-    closeButton.title = "Close";
-    closeButton.setAttribute("aria-label", "Close");
-    closeButton.addEventListener("click", () => this.close());
-
+  protected buildBody(dialog: HTMLElement): void {
     const search = document.createElement("input");
     search.type = "text";
     search.className = "launch-menu-search";
@@ -87,63 +65,39 @@ export class LaunchMenuModal {
     const status = document.createElement("div");
     status.className = "launch-menu-status";
 
-    header.append(title, closeButton);
-    dialog.append(header, search, list, empty, status);
-    overlay.appendChild(dialog);
-
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) {
-        this.close();
-      }
-    });
+    dialog.append(search, list, empty, status);
 
     search.addEventListener("input", () => this.render());
-    search.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        this.handleSearchEnter();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        this.close();
-      }
-    });
 
-    this.keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        this.close();
-      }
-    };
-    document.addEventListener("keydown", this.keyHandler);
-
-    document.body.appendChild(overlay);
-
-    this.overlay = overlay;
-    this.dialog = dialog;
     this.search = search;
     this.list = list;
     this.empty = empty;
     this.status = status;
     this.render();
-
-    requestAnimationFrame(() => {
-      this.search?.focus();
-      this.search?.select();
-    });
   }
 
-  public close(): void {
-    if (this.keyHandler) {
-      document.removeEventListener("keydown", this.keyHandler);
-      this.keyHandler = null;
-    }
-    this.overlay?.remove();
-    this.overlay = null;
-    this.dialog = null;
+  protected onShown(): void {
+    this.search?.focus();
+    this.search?.select();
+  }
+
+  protected onReopen(): void {
+    this.search?.focus();
+    this.search?.select();
+  }
+
+  protected onClose(): void {
     this.search = null;
     this.list = null;
     this.empty = null;
     this.status = null;
+  }
+
+  protected onKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      this.handleSearchEnter();
+    }
   }
 
   private render(): void {
