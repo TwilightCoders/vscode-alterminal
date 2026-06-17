@@ -188,12 +188,23 @@ export class PtyManager {
     this._tabPtyIds.set(tabId, ptyId);
     this._ptyIdToTab.set(ptyId, tabId);
 
+    // `attach` replays the FULL scrollback as its first bytes. Clear the target
+    // (viewport + scrollback via \x1b[3J) on that first chunk so the replay
+    // lands in an empty buffer — otherwise any content the webview already holds
+    // (a SerializeAddon restore, or a retained-context buffer) stacks a second
+    // identical copy underneath the replay: the scrollback-duplication bug.
+    // Enforces loompty's contract invariant: full-replay ⟺ fresh/cleared target.
+    // (Bonus: content now comes from the raw replay, so xterm rebuilds wrap
+    // flags and resize reflows the restored history correctly.)
+    this._clearOnNextData.add(tabId);
+
     try {
       await this._daemonClient.attach(ptyId);
       Logger.info(`Reattached to daemon PTY ${ptyId} for tab ${tabId}`);
       return true;
     } catch (err) {
       Logger.error(`Failed to reattach to daemon PTY ${ptyId}:`, err);
+      this._clearOnNextData.delete(tabId);
       this._tabPtyIds.delete(tabId);
       this._ptyIdToTab.delete(ptyId);
       return false;
