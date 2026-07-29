@@ -75,11 +75,30 @@ export class PtyDaemonClient extends EventEmitter {
   }
 
   /** Connect to the daemon control socket and authenticate. */
-  connect(socketPath: string): Promise<void> {
+  connect(socketPath: string, timeoutMs = 10000): Promise<void> {
     this._socketPath = socketPath;
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(socketPath);
       let settled = false;
+
+      // A wedged daemon can accept the connection and then never answer the
+      // auth — a frozen loop still holding a live socket. Without a deadline
+      // this promise never settles, so daemon startup (and everything that
+      // awaits it) hangs indefinitely instead of failing over to a fresh
+      // daemon or direct mode. The per-session attach path already guards
+      // this; the control socket did not. Reject so callers can recover.
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        reject(new Error(`Daemon control handshake timed out after ${timeoutMs}ms (${socketPath})`));
+      }, timeoutMs);
+      const settleOnce = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
 
       socket.on("connect", () => {
         this._controlSocket = socket;
@@ -95,17 +114,19 @@ export class PtyDaemonClient extends EventEmitter {
             const dm = msg as DaemonMessage;
             if (dm.type === "auth_ok") {
               socket.removeListener("data", onData);
-              this._connected = true;
-              this._wireControlSocket(socket);
-              settled = true;
-              resolve();
+              settleOnce(() => {
+                this._connected = true;
+                this._wireControlSocket(socket);
+                resolve();
+              });
               return;
             }
             if (dm.type === "error") {
               socket.removeListener("data", onData);
-              settled = true;
-              reject(new Error(`Auth failed: ${dm.message}`));
-              socket.destroy();
+              settleOnce(() => {
+                reject(new Error(`Auth failed: ${dm.message}`));
+                socket.destroy();
+              });
               return;
             }
           }
@@ -124,10 +145,7 @@ export class PtyDaemonClient extends EventEmitter {
       });
 
       socket.on("error", (err) => {
-        if (!settled) {
-          settled = true;
-          reject(err);
-        }
+        settleOnce(() => reject(err));
       });
     });
   }
