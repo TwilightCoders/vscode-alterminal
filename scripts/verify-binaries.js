@@ -71,6 +71,31 @@ function nonRedistributableDeps(binary) {
     .filter(l => l && NON_SYSTEM_LIB_RE.test(l));
 }
 
+// Highest glibc version a Linux binary demands. Static libuv removes the
+// Homebrew-style absolute-path problem but NOT this one: glibc uses symbol
+// versioning, so an ELF built on a newer distro fails on an older one with
+// "version `GLIBC_2.xx' not found" — the same invisible-on-the-build-machine
+// failure, one layer down. Read straight out of the ELF's version requirements
+// so it works from any host (we cross-vendor from macOS, where ldd/objdump for
+// a Linux target aren't available).
+const GLIBC_BASELINE = [2, 28];   // ~RHEL8 / Debian 10 / manylinux_2_28
+
+function maxGlibcRequirement(binary) {
+  let buf;
+  try {
+    buf = fs.readFileSync(binary);
+  } catch {
+    return null;
+  }
+  if (buf.subarray(0, 4).toString('binary') !== '\x7fELF') return null;   // not Linux
+  let max = null;
+  for (const m of buf.toString('latin1').matchAll(/GLIBC_(\d+)\.(\d+)/g)) {
+    const v = [Number(m[1]), Number(m[2])];
+    if (!max || v[0] > max[0] || (v[0] === max[0] && v[1] > max[1])) max = v;
+  }
+  return max;
+}
+
 const vendoredDaemons = fs.existsSync('bin')
   ? fs.readdirSync('bin').filter(f => /^loomptyd-(darwin|linux|win32)-/.test(f))
   : [];
@@ -82,9 +107,28 @@ if (vendoredDaemons.length === 0) {
 }
 
 const badlyLinked = [];
+const glibcTooNew = [];
 for (const name of vendoredDaemons) {
-  const deps = nonRedistributableDeps(path.join('bin', name));
+  const binPath = path.join('bin', name);
+  const deps = nonRedistributableDeps(binPath);
   if (deps.length > 0) badlyLinked.push({ name, deps });
+
+  const glibc = maxGlibcRequirement(binPath);
+  if (glibc && (glibc[0] > GLIBC_BASELINE[0] ||
+      (glibc[0] === GLIBC_BASELINE[0] && glibc[1] > GLIBC_BASELINE[1]))) {
+    glibcTooNew.push({ name, needs: glibc.join('.') });
+  }
+}
+
+if (glibcTooNew.length > 0) {
+  console.error('❌ ERROR: vendored Linux daemon requires a newer glibc than the support baseline:');
+  for (const { name, needs } of glibcTooNew) {
+    console.error(`  - bin/${name} needs GLIBC_${needs} (baseline ${GLIBC_BASELINE.join('.')})`);
+  }
+  console.error('\nIt will fail on older distros with "version `GLIBC_2.xx\' not found".');
+  console.error('Build against an old glibc baseline (manylinux-style container) and/or link');
+  console.error('libstdc++/libgcc statically. Static libuv alone does NOT make Linux portable.');
+  process.exit(1);
 }
 
 if (badlyLinked.length > 0) {
