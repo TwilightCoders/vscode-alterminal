@@ -112,6 +112,15 @@ if (vendoredDaemons.includes(hostDaemon)) {
       console.error(`❌ ERROR: bin/${hostDaemon} --version printed no version string: "${version}"`);
       process.exit(1);
     }
+    // loomptyd reports its build sha, suffixed `-dirty` when built from a
+    // modified working tree. A shipped binary must be traceable to an exact
+    // commit, so a dirty build is a release blocker (not a dev-build one —
+    // this whole gate is skipped for ALTERMINAL_DEV_BUILD).
+    if (/-dirty/.test(version)) {
+      console.error(`❌ ERROR: bin/${hostDaemon} was built from a dirty tree: "${version}"`);
+      console.error('   Commit or stash the loompty working tree, then: npm run vendor-daemon');
+      process.exit(1);
+    }
     console.log(`✅ Vendored daemon loads: ${version} (bin/${hostDaemon})`);
   } catch (err) {
     console.error(`❌ ERROR: bin/${hostDaemon} failed to exec — it will fail the same way for users:`);
