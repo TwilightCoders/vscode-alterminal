@@ -333,3 +333,38 @@ suite("Data Pipeline", () => {
     });
   });
 });
+
+suite("OSC 7 cwd — Windows paths", () => {
+  test("strips the file-URI leading slash from a drive path", () => {
+    // new URL('file:///C:/x').pathname is '/C:/x' — valid on POSIX, not a
+    // usable Windows path. This is what broke cwd reporting on Windows.
+    assert.strictEqual(
+      extractCwdFromOsc7("\x1b]7;file:///C:/Users/me/proj\x07"),
+      "C:\\Users\\me\\proj",
+    );
+  });
+
+  test("handles a percent-encoded Windows path with spaces", () => {
+    assert.strictEqual(
+      extractCwdFromOsc7("\x1b]7;file:///C:/Users/me/my%20proj\x07"),
+      "C:\\Users\\me\\my proj",
+    );
+  });
+
+  test("handles a bare drive root", () => {
+    assert.strictEqual(extractCwdFromOsc7("\x1b]7;file:///C:/\x07"), "C:\\");
+  });
+
+  test("POSIX paths are unchanged, including with a hostname authority", () => {
+    // Our bash/zsh scripts emit file://$HOSTNAME$PWD — the authority must NOT
+    // be reinterpreted as a UNC share, or every unix cwd would corrupt.
+    assert.strictEqual(
+      extractCwdFromOsc7("\x1b]7;file://myhost/home/dale/proj\x07"),
+      "/home/dale/proj",
+    );
+    assert.strictEqual(
+      extractCwdFromOsc7("\x1b]7;file:///home/dale/proj\x07"),
+      "/home/dale/proj",
+    );
+  });
+});

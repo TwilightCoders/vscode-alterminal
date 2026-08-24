@@ -725,6 +725,14 @@ export class PtyManager {
         const fishInit = path.join(this._extensionPath, "shell-integration", "fish.fish");
         args.push("--init-command", `source ${fishInit}`);
         hasShellIntegration = true;
+      } else if (shellBase.startsWith("powershell") || shellBase.startsWith("pwsh")) {
+        // PowerShell has no sourced-rc env hook equivalent to ALTERMINAL_SHELL_INIT,
+        // so dot-source the script up front and keep the session interactive with
+        // -NoExit. Quoted for PowerShell (literal single quotes) because the
+        // extension path routinely contains spaces.
+        const psInit = path.join(this._extensionPath, "shell-integration", "powershell.ps1");
+        args.push("-NoExit", "-Command", `. ${quoteForShell(psInit, "powershell")}`);
+        hasShellIntegration = true;
       }
     }
 
@@ -1144,8 +1152,47 @@ export class PtyManager {
     callback: (procs: Array<{ pid: number; name: string }>) => void,
   ): void {
     if (process.platform === "win32") {
-      // Windows: use wmic or tasklist — punt for now
-      callback([]);
+      // Enumerate children via CIM. `wmic` is deprecated and absent from
+      // current Windows builds, so it is not a fallback worth carrying.
+      // NOTE: this only LISTS processes for the confirmation prompt — it must
+      // never try to signal them. On Windows libuv maps SIGTERM straight to
+      // TerminateProcess (no graceful tier) and uv_signal_start(SIGTERM)
+      // silently succeeds while never firing, so a signal-based stop here
+      // would be a no-op that reports success.
+      execFile(
+        "powershell.exe",
+        [
+          "-NoProfile", "-NonInteractive", "-Command",
+          `Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | ` +
+          `Select-Object -Property ProcessId,Name | ConvertTo-Json -Compress`,
+        ],
+        { encoding: "utf8", timeout: 2000, windowsHide: true },
+        (err, stdout) => {
+          if (err || !stdout.trim()) {
+            callback([]);
+            return;
+          }
+          try {
+            const parsed = JSON.parse(stdout.trim());
+            // ConvertTo-Json emits a bare object for a single result.
+            const rows = Array.isArray(parsed) ? parsed : [parsed];
+            const procs = rows
+              .map((r: { ProcessId?: number; Name?: string }) => ({
+                pid: Number(r?.ProcessId),
+                name: String(r?.Name ?? "").replace(/\.exe$/i, ""),
+              }))
+              .filter((r) => Number.isFinite(r.pid) && r.pid > 0 && r.name);
+            const shellBase = shellName
+              ? path.basename(shellName).replace(/\.exe$/i, "").toLowerCase()
+              : "";
+            callback(
+              shellBase ? procs.filter((p) => p.name.toLowerCase() !== shellBase) : procs,
+            );
+          } catch {
+            callback([]);
+          }
+        },
+      );
       return;
     }
 

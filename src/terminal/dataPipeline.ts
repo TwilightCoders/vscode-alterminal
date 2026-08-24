@@ -92,10 +92,29 @@ export function extractCwdFromOsc7(data: string): string | null {
   }
   if (!lastUrl) return null;
   try {
-    return decodeURIComponent(new URL(lastUrl).pathname);
+    const decoded = decodeURIComponent(new URL(lastUrl).pathname);
+    return normalizeOsc7Path(decoded);
   } catch {
     return null;
   }
+}
+
+/**
+ * A file URI's pathname always starts with "/", which is correct on POSIX but
+ * produces "/C:/Users/me" for a Windows cwd — not a usable path. Strip the
+ * leading slash for drive-letter paths and restore backslash separators.
+ *
+ * Deliberately narrow: the authority component is NOT treated as a UNC host,
+ * because our own POSIX integration scripts put $HOSTNAME there
+ * (file://$HOSTNAME$PWD), so reading it as a share would corrupt every
+ * non-Windows path. Only the drive-letter shape is rewritten; everything else
+ * is returned untouched.
+ */
+export function normalizeOsc7Path(pathname: string): string {
+  if (/^\/[A-Za-z]:(\/|$)/.test(pathname)) {
+    return pathname.slice(1).replace(/\//g, "\\");
+  }
+  return pathname;
 }
 
 /**
