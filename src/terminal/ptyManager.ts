@@ -47,7 +47,6 @@ import { TERMINAL_DEFAULTS } from "../constants";
 import { ShellDetector } from "../utils/shellDetector";
 import { sanitizeSpawnEnv } from "./envSanitizer";
 import type { PtyDaemonClient } from "../daemon/ptyDaemonClient";
-import { shellEscape } from "../daemon/ptyDaemonClient";
 import type { ExtToWebviewMessage } from "../shared/messages";
 import {
   filterVSCodeSequences,
@@ -58,6 +57,7 @@ import {
   describeFocusSuspects,
 } from "./dataPipeline";
 import { BoundedChunkBuffer } from "./boundedChunkBuffer";
+import { shellFamilyFor, quoteForShell } from "./shellQuoting";
 
 const HIDDEN_BUFFER_MAX_CHUNKS = 10000;
 const HIDDEN_BUFFER_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB per tab
@@ -67,6 +67,9 @@ export class PtyManager {
   private _processMonitorTimers = new Map<number, NodeJS.Timeout>();
   private _currentProcessNames = new Map<number, string>();
   private _terminalTypes = new Map<number, string>();
+  // Shell each tab was SPAWNED with (not the current foreground process), so
+  // text we type into the tab is quoted for the right shell family.
+  private _tabShells = new Map<number, string>();
   private _currentWorkingDirs = new Map<number, string>();
   private _userVars = new Map<number, Map<string, string>>();
   private _alterminal?: vscode.WebviewView;
@@ -665,6 +668,7 @@ export class PtyManager {
 
     // Determine what command/shell to spawn based on terminal type
     const userShell = shellPath || this._getDefaultShell();
+    this._tabShells.set(tabId, userShell);
     const command = userShell;
     let args: string[];
 
@@ -857,10 +861,16 @@ export class PtyManager {
     this._ptyProcesses.get(tabId)?.resize(cols, rows);
   }
 
+  /** Quote text for the shell family this tab is actually running. */
+  private _quoteForTab(text: string, tabId: number): string {
+    return quoteForShell(text, shellFamilyFor(this._tabShells.get(tabId)));
+  }
+
   public sendFilePath(filePath: string, tabId: number): void {
-    // shellEscape: quote+escape only when needed; trailing space lets the user
-    // keep typing. Shared with the daemon-spawn escaping (one quoting rule).
-    const text = `${shellEscape(filePath)} `;
+    // Quote for the shell RUNNING IN THIS TAB — on Windows that is cmd or
+    // PowerShell, where POSIX single-quoting would arrive as a literal broken
+    // path. Trailing space lets the user keep typing.
+    const text = `${this._quoteForTab(filePath, tabId)} `;
     // Daemon mode
     const ptyId = this._tabPtyIds.get(tabId);
     if (ptyId && this._daemonClient?.connected) {
@@ -902,6 +912,7 @@ export class PtyManager {
     // Clean up state
     this._currentProcessNames.delete(tabId);
     this._terminalTypes.delete(tabId);
+    this._tabShells.delete(tabId);
     this._currentWorkingDirs.delete(tabId);
     this._userVars.delete(tabId);
     this._shellIntegrationTabs.delete(tabId);
@@ -955,11 +966,11 @@ export class PtyManager {
   ): Promise<void> {
     try {
       const tempFilePath = await this.writeDroppedFileToTemp(fileData, fileName);
-      // Escaped path for shell consumers; trailing space lets the user keep typing.
-      this.writeToPty(`${shellEscape(tempFilePath)} `, tabId);
+      // Escaped for THIS TAB's shell; trailing space lets the user keep typing.
+      this.writeToPty(`${this._quoteForTab(tempFilePath, tabId)} `, tabId);
     } catch (error) {
       Logger.error("Error writing file to temp:", error);
-      this.writeToPty(`${shellEscape(fileName)} `, tabId);
+      this.writeToPty(`${this._quoteForTab(fileName, tabId)} `, tabId);
     }
   }
 
