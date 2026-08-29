@@ -53,6 +53,59 @@ suite("PTY Integration", () => {
     });
   }
 
+
+  /**
+   * Emit an EXACT byte sequence from a real PTY, on any platform.
+   *
+   * The escape-sequence tests below originally used shell `printf` and
+   * `$(hostname)`, which cmd.exe does not have — on Windows they emitted
+   * nothing and the assertions failed with "got 0 events", looking like
+   * detection bugs when the detection logic was fine.
+   *
+   * Two things make this portable:
+   *
+   *  - **Every byte is passed as a NUMBER**, never as a quoted literal. Control
+   *    characters and quotes never appear on a command line, so neither shell
+   *    can mangle them (node-pty's Windows quoting silently corrupts args
+   *    containing spaces or quotes, and a corrupted arg means the child never
+   *    runs at all).
+   *  - **The child is console-subsystem on both platforms.** On Windows that is
+   *    powershell.exe — deliberately NOT `process.execPath`, which under the VS
+   *    Code test host is Electron: a GUI-subsystem binary produces ZERO output
+   *    when attached directly to a ConPTY (measured on Windows Server 2025),
+   *    exiting cleanly, which is indistinguishable from a program that ran and
+   *    printed nothing.
+   */
+  function emitFromPty(bytes: string, tabId = 1): Promise<{ exitCode: number }> {
+    return new Promise((resolve) => {
+      const codes = Array.from(bytes).map((c) => c.charCodeAt(0));
+      let exe: string;
+      let args: string[];
+
+      if (process.platform === "win32") {
+        exe = "powershell.exe";
+        args = [
+          "-NoProfile",
+          "-Command",
+          `[Console]::Out.Write([char[]](${codes.join(",")}) -join '')`,
+        ];
+      } else {
+        exe = "/bin/sh";
+        args = ["-c", `printf '${codes.map((n) => "\\" + n.toString(8).padStart(3, "0")).join("")}'`];
+      }
+
+      const proc = pty.spawn(exe, args, {
+        name: "xterm-256color",
+        cols: 80,
+        rows: 24,
+        cwd: process.cwd(),
+        env: { ...process.env, TERM: "xterm-256color", ALTERMINAL_SHELL_INTEGRATION: "0" },
+      });
+      proc.onData((data: string) => harness.feedData(tabId, data));
+      proc.onExit(({ exitCode }) => resolve({ exitCode }));
+    });
+  }
+
   test("should produce data messages from shell output", async function () {
     this.timeout(5000);
     await runInPty('echo "hello from pty"');
@@ -69,7 +122,7 @@ suite("PTY Integration", () => {
 
   test("should detect bell from echo command", async function () {
     this.timeout(5000);
-    await runInPty("echo -e '\\a'");
+    await emitFromPty("\x07");
 
     // The BEL character from echo -e '\a' should trigger bell detection
     assert.ok(
@@ -80,7 +133,7 @@ suite("PTY Integration", () => {
 
   test("should detect bell from printf command", async function () {
     this.timeout(5000);
-    await runInPty("printf '\\007'");
+    await emitFromPty("bel:\x07");
 
     assert.ok(
       harness.bellEvents.length > 0,
@@ -91,9 +144,7 @@ suite("PTY Integration", () => {
   test("should extract CWD from OSC 7 emitted by printf", async function () {
     this.timeout(5000);
     const testPath = "/tmp";
-    await runInPty(
-      `printf '\\033]7;file://%s%s\\007' "$(hostname)" "${testPath}"`,
-    );
+    await emitFromPty(`\x1b]7;file://localhost${testPath}\x07`);
 
     assert.ok(
       harness.cwdChanges.length > 0,
@@ -105,7 +156,7 @@ suite("PTY Integration", () => {
   test("should filter VS Code shell integration sequences", async function () {
     this.timeout(5000);
     // Emit OSC 633 (VS Code shell integration) — should be stripped
-    await runInPty("printf '\\033]633;A\\007visible text\\033]633;B\\007'");
+    await emitFromPty("\x1b]633;A\x07visible text\x1b]633;B\x07");
 
     const allData = harness.mockView
       .messagesOfType("data")

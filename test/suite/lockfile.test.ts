@@ -112,7 +112,17 @@ suite("Lockfile Utilities", () => {
       assert.strictEqual(readSecret(secretFile), "my-secret-value");
     });
 
-    test("secret file has restricted permissions", () => {
+    test("secret file has restricted permissions", function () {
+      // POSIX-only. Windows has no mode bits — NTFS uses ACLs, and Node reports
+      // a synthetic 0o666/0o444, so `mode & 0o777 === 0o600` cannot hold there
+      // no matter how the file is created. Nothing to assert rather than
+      // something weaker: the daemon this secret belongs to is POSIX-only
+      // (unix sockets, SCM_RIGHTS, flock), so this path never runs on Windows.
+      // If a Windows daemon ever ships, this needs an ACL assertion, not a
+      // relaxed mode check.
+      if (process.platform === "win32") {
+        this.skip();
+      }
       const secretFile = path.join(tmpDir, "perms.secret");
       writeSecret(secretFile, "s3cret");
       const stat = fs.statSync(secretFile);
