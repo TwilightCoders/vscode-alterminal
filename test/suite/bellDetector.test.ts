@@ -188,4 +188,29 @@ suite("BellDetector Test Suite", () => {
       true,
     );
   });
+
+  test("conhost's injected OSC 0 title is not a bell (Windows startup)", () => {
+    // Measured on Windows Server 2025: a ConPTY emits a preamble before the
+    // child writes anything, and it ends with a BEL-terminated OSC 0 naming
+    // the child's exe. A naive `indexOf("\x07")` therefore reports a bell on
+    // EVERY fresh Windows session, deterministically, with no bell involved.
+    // These are the actual bytes off the wire.
+    const d = new BellDetector();
+    const conhostPreamble =
+      "\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[m\x1b[H" +
+      "\x1b]0;C:\\Windows\\System32\\cmd.exe\x07\x1b[?25h";
+
+    assert.strictEqual(d.detect(1, conhostPreamble), false);
+  });
+
+  test("a real BEL still fires alongside conhost's injected title", () => {
+    // The guard must not overcorrect into swallowing genuine bells that
+    // arrive in the same chunk as the injected title.
+    const d = new BellDetector();
+    assert.strictEqual(
+      d.detect(1, "\x1b]0;C:\\Windows\\System32\\cmd.exe\x07ding\x07"),
+      true,
+    );
+  });
+
 });
