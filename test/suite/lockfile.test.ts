@@ -170,4 +170,51 @@ suite("Lockfile Utilities", () => {
       assert.strictEqual(isProcessAlive(999999), false);
     });
   });
+
+  suite("runtime directory (socket + pidfile location)", () => {
+    const saved = process.env.ALTERMINAL_RUNTIME_DIR;
+    teardown(() => {
+      if (saved === undefined) delete process.env.ALTERMINAL_RUNTIME_DIR;
+      else process.env.ALTERMINAL_RUNTIME_DIR = saved;
+    });
+
+    test("ALTERMINAL_RUNTIME_DIR overrides the platform default", () => {
+      const dir = path.join(tmpDir, "override-run");
+      process.env.ALTERMINAL_RUNTIME_DIR = dir;
+      assert.ok(socketPath("abc123").startsWith(dir));
+    });
+
+    test("the socket is NOT placed in the OS temp dir", function () {
+      // The bug this guards: on macOS os.tmpdir() is /var/folders/../T, which
+      // the OS purges of files untouched for ~3 days. A daemon that outlived
+      // that window lost its socket and pidfile, so the flock single-instance
+      // guard silently stopped working and the next start squatted the path,
+      // stranding five live shells. Anything reaped by the OS is disqualified.
+      if (process.platform === "win32") this.skip();
+      delete process.env.ALTERMINAL_RUNTIME_DIR;
+      const sock = socketPath("abc123");
+      assert.ok(
+        !sock.startsWith(os.tmpdir()),
+        `socket must not live in the reapable temp dir, got ${sock}`,
+      );
+    });
+
+    test("the pidfile sits beside the socket", () => {
+      // loomptyd derives its pidfile as <socket>.pid, so they must share a
+      // directory — putting them in different places breaks discovery.
+      const dir = path.join(tmpDir, "beside-run");
+      process.env.ALTERMINAL_RUNTIME_DIR = dir;
+      assert.strictEqual(pidfilePath("abc123"), socketPath("abc123") + ".pid");
+      assert.strictEqual(path.dirname(pidfilePath("abc123")), path.dirname(socketPath("abc123")));
+    });
+
+    test("socket path stays under the AF_UNIX length limit", function () {
+      // macOS caps sun_path near 104 bytes; exceeding it fails at bind with
+      // EINVAL, which is how the VS Code test harness broke on Linux CI.
+      if (process.platform === "win32") this.skip();
+      delete process.env.ALTERMINAL_RUNTIME_DIR;
+      assert.ok(socketPath("abcdef123456").length < 104, socketPath("abcdef123456"));
+    });
+  });
+
 });

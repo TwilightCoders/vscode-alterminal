@@ -19,9 +19,66 @@ export function workspaceHash(workspaceFolders: string[]): string {
   return crypto.createHash("sha256").update(key).digest("hex").slice(0, 12);
 }
 
-/** Directory for lockfiles and sockets. */
+/**
+ * Where the daemon's socket and pidfile live, per platform.
+ *
+ * These files ARE the daemon's identity: the pidfile is the flock-held
+ * single-instance guard, and the socket is the only way to reach a running
+ * daemon. If the OS deletes them out from under a live daemon, the guard
+ * silently stops working — a later cold start finds no pidfile, concludes
+ * nothing is running, and binds a *new* socket at the same path. The old
+ * daemon keeps running with its sessions, now unreachable, because an unlinked
+ * unix socket has no path to connect to.
+ *
+ * That is not hypothetical. On macOS `os.tmpdir()` is `/var/folders/…/T`,
+ * which the OS purges of files untouched for ~3 days. A daemon that had been
+ * up for six days lost its socket and pidfile to that reaper; the next VS Code
+ * start squatted the path and stranded five live shells. So the requirement is
+ * specifically a directory the OS will NOT clean, not merely a writable one.
+ *
+ * Order of preference per platform:
+ *   - explicit override — `ALTERMINAL_RUNTIME_DIR`, for tests and for users
+ *     whose environment needs something we did not anticipate;
+ *   - darwin  — `~/Library/Application Support/alterminal`, never reaped.
+ *     Deliberately not `~/Library/Caches`, which macOS may purge under
+ *     pressure, and not TMPDIR for the reason above;
+ *   - linux   — `XDG_RUNTIME_DIR` (`/run/user/N`) when set: the standard,
+ *     tmpfs-backed, cleared only at logout. Falls back to `~/.alterminal/run`
+ *     rather than `/tmp`, which systemd-tmpfiles ages out;
+ *   - win32   — unused: named pipes are not filesystem objects and are not
+ *     subject to any of this. Kept for completeness.
+ *
+ * AF_UNIX paths are capped near 104 bytes on macOS, so these stay short
+ * deliberately — a nested per-workspace directory would risk EINVAL at bind.
+ */
 function runtimeDir(): string {
-  return process.env.XDG_RUNTIME_DIR || os.tmpdir();
+  const override = process.env.ALTERMINAL_RUNTIME_DIR;
+  if (override) return override;
+
+  switch (process.platform) {
+    case "darwin":
+      return path.join(os.homedir(), "Library", "Application Support", "alterminal");
+    case "win32":
+      return os.tmpdir(); // not used; socketPath() returns a named pipe
+    default:
+      return process.env.XDG_RUNTIME_DIR || path.join(os.homedir(), ".alterminal", "run");
+  }
+}
+
+/**
+ * Ensure the runtime directory exists and is owner-only. Created lazily: the
+ * daemon binds its socket here, so a missing directory is a bind failure, and
+ * a world-writable one would let another local user pre-create or replace the
+ * socket path. Mode is advisory on Windows, where this path is unused anyway.
+ */
+export function ensureRuntimeDir(): string {
+  const dir = runtimeDir();
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    // Already present, or unwritable — bind will surface the real error.
+  }
+  return dir;
 }
 
 /**
@@ -39,7 +96,7 @@ export function socketPath(wsHash: string): string {
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\alterminal-${wsHash}`;
   }
-  return path.join(runtimeDir(), `alterminal-${wsHash}.sock`);
+  return path.join(ensureRuntimeDir(), `alterminal-${wsHash}.sock`);
 }
 
 /** Generate a random shared secret for client authentication. */
