@@ -66,6 +66,14 @@ node "$ROOT/scripts/verify-package.js" "$WORK/extension" \
   "$ROOT/src/utils/templateUtils.ts" $GATE_FLAG
 
 # (4) Repack.
+#
+# `zip` ADDS to an existing archive rather than replacing it, so packaging over
+# a previous vsix at the same path silently retains that build's entries. A file
+# removed from the extension would keep shipping forever — this is how the macOS
+# `bin/loomptyd` dev binary kept reaching Windows users after .vscodeignore
+# correctly started excluding it (vsce omitted it; the stale zip entry outlived
+# the rebuild). Always start from a clean archive.
+rm -f "$OUT"
 ( cd "$WORK" && zip -qr "$OUT" . )
 SIZE=$(wc -c < "$OUT")
 echo "✅ Packaged $OUT ($((SIZE / 1024 / 1024))MB)"
