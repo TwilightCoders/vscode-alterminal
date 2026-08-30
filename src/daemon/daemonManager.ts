@@ -14,6 +14,7 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import { Logger } from "../utils/logger";
 import { PtyDaemonClient } from "./ptyDaemonClient";
+import { resolveDaemonBinary } from "./daemonLookup";
 import {
   pidfilePath,
   socketPath,
@@ -331,7 +332,9 @@ export class DaemonManager {
       Logger.info("Spawned and connected to new PTY daemon");
       return client;
     } catch (err) {
-      Logger.error("Failed to spawn PTY daemon:", err);
+      // Error objects stringify to "{}" — log the message explicitly, or a
+      // real failure reads as an empty object in the log.
+      Logger.error(`Failed to spawn PTY daemon: ${(err as Error)?.message ?? String(err)}`);
       return null;
     }
   }
@@ -460,26 +463,30 @@ export class DaemonManager {
    */
   private _findLoomptyd(): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Check the extension bundle first. Releases vendor a platform-specific
-      // binary (bin/loomptyd-<platform>-<arch>); local dev builds drop a
-      // generic bin/loomptyd via scripts/build-daemon.sh. Prefer the former.
-      const binDir = path.join(this._extensionPath, "bin");
-      const bundledCandidates = [
-        path.join(binDir, `loomptyd-${process.platform}-${process.arch}`),
-        path.join(binDir, "loomptyd"),
-      ];
-      for (const candidate of bundledCandidates) {
-        try {
-          if (require("fs").statSync(candidate).isFile()) {
-            resolve(candidate);
-            return;
+      const result = resolveDaemonBinary({
+        binDir: path.join(this._extensionPath, "bin"),
+        platform: process.platform,
+        arch: process.arch,
+        isFile: (p) => {
+          try {
+            return fs.statSync(p).isFile();
+          } catch {
+            return false;
           }
-        } catch {
-          // Try the next candidate, then fall through to PATH search.
-        }
+        },
+      });
+
+      if (result.kind === "found") {
+        resolve(result.path);
+        return;
+      }
+      if (result.kind === "unsupported") {
+        reject(new Error(result.reason));
+        return;
       }
 
-      // Search PATH
+      // POSIX only — resolveDaemonBinary never returns "searchPath" on Windows,
+      // where `which` does not exist.
       cp.execFile("which", ["loomptyd"], (err, stdout) => {
         if (!err && stdout.trim()) {
           resolve(stdout.trim());

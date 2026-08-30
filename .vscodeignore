@@ -38,3 +38,8 @@ lib/xterm-addon-webgpu/demo.html
 lib/xterm-addon-webgpu/*.json
 lib/xterm-addon-webgpu/*.md
 lib/xterm-addon-webgpu/LICENSE
+
+# The unsuffixed dev binary built by scripts/build-daemon.sh. Only the
+# platform-suffixed vendored copies (loomptyd-<platform>-<arch>) should ship;
+# this one is whatever the publisher built on and cannot run elsewhere.
+bin/loomptyd
