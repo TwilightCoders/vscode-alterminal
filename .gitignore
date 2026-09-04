@@ -69,3 +69,6 @@ buffer-with-snap.txt
 # Dev build counter and generated files
 .vscode/dev-counter
 src/generated/
+
+# ClaudePilot session scratch (agent harness, not project state)
+.claudepilot/
