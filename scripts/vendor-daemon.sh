@@ -7,7 +7,8 @@
 # Run this only when loompty itself changes, then commit the updated binary as
 # its own change:
 #
-#   npm run vendor-daemon
+#   npm run vendor-daemon                 # builds LOOM_DIR's current HEAD
+#   LOOM_REF=v0.4.6 npm run vendor-daemon # builds a tag, via a throwaway clone
 #   git add bin/loomptyd-<platform>-<arch> && git commit
 #
 # CI has no loompty source to build from, so the release relies entirely on
@@ -28,6 +29,27 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LOOM_DIR="${LOOM_DIR:-$HOME/Workspace/TwilightCoders/loompty}"
+
+# Building a specific ref must NEVER be done by checking it out in LOOM_DIR.
+# That directory is another agent's live working tree, and a checkout there
+# leaves their HEAD detached — which makes `git push origin main` a silent
+# no-op that reports "Everything up-to-date" while their work sits on a
+# nameless commit. It happened twice before this guard existed, and the only
+# reason it was caught is that they verify `git ls-remote` against local HEAD
+# rather than trusting push output.
+#
+# So: pass LOOM_REF to build a tag or commit, and we clone to a throwaway
+# directory instead. Same shape as every other bug this week — harmless on the
+# machine you ran it on, quietly wrong for the other party.
+if [ -n "${LOOM_REF:-}" ]; then
+  CLONE_DIR="$(mktemp -d)"
+  trap 'rm -rf "$CLONE_DIR"' EXIT
+  echo "📦 Cloning $LOOM_REF out of $LOOM_DIR (never checking out in place)…"
+  git clone --quiet --shared "$LOOM_DIR" "$CLONE_DIR"
+  git -C "$CLONE_DIR" -c advice.detachedHead=false checkout --quiet "$LOOM_REF"
+  LOOM_DIR="$CLONE_DIR"
+fi
+
 BUILD_DIR="$LOOM_DIR/build-static"
 
 if [[ ! -f "$LOOM_DIR/cmd/loomptyd/main.cpp" ]]; then
