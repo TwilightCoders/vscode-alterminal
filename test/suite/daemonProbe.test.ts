@@ -115,3 +115,39 @@ suite("daemonProbe exit codes", () => {
     assert.strictEqual(probePermitsReap("live"), false);
   });
 });
+
+// ── Which pidfile we probe ───────────────────────────────────────────────────
+//
+// loomptyd keeps TWO pidfiles, and only one of them is safe to probe:
+//
+//   <socket>.pid    the PTY plugin's ownership pidfile — flock-held
+//   --pidfile PATH  loom_process daemonization — a plain fopen/write/fclose,
+//                   never locked by anything
+//
+// loom_daemon_probe handed the second one finds a file it can lock, concludes
+// nobody owns it, and returns NONE — the single value that authorises a reap —
+// for a daemon that is alive and serving. And the probe cannot detect the
+// mistake: an unlocked file is indistinguishable from a stale one, which is the
+// mechanism itself. So the guard has to live here, at the call site.
+suite("daemonProbe target", () => {
+  test("probes the flock-held ownership pidfile, not the process pidfile", () => {
+    const { pidfilePath, socketPath } = require("../../src/daemon/lockfile");
+    assert.strictEqual(pidfilePath("abc"), socketPath("abc") + ".pid");
+  });
+
+  // If we ever pass --pidfile, a second, UNLOCKED pidfile starts existing —
+  // and then the only thing standing between us and reaping a live fleet is
+  // that nobody points the probe at it. Better that it never exists.
+  test("never asks loomptyd to write a second, unlocked pidfile", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const root = path.resolve(__dirname, "..", "..", "..");
+    for (const rel of ["src/daemon/daemonManager.ts", "scripts/spawn-loomptyd.js"]) {
+      const file = path.join(root, rel);
+      if (!fs.existsSync(file)) continue;
+      const src: string = fs.readFileSync(file, "utf8");
+      const passesFlag = /["'`]--pidfile["'`]/.test(src);
+      assert.strictEqual(passesFlag, false, `${rel} must not pass --pidfile`);
+    }
+  });
+});
