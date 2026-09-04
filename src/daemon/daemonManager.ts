@@ -15,6 +15,7 @@ import * as fs from "fs";
 import { Logger } from "../utils/logger";
 import { PtyDaemonClient } from "./ptyDaemonClient";
 import { resolveDaemonBinary } from "./daemonLookup";
+import { decideAfterConnectFailure, ConnectFailure } from "./daemonProbe";
 import {
   pidfilePath,
   socketPath,
@@ -98,6 +99,20 @@ export class DaemonManager {
       const client = await this._tryConnect();
       if (client) {
         return client;
+      }
+
+      // Something IS running and simply did not answer — the handoff window, a
+      // daemon still writing its files, or a full backlog. Spawning a second
+      // daemon here would strand every session the live one is holding, so wait
+      // and try again instead.
+      const decision = decideAfterConnectFailure(this._lastFailure);
+      if (decision.retry) {
+        Logger.info(
+          `[daemon] live daemon did not answer (${this._lastFailure}); retrying ` +
+          `(attempt ${attempt}/${MAX_CONNECT_ATTEMPTS}) rather than spawning a rival`,
+        );
+        await this._sleep(RETRY_DELAY_MS);
+        continue;
       }
 
       // No daemon running. Try to acquire the spawn lock.
@@ -271,23 +286,28 @@ export class DaemonManager {
   // -------------------------------------------------------------------------
 
   /** Try connecting to an existing daemon, discovered via its `<socket>.pid` pidfile. */
+  /**
+   * Why the last _tryConnect failed, so callers can tell "nothing is running"
+   * from "something is running and did not answer". Only the former may spawn.
+   */
+  private _lastFailure: ConnectFailure = "no-pidfile";
+
   private async _tryConnect(): Promise<PtyDaemonClient | null> {
     const sockPath = socketPath(GLOBAL_DAEMON_ID);
     const pidPath = pidfilePath(GLOBAL_DAEMON_ID);
     const pid = readPidfile(pidPath);
     if (!pid || !isProcessAlive(pid)) {
       Logger.info(`[daemon] _tryConnect: pid=${pid ?? "none"} alive=${pid ? isProcessAlive(pid) : "n/a"}`);
-      // Stale pidfile from a crashed daemon — clean it (and the dead socket) up.
-      if (pid) {
-        removePidfile(pidPath);
-        removeStaleSocket(sockPath);
-      }
+      this._lastFailure = pid ? "dead-process" : "no-pidfile";
+      this._applyFailurePolicy(pidPath, sockPath);
       return null;
     }
 
     const secret = readSecret(secretPath(GLOBAL_DAEMON_ID));
     if (!secret) {
       Logger.info("[daemon] _tryConnect: pidfile exists but no secret file");
+      this._lastFailure = "no-secret";
+      this._applyFailurePolicy(pidPath, sockPath);
       return null;
     }
 
@@ -303,15 +323,27 @@ export class DaemonManager {
       }
       client.disconnect();
     } catch {
-      // Socket exists but unreachable — daemon may be dead
-      Logger.info("Daemon socket unreachable");
+      // Socket exists but unreachable.
     }
 
-    // Clean up after failed connection
+    // A LIVE pid that would not talk to us. Almost always the handoff window or
+    // a full listen backlog — not a dead daemon. Reaping here deletes the files
+    // of a running daemon that is holding real sessions, and unlinking its
+    // socket makes it unreachable for good.
+    this._lastFailure = "unreachable";
+    Logger.info(`[daemon] socket unreachable but PID ${pid} is alive — not reaping, will retry`);
+    this._applyFailurePolicy(pidPath, sockPath);
+    return null;
+  }
+
+  /** Reap daemon state only when the decision says it is safe. */
+  private _applyFailurePolicy(pidPath: string, sockPath: string): void {
+    if (!decideAfterConnectFailure(this._lastFailure).reap) {
+      return;
+    }
     removePidfile(pidPath);
     removeSecret(secretPath(GLOBAL_DAEMON_ID));
     removeStaleSocket(sockPath);
-    return null;
   }
 
   /** Spawn a new daemon and connect to it. Caller holds the spawn lock. */
