@@ -15,7 +15,13 @@ import * as fs from "fs";
 import { Logger } from "../utils/logger";
 import { PtyDaemonClient } from "./ptyDaemonClient";
 import { resolveDaemonBinary } from "./daemonLookup";
-import { decideAfterConnectFailure, ConnectFailure } from "./daemonProbe";
+import {
+  decideAfterConnectFailure,
+  daemonStateFromProbeExit,
+  probePermitsReap,
+  ConnectFailure,
+  DaemonState,
+} from "./daemonProbe";
 import {
   pidfilePath,
   socketPath,
@@ -299,7 +305,7 @@ export class DaemonManager {
     if (!pid || !isProcessAlive(pid)) {
       Logger.info(`[daemon] _tryConnect: pid=${pid ?? "none"} alive=${pid ? isProcessAlive(pid) : "n/a"}`);
       this._lastFailure = pid ? "dead-process" : "no-pidfile";
-      this._applyFailurePolicy(pidPath, sockPath);
+      await this._applyFailurePolicy(pidPath, sockPath);
       return null;
     }
 
@@ -307,7 +313,7 @@ export class DaemonManager {
     if (!secret) {
       Logger.info("[daemon] _tryConnect: pidfile exists but no secret file");
       this._lastFailure = "no-secret";
-      this._applyFailurePolicy(pidPath, sockPath);
+      await this._applyFailurePolicy(pidPath, sockPath);
       return null;
     }
 
@@ -332,13 +338,28 @@ export class DaemonManager {
     // socket makes it unreachable for good.
     this._lastFailure = "unreachable";
     Logger.info(`[daemon] socket unreachable but PID ${pid} is alive — not reaping, will retry`);
-    this._applyFailurePolicy(pidPath, sockPath);
+    await this._applyFailurePolicy(pidPath, sockPath);
     return null;
   }
 
-  /** Reap daemon state only when the decision says it is safe. */
-  private _applyFailurePolicy(pidPath: string, sockPath: string): void {
+  /**
+   * Reap daemon state only when the classification says it is safe AND the
+   * daemon's own flock agrees nothing owns the pidfile.
+   *
+   * The probe is a strict upgrade to the "dead-process" case, not a
+   * replacement for the classification: pid liveness is a heuristic that a
+   * reused pid can fool in both directions, while the flock is authoritative
+   * and stays correct across a handoff.
+   */
+  private async _applyFailurePolicy(pidPath: string, sockPath: string): Promise<void> {
     if (!decideAfterConnectFailure(this._lastFailure).reap) {
+      return;
+    }
+    // "unsupported" means an older daemon with no --probe: fall back to the
+    // classification, which is already safe on its own.
+    const state = await this._probeDaemon(pidPath);
+    if (state !== "unsupported" && !probePermitsReap(state)) {
+      Logger.info(`[daemon] probe says '${state}' for ${pidPath} — not reaping`);
       return;
     }
     removePidfile(pidPath);
@@ -346,12 +367,56 @@ export class DaemonManager {
     removeStaleSocket(sockPath);
   }
 
+  /**
+   * Ask loomptyd who owns a pidfile. Any failure to get an answer yields
+   * "unknown", which never authorises a reap.
+   *
+   * When no daemon binary exists at all (Windows today), there is likewise no
+   * daemon that could own the pidfile, so we fall back to the classification
+   * rather than refusing to ever clean up crash leftovers.
+   */
+  private async _probeDaemon(pidPath: string): Promise<DaemonState> {
+    let binary: string;
+    try {
+      binary = await this._findLoomptyd();
+    } catch {
+      return "none"; // No daemon on this platform — defer to the classification.
+    }
+    return new Promise((resolve) => {
+      cp.execFile(binary, ["--probe", pidPath], { timeout: 2000 }, (err) => {
+        const code = (err as unknown as { code?: number } | null)?.code;
+        resolve(daemonStateFromProbeExit(err ? (typeof code === "number" ? code : null) : 0));
+      });
+    });
+  }
+
   /** Spawn a new daemon and connect to it. Caller holds the spawn lock. */
   private async _spawnAndConnect(): Promise<PtyDaemonClient | null> {
     const sockPath = socketPath(GLOBAL_DAEMON_ID);
+    const pidPath = pidfilePath(GLOBAL_DAEMON_ID);
+
+    // Ask the flock before destroying anything. Pid liveness is not sufficient.
+    //
+    // During a handoff the successor adopts the pidfile fd over SCM_RIGHTS and
+    // rewrites the pid line with its own — but the predecessor can exit before
+    // that rewrite completes. For that window the file names a dead process
+    // while a live daemon demonstrably owns the path, so isProcessAlive()
+    // reports dead and the cleanup below would delete a healthy daemon's files
+    // and spawn a rival beside it.
+    //
+    // The window is transient, not persistent: outside a handoff the pidfile is
+    // accurate and fine for diagnostics. The lock, however, is held
+    // continuously across the whole transition, so it is right exactly when the
+    // contents are briefly stale. (loompty documents this as the out_pid-can-
+    // disagree-with-the-verdict caveat.)
+    const state = await this._probeDaemon(pidPath);
+    if (state !== "unsupported" && !probePermitsReap(state)) {
+      Logger.info(`[daemon] probe says '${state}' — a daemon owns this path; not spawning a rival`);
+      return null;
+    }
 
     // Clean up any leftover state
-    removePidfile(pidfilePath(GLOBAL_DAEMON_ID));
+    removePidfile(pidPath);
     removeSecret(secretPath(GLOBAL_DAEMON_ID));
     removeStaleSocket(sockPath);
 

@@ -1,5 +1,10 @@
 import * as assert from "assert";
-import { decideAfterConnectFailure, ConnectFailure } from "../../src/daemon/daemonProbe";
+import {
+  decideAfterConnectFailure,
+  daemonStateFromProbeExit,
+  probePermitsReap,
+  ConnectFailure,
+} from "../../src/daemon/daemonProbe";
 
 suite("daemonProbe", () => {
   // THE regression. loompty's handoff is structurally discontinuous: the
@@ -63,5 +68,50 @@ suite("daemonProbe", () => {
         assert.strictEqual(f, "dead-process", `${f} must not reap daemon state`);
       }
     }
+  });
+});
+
+suite("daemonProbe exit codes", () => {
+  // loomptyd --probe is deliberately NOT 0-is-success. This is the exact
+  // inversion a well-meaning refactor "corrects", so pin it.
+  test("maps loomptyd --probe exit codes", () => {
+    assert.strictEqual(daemonStateFromProbeExit(0), "live");
+    assert.strictEqual(daemonStateFromProbeExit(3), "none");
+    assert.strictEqual(daemonStateFromProbeExit(4), "unknown");
+    assert.strictEqual(daemonStateFromProbeExit(2), "unknown", "usage error is not an answer");
+  });
+
+  // The property that makes the scheme safe by construction rather than by
+  // discipline: a missing binary (127), a crash (139), a signal, a timeout
+  // (null) — none of them may authorise destroying a live daemon's files.
+  test("only exit 3 ever authorises a reap", () => {
+    const codes = [0, 1, 2, 4, 5, 126, 127, 139, 255, -1, null];
+    for (const c of codes) {
+      assert.strictEqual(
+        probePermitsReap(daemonStateFromProbeExit(c)),
+        false,
+        `exit ${c} must not authorise a reap`,
+      );
+    }
+    assert.strictEqual(probePermitsReap(daemonStateFromProbeExit(3)), true);
+  });
+
+  // The regression that would have shipped a total outage: loomptyd 0.4.5
+  // rejects --probe with exit 1. Folded into "unknown", that means never-reap
+  // AND never-spawn, so an extension carrying an older vendored daemon would
+  // refuse to start one at all — no PTY persistence whatsoever.
+  test("an older daemon without --probe is 'unsupported', not 'unknown'", () => {
+    assert.strictEqual(daemonStateFromProbeExit(1), "unsupported");
+    assert.notStrictEqual(daemonStateFromProbeExit(1), "unknown");
+  });
+
+  test("unsupported does not itself authorise a reap", () => {
+    assert.strictEqual(probePermitsReap("unsupported"), false);
+  });
+
+  test("an unanswerable probe is treated as live", () => {
+    assert.strictEqual(daemonStateFromProbeExit(null), "unknown");
+    assert.strictEqual(probePermitsReap("unknown"), false);
+    assert.strictEqual(probePermitsReap("live"), false);
   });
 });
